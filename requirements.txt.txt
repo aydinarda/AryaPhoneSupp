@@ -1,5 +1,10 @@
-streamlit>=1.31
-pandas>=2.0
-openpyxl>=3.1
-numpy>=1.26
+streamlit
+pandas
+plotly
+numpy
+requests
+openpyxl
+matplotlib
 gurobipy
+scipy
+geopy
