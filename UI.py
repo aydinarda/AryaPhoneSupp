@@ -10,14 +10,7 @@ import streamlit as st
 # -------------------------
 # Optional Gurobi import
 # -------------------------
-try:
-    import gurobipy as gp
-    from gurobipy import GRB
-    GUROBI_AVAILABLE = True
-except Exception:
-    gp = None
-    GRB = None
-    GUROBI_AVAILABLE = False
+from gurobipy import Model, GRB, quicksum
 
 
 # =========================
