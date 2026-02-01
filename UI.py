@@ -111,7 +111,7 @@ class MinCostAgent:
         cfg: Optional[MinCostConfig] = None,
     ):
         if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy mevcut değil. Streamlit UI çalışır ama solver çalışmaz.")
+            raise RuntimeError("gurobipy is not available. The UI can run, but the solver cannot.")
 
         self.suppliers = suppliers_df.copy()
         self.users = users_df.copy()
@@ -129,9 +129,9 @@ class MinCostAgent:
         u_req = {"user_id", "w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"}
 
         if not s_req.issubset(self.suppliers.columns):
-            raise ValueError(f"suppliers_df eksik kolon: {sorted(s_req - set(self.suppliers.columns))}")
+            raise ValueError(f"suppliers_df missing columns: {sorted(s_req - set(self.suppliers.columns))}")
         if not u_req.issubset(self.users.columns):
-            raise ValueError(f"users_df eksik kolon: {sorted(u_req - set(self.users.columns))}")
+            raise ValueError(f"users_df missing columns: {sorted(u_req - set(self.users.columns))}")
 
         self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
         self.users["user_id"] = self.users["user_id"].astype(str)
@@ -365,36 +365,30 @@ class MinCostAgent:
 # =========================
 # Streamlit UI
 # =========================
+
 st.set_page_config(page_title="Min-Cost Policy Matching", layout="wide")
 
-st.title("Minimum Cost Matching • Government Policy Selector")
+# --- lightweight styling (no external assets) ---
+st.markdown(
+    """
+<style>
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+    div[data-testid="stMetric"] { padding: 0.75rem 0.75rem; border-radius: 12px; border: 1px solid rgba(49,51,63,0.2); }
+    div[data-testid="stMetric"] > div { gap: 0.25rem; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-with st.expander("Ne yapıyor?", expanded=False):
-    st.markdown(
-        """
-- Excel import **YOK**: data bu dosyanın içine gömülü (default).
-- Hükümet politikası parametrelerini dropdown ile seçtirir.
-- Gurobi varsa **minimum-cost** matching çözer.
-        """
-    )
+st.title("Minimum-Cost Matching")
+st.caption("Embedded demo data - Government policy as fixed dropdowns - Gurobi MILP solver")
 
 if not GUROBI_AVAILABLE:
     st.warning(
-        "Bu ortamda **gurobipy** bulunamadı. UI açılır ama 'Solve' çalışmaz. "
-        "Streamlit Cloud kullanıyorsan, Gurobi'yi/ lisansı environment'a eklemen gerekir."
+        "gurobipy was not detected in this environment. The UI will load, but solving is disabled."
     )
 
 # ---------- helpers ----------
-def _parse_candidates(text: str) -> List[float]:
-    vals: List[float] = []
-    for part in text.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        vals.append(float(part))
-    return sorted(set(vals))
-
-
 def _default_dfs() -> Tuple[pd.DataFrame, pd.DataFrame]:
     suppliers_df = pd.DataFrame(DEFAULT_SUPPLIERS)
     users_df = pd.DataFrame(DEFAULT_USERS)
@@ -404,81 +398,93 @@ def _default_dfs() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def policy_selector(prefix: str = "pol") -> Policy:
-    st.subheader("Government Policy (dropdown ile seç)")
+    """Government policy controls.
 
-    default_candidates = "0, 0.25, 0.5, 1, 2, 5, 10"
-    cand_text = st.text_input(
-        "Dropdown seçenekleri (virgülle ayır)",
-        value=default_candidates,
-        help="Tüm policy parametre dropdown’ları bu listeden değer seçer.",
-    )
-    candidates = _parse_candidates(cand_text) or [0.0, 1.0]
+    Requirement from user:
+      - No free-text inputs
+      - Each policy parameter is a dropdown with values 1..5
+      - A selection is always present
+    """
 
-    # index for 1.0 if exists, else middle
-    def _idx(val: float) -> int:
-        if val in candidates:
-            return candidates.index(val)
-        return min(len(candidates) // 2, len(candidates) - 1)
+    options = [1, 2, 3, 4, 5]
+    default_index = 2  # 3
 
-    cols = st.columns(3)
-    with cols[0]:
-        env = st.selectbox("env_mult", candidates, index=_idx(1.0), key=f"{prefix}_env")
-        social = st.selectbox("social_mult", candidates, index=_idx(1.0), key=f"{prefix}_social")
-        cost = st.selectbox("cost_mult", candidates, index=_idx(1.0), key=f"{prefix}_cost")
-    with cols[1]:
-        strategic = st.selectbox("strategic_mult", candidates, index=_idx(1.0), key=f"{prefix}_strategic")
-        improvement = st.selectbox("improvement_mult", candidates, index=_idx(1.0), key=f"{prefix}_improvement")
-        lq = st.selectbox("low_quality_mult", candidates, index=_idx(1.0), key=f"{prefix}_lq")
-    with cols[2]:
-        child = st.selectbox("child_labor_penalty", candidates, index=_idx(0.0), key=f"{prefix}_child")
-        banned = st.selectbox("banned_chem_penalty", candidates, index=_idx(0.0), key=f"{prefix}_banned")
+    st.subheader("Government policy")
 
-    pol = Policy(
-        env_mult=env,
-        social_mult=social,
-        cost_mult=cost,
-        strategic_mult=strategic,
-        improvement_mult=improvement,
-        low_quality_mult=lq,
-        child_labor_penalty=child,
-        banned_chem_penalty=banned,
+    # Layout: two groups
+    left, right = st.columns(2, gap="large")
+
+    with left:
+        st.markdown("#### Multipliers")
+        env = st.selectbox("Environmental multiplier", options, index=default_index, key=f"{prefix}_env")
+        social = st.selectbox("Social multiplier", options, index=default_index, key=f"{prefix}_social")
+        cost = st.selectbox("Cost multiplier", options, index=default_index, key=f"{prefix}_cost")
+        strategic = st.selectbox("Strategic multiplier", options, index=default_index, key=f"{prefix}_strategic")
+        improvement = st.selectbox("Improvement multiplier", options, index=default_index, key=f"{prefix}_improvement")
+        lq = st.selectbox("Low-quality multiplier", options, index=default_index, key=f"{prefix}_lq")
+
+    with right:
+        st.markdown("#### Regulation penalties")
+        child = st.selectbox("Child labor penalty", options, index=default_index, key=f"{prefix}_child")
+        banned = st.selectbox("Banned chemicals penalty", options, index=default_index, key=f"{prefix}_banned")
+
+        with st.expander("Policy preview", expanded=False):
+            st.write(
+                {
+                    "env_mult": env,
+                    "social_mult": social,
+                    "cost_mult": cost,
+                    "strategic_mult": strategic,
+                    "improvement_mult": improvement,
+                    "low_quality_mult": lq,
+                    "child_labor_penalty": child,
+                    "banned_chem_penalty": banned,
+                }
+            )
+
+    return Policy(
+        env_mult=float(env),
+        social_mult=float(social),
+        cost_mult=float(cost),
+        strategic_mult=float(strategic),
+        improvement_mult=float(improvement),
+        low_quality_mult=float(lq),
+        child_labor_penalty=float(child),
+        banned_chem_penalty=float(banned),
     ).clamp_nonnegative()
-
-    st.caption("Seçili policy (JSON):")
-    st.json(pol.to_dict())
-    return pol
 
 
 # ---------- sidebar controls ----------
-st.sidebar.header("Model Ayarları (Excel yok)")
+st.sidebar.header("Solver settings")
 
-st.sidebar.subheader("Optimization config")
-capacity = st.sidebar.number_input("capacity (max matches)", min_value=0, value=6, step=1)
-suppliers_to_select = st.sidebar.number_input("K (suppliers_to_select)", min_value=1, value=1, step=1)
-target_matches = st.sidebar.number_input("target_matches (en az)", min_value=0, value=6, step=1)
-min_utility = st.sidebar.number_input("min_utility (match olunca)", value=0.0, step=0.5)
-lexi = st.sidebar.checkbox("Lexicographic tie-break (min cost → max utility)", value=True)
-output_flag = st.sidebar.checkbox("Gurobi log göster (OutputFlag=1)", value=False)
+st.sidebar.subheader("Optimization")
+capacity = st.sidebar.number_input("Capacity (max matches)", min_value=0, value=6, step=1)
+suppliers_to_select = st.sidebar.number_input("Suppliers to select (K)", min_value=1, value=1, step=1)
+target_matches = st.sidebar.number_input("Target matches (minimum)", min_value=0, value=6, step=1)
+min_utility = st.sidebar.number_input("Minimum utility (if matched)", value=0.0, step=0.5)
+lexi = st.sidebar.checkbox("Lexicographic objective (min cost -> max utility)", value=True)
+output_flag = st.sidebar.checkbox("Show Gurobi log", value=False)
 
 st.sidebar.divider()
-st.sidebar.caption("Not: Excel okuma (openpyxl) bu UI'dan tamamen çıkarıldı. Data gömülü.")
+with st.sidebar.expander("Data source", expanded=False):
+    st.write("Data is embedded in this file. No Excel import is used.")
 
 
-# ---------- main ----------
-colA, colB = st.columns([1.15, 0.85], gap="large")
+# ---------- main layout ----------
+left, right = st.columns([1.25, 0.75], gap="large")
 
-with colB:
+with right:
     policy = policy_selector()
 
-with colA:
-    st.subheader("Veri & Çözüm")
+with left:
+    st.subheader("Data and solve")
 
     suppliers_df, users_df = _default_dfs()
 
-    with st.expander("Suppliers (gömülü tablo)", expanded=False):
+    with st.expander("Suppliers", expanded=False):
         st.dataframe(suppliers_df, use_container_width=True)
 
-    with st.expander("Users (gömülü tablo)", expanded=False):
+    with st.expander("Users", expanded=False):
         st.dataframe(users_df, use_container_width=True)
 
     cfg = MinCostConfig(
@@ -490,7 +496,7 @@ with colA:
         lexicographic_tiebreak=bool(lexi),
     )
 
-    solve_btn = st.button("Solve (Gurobi)", type="primary", disabled=not GUROBI_AVAILABLE)
+    solve_btn = st.button("Solve", type="primary", disabled=not GUROBI_AVAILABLE)
 
     if solve_btn:
         try:
@@ -498,7 +504,7 @@ with colA:
             agent.build()
             sol = agent.solve()
         except Exception as e:
-            st.error("Model solve hatası.")
+            st.error("Solve failed.")
             st.exception(e)
             st.stop()
 
@@ -506,15 +512,15 @@ with colA:
         kpi1.metric("Matched", sol["num_matched"])
         kpi2.metric("Total cost", f"{sol['total_cost']:.3f}")
         kpi3.metric("Avg utility", f"{sol['avg_utility']:.3f}")
-        kpi4.metric("Obj (Gurobi)", f"{sol['objective_value']:.3f}")
+        kpi4.metric("Objective", f"{sol['objective_value']:.3f}")
 
-        st.markdown("### Seçilen supplier(lar)")
+        st.markdown("### Selected suppliers")
         st.write(sol["chosen_suppliers"])
 
-        st.markdown("### Match tablosu (utility & unit_cost)")
+        st.markdown("### Matches")
         st.dataframe(sol["matches"], use_container_width=True)
 
-        st.markdown("### Hızlı özet")
+        st.markdown("### Aggregates")
         if sol["num_matched"] > 0:
             by_supplier = (
                 sol["matches"]
@@ -529,4 +535,5 @@ with colA:
             )
             st.dataframe(by_supplier, use_container_width=True)
         else:
-            st.warning("Hiç match çıkmadı. target_matches / min_utility / capacity / policy değerlerini kontrol et.")
+            st.info("No matches were produced. Consider adjusting target_matches, min_utility, capacity, or the policy values.")
+
