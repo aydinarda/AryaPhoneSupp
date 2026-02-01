@@ -1,17 +1,52 @@
-# app.py
+# UI.py
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import openpyxl
 import streamlit as st
 
-# Gurobi
-import gurobipy as gp
-from gurobipy import GRB
+# -------------------------
+# Optional Gurobi import
+# -------------------------
+try:
+    import gurobipy as gp
+    from gurobipy import GRB
+    GUROBI_AVAILABLE = True
+except Exception:
+    gp = None
+    GRB = None
+    GUROBI_AVAILABLE = False
+
+
+# =========================
+# Default data (EMBEDDED)
+#   - extracted from Arya_Phones_Supplier_Selection.xlsx / sheet "Min Cost Agent"
+#   - no Excel dependency at runtime
+# =========================
+DEFAULT_SUPPLIERS: List[Dict[str, Any]] = [
+    {"supplier_id": "A", "env_risk": 2, "social_risk": 4, "cost_score": 1, "strategic": 3, "improvement": 4, "child_labor": 1, "banned_chem": 0, "low_quality": 0},
+    {"supplier_id": "B", "env_risk": 3, "social_risk": 5, "cost_score": 2, "strategic": 3, "improvement": 3, "child_labor": 0, "banned_chem": 0, "low_quality": 1},
+    {"supplier_id": "C", "env_risk": 2, "social_risk": 1, "cost_score": 3, "strategic": 2, "improvement": 3, "child_labor": 0, "banned_chem": 1, "low_quality": 0},
+    {"supplier_id": "D", "env_risk": 2, "social_risk": 2, "cost_score": 5, "strategic": 2, "improvement": 2, "child_labor": 0, "banned_chem": 0, "low_quality": 0},
+    {"supplier_id": "E", "env_risk": 3, "social_risk": 4, "cost_score": 3, "strategic": 2, "improvement": 5, "child_labor": 0, "banned_chem": 0, "low_quality": 1},
+    {"supplier_id": "F", "env_risk": 5, "social_risk": 4, "cost_score": 2, "strategic": 4, "improvement": 4, "child_labor": 1, "banned_chem": 1, "low_quality": 0},
+    {"supplier_id": "G", "env_risk": 2, "social_risk": 1, "cost_score": 3, "strategic": 3, "improvement": 3, "child_labor": 0, "banned_chem": 0, "low_quality": 0},
+]
+
+DEFAULT_USERS: List[Dict[str, Any]] = [
+    {"user_id": "1", "w_env": 0.30, "w_social": 0.20, "w_cost": 0.40, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.20},
+    {"user_id": "2", "w_env": 0.25, "w_social": 0.15, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.30},
+    {"user_id": "3", "w_env": 0.15, "w_social": 0.30, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.15, "w_low_quality": 0.20},
+    {"user_id": "4", "w_env": 0.35, "w_social": 0.10, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.10},
+    {"user_id": "5", "w_env": 0.10, "w_social": 0.35, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.10},
+    {"user_id": "6", "w_env": 0.10, "w_social": 0.10, "w_cost": 0.35, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.10},
+    {"user_id": "7", "w_env": 0.20, "w_social": 0.10, "w_cost": 0.20, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.30},
+    {"user_id": "8", "w_env": 0.10, "w_social": 0.20, "w_cost": 0.10, "w_strategic": 0.30, "w_improvement": 0.10, "w_low_quality": 0.20},
+    {"user_id": "9", "w_env": 0.10, "w_social": 0.10, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.40, "w_low_quality": 0.20},
+    {"user_id": "10", "w_env": 0.20, "w_social": 0.20, "w_cost": 0.10, "w_strategic": 0.10, "w_improvement": 0.10, "w_low_quality": 0.20},
+]
 
 
 # =========================
@@ -19,7 +54,7 @@ from gurobipy import GRB
 # =========================
 @dataclass
 class Policy:
-    # Multipliers (how strongly each supplier dimension counts)
+    # Multipliers
     env_mult: float = 1.0
     social_mult: float = 1.0
     cost_mult: float = 1.0
@@ -27,12 +62,11 @@ class Policy:
     improvement_mult: float = 1.0
     low_quality_mult: float = 1.0
 
-    # Penalties (hard/soft policy penalties)
+    # Penalties (policy / regulation)
     child_labor_penalty: float = 0.0
     banned_chem_penalty: float = 0.0
 
     def clamp_nonnegative(self) -> "Policy":
-        # If you want to allow negative multipliers, remove this clamp.
         for k, v in self.__dict__.items():
             if v is None:
                 setattr(self, k, 0.0)
@@ -49,16 +83,12 @@ class Policy:
 # =========================
 @dataclass
 class MinCostConfig:
-    capacity: int = 6                 # max number of matches total
-    suppliers_to_select: int = 1      # choose K suppliers
-    target_matches: int = 6           # require at least this many matches
-    min_utility: float = 0.0          # if matched, must satisfy utility >= min_utility
-    big_m: Optional[float] = None     # auto if None
-    output_flag: int = 0              # Gurobi OutputFlag
-    sheet_name: str = "Min Cost Agent"
-
-    # Optional tie-break:
-    # First minimize cost, then maximize total utility (policy-driven)
+    capacity: int = 6
+    suppliers_to_select: int = 1
+    target_matches: int = 6
+    min_utility: float = 0.0
+    big_m: Optional[float] = None
+    output_flag: int = 0
     lexicographic_tiebreak: bool = True
 
 
@@ -69,118 +99,10 @@ class MinCostAgent:
     """
     Minimum-Cost Matching Agent (MILP, Gurobi)
 
-    Variables:
-      y[i] ∈ {0,1}  supplier selected
-      z[i,u] ∈ {0,1} user u matched to supplier i
-
-    Constraints:
-      sum_i y[i] == K
-      sum_i z[i,u] <= 1                   (each user at most once)
-      z[i,u] <= y[i]                       (link)
-      sum_{i,u} z[i,u] <= capacity
-      sum_{i,u} z[i,u] >= target_matches
-      If z[i,u]=1 -> Utility(i,u) >= min_utility   (Big-M)
-
-    Objective (primary):
-      Minimize total procurement cost:
-        sum_{i,u} Cost(i) * z[i,u]
-      where Cost(i) is policy-weighted supplier score + penalties
-
-    Secondary (optional):
-      Maximize total utility among equal-cost solutions.
+    This file intentionally does NOT import Excel readers (openpyxl).
+    Data is provided as pandas DataFrames (embedded defaults or any DF you build).
     """
 
-    # ---------- Excel loaders ----------
-    @staticmethod
-    def suppliers_from_excel(
-        xlsx_bytes_or_path,
-        sheet_name: str = "Min Cost Agent",
-        header_row: int = 3,
-        first_row: int = 4,
-        last_row: int = 10,
-        start_col: int = 18,   # R = 18 (default based on your note: supplier table starts at R3)
-    ) -> pd.DataFrame:
-        wb = openpyxl.load_workbook(xlsx_bytes_or_path, data_only=True)
-        ws = wb[sheet_name]
-
-        # Expect 9 columns (Supplier + 8 attributes)
-        headers = [ws.cell(header_row, c).value for c in range(start_col, start_col + 9)]
-        col_map = {
-            "Supplier": "supplier_id",
-            "Environmental Risk": "env_risk",
-            "Social Risk": "social_risk",
-            "Cost Score": "cost_score",
-            "Strategic Importance": "strategic",
-            "Improvement Potential": "improvement",
-            "Child Labor": "child_labor",
-            "Banned Chemicals": "banned_chem",
-            "Low Product Quality": "low_quality",
-        }
-
-        rows = []
-        for r in range(first_row, last_row + 1):
-            supplier_id = ws.cell(r, start_col).value
-            if supplier_id is None:
-                continue
-            row = {}
-            for i, h in enumerate(headers):
-                raw = ws.cell(r, start_col + i).value
-                row[col_map.get(h, h)] = raw
-            rows.append(row)
-
-        df = pd.DataFrame(rows)
-        df["supplier_id"] = df["supplier_id"].astype(str)
-        num_cols = ["env_risk","social_risk","cost_score","strategic","improvement","child_labor","banned_chem","low_quality"]
-        for c in num_cols:
-            df[c] = df[c].astype(float)
-        return df
-
-    @staticmethod
-    def users_from_excel(
-        xlsx_bytes_or_path,
-        sheet_name: str = "Min Cost Agent",
-        header_row: int = 24,
-        start_col: int = 2,   # B = 2 (default based on your note: user table starts at B24)
-    ) -> pd.DataFrame:
-        wb = openpyxl.load_workbook(xlsx_bytes_or_path, data_only=True)
-        ws = wb[sheet_name]
-
-        # Expect 7 columns (Users + 6 weights)
-        headers = [ws.cell(header_row, c).value for c in range(start_col, start_col + 7)]
-        col_map = {
-            "Users": "user_id",
-            "Environmental Risk": "w_env",
-            "Social Risk": "w_social",
-            "Cost Score": "w_cost",
-            "Strategic Importance": "w_strategic",
-            "Improvement Potential": "w_improvement",
-            "Low Product Quality": "w_low_quality",
-        }
-
-        rows = []
-        r = header_row + 1
-        while True:
-            uid = ws.cell(r, start_col).value
-            if uid is None:
-                break
-            row = {}
-            for i, h in enumerate(headers):
-                raw = ws.cell(r, start_col + i).value
-                row[col_map.get(h, h)] = raw
-            rows.append(row)
-            r += 1
-
-        df = pd.DataFrame(rows)
-        df["user_id"] = df["user_id"].astype(str)
-        for c in ["w_env","w_social","w_cost","w_strategic","w_improvement","w_low_quality"]:
-            df[c] = df[c].astype(float)
-
-        # If your Excel stores low_quality weight as negative, flip here.
-        # If not needed, comment it out.
-        df["w_low_quality"] = -df["w_low_quality"]
-        return df
-
-    # ---------- init ----------
     def __init__(
         self,
         suppliers_df: pd.DataFrame,
@@ -188,6 +110,9 @@ class MinCostAgent:
         policy: Optional[Policy] = None,
         cfg: Optional[MinCostConfig] = None,
     ):
+        if not GUROBI_AVAILABLE:
+            raise RuntimeError("gurobipy mevcut değil. Streamlit UI çalışır ama solver çalışmaz.")
+
         self.suppliers = suppliers_df.copy()
         self.users = users_df.copy()
         self.policy = (policy or Policy()).clamp_nonnegative()
@@ -200,18 +125,30 @@ class MinCostAgent:
         self._prep()
 
     def _prep(self) -> None:
-        s_req = {"supplier_id","env_risk","social_risk","cost_score","strategic","improvement","child_labor","banned_chem","low_quality"}
-        u_req = {"user_id","w_env","w_social","w_cost","w_strategic","w_improvement","w_low_quality"}
+        s_req = {"supplier_id", "env_risk", "social_risk", "cost_score", "strategic", "improvement", "child_labor", "banned_chem", "low_quality"}
+        u_req = {"user_id", "w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"}
+
         if not s_req.issubset(self.suppliers.columns):
-            raise ValueError(f"suppliers_df eksik kolon: {s_req - set(self.suppliers.columns)}")
+            raise ValueError(f"suppliers_df eksik kolon: {sorted(s_req - set(self.suppliers.columns))}")
         if not u_req.issubset(self.users.columns):
-            raise ValueError(f"users_df eksik kolon: {u_req - set(self.users.columns)}")
+            raise ValueError(f"users_df eksik kolon: {sorted(u_req - set(self.users.columns))}")
 
         self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
         self.users["user_id"] = self.users["user_id"].astype(str)
 
+        # Low quality is a "bad" attribute. In our utility definition it should reduce utility.
+        # Excel user weights are positive; we flip sign here (same convention as earlier code).
+        self.users["w_low_quality"] = -self.users["w_low_quality"].astype(float)
+
+        num_s = ["env_risk", "social_risk", "cost_score", "strategic", "improvement", "child_labor", "banned_chem", "low_quality"]
+        for c in num_s:
+            self.suppliers[c] = self.suppliers[c].astype(float)
+
+        num_u = ["w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]
+        for c in num_u:
+            self.users[c] = self.users[c].astype(float)
+
     def _auto_big_m(self) -> float:
-        # Conservative M derived from magnitudes in data (utility constraint)
         p = self.policy
         s = self.suppliers
         u = self.users
@@ -234,68 +171,51 @@ class MinCostAgent:
         }
 
         pref_max = (
-            max_u["w_env"] * max_s["env_risk"] +
-            max_u["w_social"] * max_s["social_risk"] +
-            max_u["w_cost"] * max_s["cost_score"] +
-            max_u["w_strategic"] * max_s["strategic"] +
-            max_u["w_improvement"] * max_s["improvement"] +
-            max_u["w_low_quality"] * max_s["low_quality"]
+            max_u["w_env"] * max_s["env_risk"]
+            + max_u["w_social"] * max_s["social_risk"]
+            + max_u["w_cost"] * max_s["cost_score"]
+            + max_u["w_strategic"] * max_s["strategic"]
+            + max_u["w_improvement"] * max_s["improvement"]
+            + max_u["w_low_quality"] * max_s["low_quality"]
         )
         pen_max = float((p.child_labor_penalty * s["child_labor"] + p.banned_chem_penalty * s["banned_chem"]).max())
         return float(pref_max + pen_max + 10.0)
 
-    def _utility(self, i: str, u: str, s_dicts: Dict[str, Dict[str, float]], u_dicts: Dict[str, Dict[str, float]]) -> float:
+    def _utility(self, supplier_id: str, user_id: str, s: Dict[str, Dict[str, float]], w: Dict[str, Dict[str, float]]) -> float:
         p = self.policy
-        s = s_dicts
-        w = u_dicts
-
         user_pref = (
-            w["w_env"][u] * (p.env_mult * s["env_risk"][i]) +
-            w["w_social"][u] * (p.social_mult * s["social_risk"][i]) +
-            w["w_cost"][u] * (p.cost_mult * s["cost_score"][i]) +
-            w["w_strategic"][u] * (p.strategic_mult * s["strategic"][i]) +
-            w["w_improvement"][u] * (p.improvement_mult * s["improvement"][i]) +
-            w["w_low_quality"][u] * (p.low_quality_mult * s["low_quality"][i])
+            w["w_env"][user_id] * (p.env_mult * s["env_risk"][supplier_id])
+            + w["w_social"][user_id] * (p.social_mult * s["social_risk"][supplier_id])
+            + w["w_cost"][user_id] * (p.cost_mult * s["cost_score"][supplier_id])
+            + w["w_strategic"][user_id] * (p.strategic_mult * s["strategic"][supplier_id])
+            + w["w_improvement"][user_id] * (p.improvement_mult * s["improvement"][supplier_id])
+            + w["w_low_quality"][user_id] * (p.low_quality_mult * s["low_quality"][supplier_id])
         )
-
-        policy_pen = (
-            p.child_labor_penalty * s["child_labor"][i] +
-            p.banned_chem_penalty * s["banned_chem"][i]
-        )
-
+        policy_pen = p.child_labor_penalty * s["child_labor"][supplier_id] + p.banned_chem_penalty * s["banned_chem"][supplier_id]
         return float(user_pref - policy_pen)
 
-    def _cost(self, i: str, s_dicts: Dict[str, Dict[str, float]]) -> float:
-        """
-        Procurement cost per matched unit for supplier i.
-        You can tune this mapping to match your business definition of \"cost\".
-        """
+    def _cost(self, supplier_id: str, s: Dict[str, Dict[str, float]]) -> float:
         p = self.policy
-        s = s_dicts
-
         base = (
-            p.env_mult * s["env_risk"][i] +
-            p.social_mult * s["social_risk"][i] +
-            p.cost_mult * s["cost_score"][i] +
-            p.strategic_mult * s["strategic"][i] +
-            p.improvement_mult * s["improvement"][i] +
-            p.low_quality_mult * s["low_quality"][i]
+            p.env_mult * s["env_risk"][supplier_id]
+            + p.social_mult * s["social_risk"][supplier_id]
+            + p.cost_mult * s["cost_score"][supplier_id]
+            + p.strategic_mult * s["strategic"][supplier_id]
+            + p.improvement_mult * s["improvement"][supplier_id]
+            + p.low_quality_mult * s["low_quality"][supplier_id]
         )
-        penalties = (
-            p.child_labor_penalty * s["child_labor"][i] +
-            p.banned_chem_penalty * s["banned_chem"][i]
-        )
+        penalties = p.child_labor_penalty * s["child_labor"][supplier_id] + p.banned_chem_penalty * s["banned_chem"][supplier_id]
         return float(base + penalties)
 
-    def build(self, name: str = "MinCostAgent") -> gp.Model:
+    def build(self, name: str = "MinCostAgent") -> "gp.Model":
         cfg = self.cfg
         p = self.policy
 
         Suppliers = self.suppliers["supplier_id"].tolist()
         Users = self.users["user_id"].tolist()
 
-        # Supplier dicts
-        s_dicts = {
+        # dicts
+        s = {
             "env_risk": dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"])),
             "social_risk": dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"])),
             "cost_score": dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"])),
@@ -305,9 +225,7 @@ class MinCostAgent:
             "child_labor": dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"])),
             "banned_chem": dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"])),
         }
-
-        # User dicts
-        u_dicts = {
+        w = {
             "w_env": dict(zip(self.users["user_id"], self.users["w_env"])),
             "w_social": dict(zip(self.users["user_id"], self.users["w_social"])),
             "w_cost": dict(zip(self.users["user_id"], self.users["w_cost"])),
@@ -319,79 +237,68 @@ class MinCostAgent:
         M = cfg.big_m if cfg.big_m is not None else self._auto_big_m()
 
         m = gp.Model(name)
-        m.Params.OutputFlag = cfg.output_flag
+        m.Params.OutputFlag = int(cfg.output_flag)
 
-        # -------------------- Variables --------------------
+        # Vars
         y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select_supplier")
         z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
 
-        # -------------------- Constraints --------------------
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == cfg.suppliers_to_select, name="select_k_suppliers")
+        # Constraints
+        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k_suppliers")
 
-        for u in Users:
-            m.addConstr(gp.quicksum(z[i, u] for i in Suppliers) <= 1, name=f"user_once[{u}]")
+        for u_id in Users:
+            m.addConstr(gp.quicksum(z[i, u_id] for i in Suppliers) <= 1, name=f"user_once[{u_id}]")
 
         for i in Suppliers:
-            for u in Users:
-                m.addConstr(z[i, u] <= y[i], name=f"link[{i},{u}]")
+            for u_id in Users:
+                m.addConstr(z[i, u_id] <= y[i], name=f"link[{i},{u_id}]")
 
-        m.addConstr(gp.quicksum(z[i, u] for i in Suppliers for u in Users) <= cfg.capacity, name="capacity_total")
-
-        # Force some service level so the trivial 0-match solution is infeasible.
-        m.addConstr(gp.quicksum(z[i, u] for i in Suppliers for u in Users) >= cfg.target_matches, name="target_matches")
+        m.addConstr(gp.quicksum(z[i, u_id] for i in Suppliers for u_id in Users) <= int(cfg.capacity), name="capacity_total")
+        m.addConstr(gp.quicksum(z[i, u_id] for i in Suppliers for u_id in Users) >= int(cfg.target_matches), name="target_matches")
 
         # Utility feasibility: if matched, utility >= min_utility
         for i in Suppliers:
-            for u in Users:
-                # Utility(i,u) expression
-                UserPref_i_u = (
-                    (u_dicts["w_env"][u] * (p.env_mult * s_dicts["env_risk"][i])) +
-                    (u_dicts["w_social"][u] * (p.social_mult * s_dicts["social_risk"][i])) +
-                    (u_dicts["w_cost"][u] * (p.cost_mult * s_dicts["cost_score"][i])) +
-                    (u_dicts["w_strategic"][u] * (p.strategic_mult * s_dicts["strategic"][i])) +
-                    (u_dicts["w_improvement"][u] * (p.improvement_mult * s_dicts["improvement"][i])) +
-                    (u_dicts["w_low_quality"][u] * (p.low_quality_mult * s_dicts["low_quality"][i]))
+            for u_id in Users:
+                user_pref = (
+                    (w["w_env"][u_id] * (p.env_mult * s["env_risk"][i]))
+                    + (w["w_social"][u_id] * (p.social_mult * s["social_risk"][i]))
+                    + (w["w_cost"][u_id] * (p.cost_mult * s["cost_score"][i]))
+                    + (w["w_strategic"][u_id] * (p.strategic_mult * s["strategic"][i]))
+                    + (w["w_improvement"][u_id] * (p.improvement_mult * s["improvement"][i]))
+                    + (w["w_low_quality"][u_id] * (p.low_quality_mult * s["low_quality"][i]))
                 )
-                PolicyPenalty_i = (
-                    (p.child_labor_penalty * s_dicts["child_labor"][i]) +
-                    (p.banned_chem_penalty * s_dicts["banned_chem"][i])
-                )
-                Utility_i_u = UserPref_i_u - PolicyPenalty_i
+                pen = (p.child_labor_penalty * s["child_labor"][i]) + (p.banned_chem_penalty * s["banned_chem"][i])
+                util = user_pref - pen
 
-                # Utility_i_u >= min_utility - M*(1 - z[i,u])
-                m.addConstr(Utility_i_u >= cfg.min_utility - M * (1 - z[i, u]), name=f"utility[{i},{u}]")
+                m.addConstr(util >= float(cfg.min_utility) - M * (1 - z[i, u_id]), name=f"utility[{i},{u_id}]")
 
-        # -------------------- Objective --------------------
-        # Cost(i) per matched unit (supplier-level)
-        cost_i = {i: self._cost(i, s_dicts) for i in Suppliers}
-
-        TotalCost = gp.quicksum(cost_i[i] * z[i, u] for i in Suppliers for u in Users)
+        # Objective
+        cost_i = {i: self._cost(i, s) for i in Suppliers}
+        total_cost = gp.quicksum(cost_i[i] * z[i, u_id] for i in Suppliers for u_id in Users)
 
         if not cfg.lexicographic_tiebreak:
-            m.setObjective(TotalCost, GRB.MINIMIZE)
+            m.setObjective(total_cost, GRB.MINIMIZE)
         else:
-            # Min cost first, then maximize total utility
-            TotalUtility = gp.quicksum(
-                (  # same utility expression but multiplied by z
+            total_utility = gp.quicksum(
+                (
                     (
-                        (u_dicts["w_env"][u] * (p.env_mult * s_dicts["env_risk"][i])) +
-                        (u_dicts["w_social"][u] * (p.social_mult * s_dicts["social_risk"][i])) +
-                        (u_dicts["w_cost"][u] * (p.cost_mult * s_dicts["cost_score"][i])) +
-                        (u_dicts["w_strategic"][u] * (p.strategic_mult * s_dicts["strategic"][i])) +
-                        (u_dicts["w_improvement"][u] * (p.improvement_mult * s_dicts["improvement"][i])) +
-                        (u_dicts["w_low_quality"][u] * (p.low_quality_mult * s_dicts["low_quality"][i]))
+                        (w["w_env"][u_id] * (p.env_mult * s["env_risk"][i]))
+                        + (w["w_social"][u_id] * (p.social_mult * s["social_risk"][i]))
+                        + (w["w_cost"][u_id] * (p.cost_mult * s["cost_score"][i]))
+                        + (w["w_strategic"][u_id] * (p.strategic_mult * s["strategic"][i]))
+                        + (w["w_improvement"][u_id] * (p.improvement_mult * s["improvement"][i]))
+                        + (w["w_low_quality"][u_id] * (p.low_quality_mult * s["low_quality"][i]))
                     )
                     - (
-                        (p.child_labor_penalty * s_dicts["child_labor"][i]) +
-                        (p.banned_chem_penalty * s_dicts["banned_chem"][i])
+                        (p.child_labor_penalty * s["child_labor"][i]) + (p.banned_chem_penalty * s["banned_chem"][i])
                     )
-                ) * z[i, u]
+                )
+                * z[i, u_id]
                 for i in Suppliers
-                for u in Users
+                for u_id in Users
             )
-
-            m.setObjectiveN(TotalCost, index=0, priority=2, name="min_total_cost")
-            m.setObjectiveN(TotalUtility, index=1, priority=1, name="max_total_utility")
+            m.setObjectiveN(total_cost, index=0, priority=2, name="min_total_cost")
+            m.setObjectiveN(total_utility, index=1, priority=1, name="max_total_utility")
 
         self.model, self.y, self.z = m, y, z
         return m
@@ -406,8 +313,9 @@ class MinCostAgent:
 
         Suppliers = self.suppliers["supplier_id"].tolist()
         Users = self.users["user_id"].tolist()
-        # Rebuild dicts for reporting
-        s_dicts = {
+
+        # dicts for reporting
+        s = {
             "env_risk": dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"])),
             "social_risk": dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"])),
             "cost_score": dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"])),
@@ -417,7 +325,7 @@ class MinCostAgent:
             "child_labor": dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"])),
             "banned_chem": dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"])),
         }
-        u_dicts = {
+        w = {
             "w_env": dict(zip(self.users["user_id"], self.users["w_env"])),
             "w_social": dict(zip(self.users["user_id"], self.users["w_social"])),
             "w_cost": dict(zip(self.users["user_id"], self.users["w_cost"])),
@@ -427,19 +335,18 @@ class MinCostAgent:
         }
 
         chosen = [i for i in Suppliers if self.y[i].X > 0.5]
+        pairs: List[Tuple[str, str]] = [(u_id, i) for i in Suppliers for u_id in Users if self.z[i, u_id].X > 0.5]
 
-        pairs: List[Tuple[str, str]] = [(u, i) for i in Suppliers for u in Users if self.z[i, u].X > 0.5]
         match_df = pd.DataFrame(pairs, columns=["user_id", "supplier_id"])
-
         if len(match_df) > 0:
-            match_df["utility"] = match_df.apply(lambda r: self._utility(r["supplier_id"], r["user_id"], s_dicts, u_dicts), axis=1)
-            match_df["unit_cost"] = match_df["supplier_id"].map(lambda i: self._cost(i, s_dicts))
+            match_df["utility"] = match_df.apply(lambda r: self._utility(r["supplier_id"], r["user_id"], s, w), axis=1)
+            match_df["unit_cost"] = match_df["supplier_id"].map(lambda sid: self._cost(sid, s))
             match_df = match_df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
         else:
             match_df["utility"] = []
             match_df["unit_cost"] = []
 
-        total_cost = float(sum(match_df["unit_cost"])) if len(match_df) else 0.0
+        total_cost = float(match_df["unit_cost"].sum()) if len(match_df) else 0.0
         avg_utility = float(match_df["utility"].mean()) if len(match_df) else 0.0
 
         return {
@@ -465,47 +372,36 @@ st.title("Minimum Cost Matching • Government Policy Selector")
 with st.expander("Ne yapıyor?", expanded=False):
     st.markdown(
         """
-- Excel’den supplier + user tablolarını okur  
-- Hükümet politikası parametrelerini dropdown ile seçtirir  
-- Gurobi ile **minimum-cost** matching çözer  
-- Seçilen supplier(lar), match’ler ve **utility** değerlerini gösterir  
+- Excel import **YOK**: data bu dosyanın içine gömülü (default).
+- Hükümet politikası parametrelerini dropdown ile seçtirir.
+- Gurobi varsa **minimum-cost** matching çözer.
         """
+    )
+
+if not GUROBI_AVAILABLE:
+    st.warning(
+        "Bu ortamda **gurobipy** bulunamadı. UI açılır ama 'Solve' çalışmaz. "
+        "Streamlit Cloud kullanıyorsan, Gurobi'yi/ lisansı environment'a eklemen gerekir."
     )
 
 # ---------- helpers ----------
 def _parse_candidates(text: str) -> List[float]:
-    vals = []
+    vals: List[float] = []
     for part in text.split(","):
         part = part.strip()
         if not part:
             continue
         vals.append(float(part))
-    # unique + sorted
-    vals = sorted(set(vals))
-    return vals
+    return sorted(set(vals))
 
-@st.cache_data(show_spinner=False)
-def load_tables_from_excel(
-    file_bytes: bytes,
-    sheet_name: str,
-    s_header_row: int,
-    s_first_row: int,
-    s_last_row: int,
-    s_start_col: int,
-    u_header_row: int,
-    u_start_col: int,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    bio = io.BytesIO(file_bytes)
-    suppliers = MinCostAgent.suppliers_from_excel(
-        bio, sheet_name=sheet_name,
-        header_row=s_header_row, first_row=s_first_row, last_row=s_last_row, start_col=s_start_col
-    )
-    bio2 = io.BytesIO(file_bytes)
-    users = MinCostAgent.users_from_excel(
-        bio2, sheet_name=sheet_name,
-        header_row=u_header_row, start_col=u_start_col
-    )
-    return suppliers, users
+
+def _default_dfs() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    suppliers_df = pd.DataFrame(DEFAULT_SUPPLIERS)
+    users_df = pd.DataFrame(DEFAULT_USERS)
+    suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
+    users_df["user_id"] = users_df["user_id"].astype(str)
+    return suppliers_df, users_df
+
 
 def policy_selector(prefix: str = "pol") -> Policy:
     st.subheader("Government Policy (dropdown ile seç)")
@@ -514,22 +410,28 @@ def policy_selector(prefix: str = "pol") -> Policy:
     cand_text = st.text_input(
         "Dropdown seçenekleri (virgülle ayır)",
         value=default_candidates,
-        help="Tüm policy parametre dropdown’ları bu listeden değer seçer."
+        help="Tüm policy parametre dropdown’ları bu listeden değer seçer.",
     )
     candidates = _parse_candidates(cand_text) or [0.0, 1.0]
 
+    # index for 1.0 if exists, else middle
+    def _idx(val: float) -> int:
+        if val in candidates:
+            return candidates.index(val)
+        return min(len(candidates) // 2, len(candidates) - 1)
+
     cols = st.columns(3)
     with cols[0]:
-        env = st.selectbox("env_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_env")
-        social = st.selectbox("social_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_social")
-        cost = st.selectbox("cost_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_cost")
+        env = st.selectbox("env_mult", candidates, index=_idx(1.0), key=f"{prefix}_env")
+        social = st.selectbox("social_mult", candidates, index=_idx(1.0), key=f"{prefix}_social")
+        cost = st.selectbox("cost_mult", candidates, index=_idx(1.0), key=f"{prefix}_cost")
     with cols[1]:
-        strategic = st.selectbox("strategic_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_strategic")
-        improvement = st.selectbox("improvement_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_improvement")
-        lq = st.selectbox("low_quality_mult", candidates, index=min(3, len(candidates)-1), key=f"{prefix}_lq")
+        strategic = st.selectbox("strategic_mult", candidates, index=_idx(1.0), key=f"{prefix}_strategic")
+        improvement = st.selectbox("improvement_mult", candidates, index=_idx(1.0), key=f"{prefix}_improvement")
+        lq = st.selectbox("low_quality_mult", candidates, index=_idx(1.0), key=f"{prefix}_lq")
     with cols[2]:
-        child = st.selectbox("child_labor_penalty", candidates, index=0, key=f"{prefix}_child")
-        banned = st.selectbox("banned_chem_penalty", candidates, index=0, key=f"{prefix}_banned")
+        child = st.selectbox("child_labor_penalty", candidates, index=_idx(0.0), key=f"{prefix}_child")
+        banned = st.selectbox("banned_chem_penalty", candidates, index=_idx(0.0), key=f"{prefix}_banned")
 
     pol = Policy(
         env_mult=env,
@@ -548,32 +450,19 @@ def policy_selector(prefix: str = "pol") -> Policy:
 
 
 # ---------- sidebar controls ----------
-st.sidebar.header("Excel & Model Ayarları")
-
-uploaded = st.sidebar.file_uploader("Excel yükle (.xlsx)", type=["xlsx"])
-
-sheet_name = st.sidebar.text_input("Sheet name", value="Min Cost Agent")
-
-st.sidebar.subheader("Supplier table koordinatları")
-s_header_row = st.sidebar.number_input("Supplier header row", min_value=1, value=3, step=1)
-s_first_row = st.sidebar.number_input("Supplier first data row", min_value=1, value=4, step=1)
-s_last_row = st.sidebar.number_input("Supplier last data row", min_value=1, value=10, step=1)
-s_start_col = st.sidebar.number_input("Supplier start col (A=1, B=2, ... R=18)", min_value=1, value=18, step=1)
-
-st.sidebar.subheader("User table koordinatları")
-u_header_row = st.sidebar.number_input("User header row", min_value=1, value=24, step=1)
-u_start_col = st.sidebar.number_input("User start col (A=1, B=2, ...)", min_value=1, value=2, step=1)
+st.sidebar.header("Model Ayarları (Excel yok)")
 
 st.sidebar.subheader("Optimization config")
 capacity = st.sidebar.number_input("capacity (max matches)", min_value=0, value=6, step=1)
 suppliers_to_select = st.sidebar.number_input("K (suppliers_to_select)", min_value=1, value=1, step=1)
-
-min_utility = st.sidebar.number_input("min_utility (match olunca)", value=0.0, step=0.5)
 target_matches = st.sidebar.number_input("target_matches (en az)", min_value=0, value=6, step=1)
-
+min_utility = st.sidebar.number_input("min_utility (match olunca)", value=0.0, step=0.5)
 lexi = st.sidebar.checkbox("Lexicographic tie-break (min cost → max utility)", value=True)
-
 output_flag = st.sidebar.checkbox("Gurobi log göster (OutputFlag=1)", value=False)
+
+st.sidebar.divider()
+st.sidebar.caption("Not: Excel okuma (openpyxl) bu UI'dan tamamen çıkarıldı. Data gömülü.")
+
 
 # ---------- main ----------
 colA, colB = st.columns([1.15, 0.85], gap="large")
@@ -584,30 +473,12 @@ with colB:
 with colA:
     st.subheader("Veri & Çözüm")
 
-    if uploaded is None:
-        st.info("Devam etmek için Excel dosyasını yükle.")
-        st.stop()
+    suppliers_df, users_df = _default_dfs()
 
-    try:
-        suppliers_df, users_df = load_tables_from_excel(
-            uploaded.getvalue(),
-            sheet_name=sheet_name,
-            s_header_row=int(s_header_row),
-            s_first_row=int(s_first_row),
-            s_last_row=int(s_last_row),
-            s_start_col=int(s_start_col),
-            u_header_row=int(u_header_row),
-            u_start_col=int(u_start_col),
-        )
-    except Exception as e:
-        st.error("Excel okuma hatası. Sheet adı ve koordinatları kontrol et.")
-        st.exception(e)
-        st.stop()
-
-    with st.expander("Suppliers (okunan tablo)", expanded=False):
+    with st.expander("Suppliers (gömülü tablo)", expanded=False):
         st.dataframe(suppliers_df, use_container_width=True)
 
-    with st.expander("Users (okunan tablo)", expanded=False):
+    with st.expander("Users (gömülü tablo)", expanded=False):
         st.dataframe(users_df, use_container_width=True)
 
     cfg = MinCostConfig(
@@ -616,21 +487,16 @@ with colA:
         target_matches=int(target_matches),
         min_utility=float(min_utility),
         output_flag=1 if output_flag else 0,
-        sheet_name=sheet_name,
         lexicographic_tiebreak=bool(lexi),
     )
 
-    solve_btn = st.button("Solve (Gurobi)", type="primary")
+    solve_btn = st.button("Solve (Gurobi)", type="primary", disabled=not GUROBI_AVAILABLE)
 
     if solve_btn:
         try:
             agent = MinCostAgent(suppliers_df, users_df, policy=policy, cfg=cfg)
             agent.build()
             sol = agent.solve()
-        except gp.GurobiError as ge:
-            st.error("Gurobi hatası (lisans / environment olabilir).")
-            st.exception(ge)
-            st.stop()
         except Exception as e:
             st.error("Model solve hatası.")
             st.exception(e)
@@ -650,12 +516,17 @@ with colA:
 
         st.markdown("### Hızlı özet")
         if sol["num_matched"] > 0:
-            by_supplier = sol["matches"].groupby("supplier_id").agg(
-                matched=("user_id", "count"),
-                avg_utility=("utility", "mean"),
-                avg_unit_cost=("unit_cost", "mean"),
-                total_cost=("unit_cost", "sum"),
-            ).reset_index()
+            by_supplier = (
+                sol["matches"]
+                .groupby("supplier_id")
+                .agg(
+                    matched=("user_id", "count"),
+                    avg_utility=("utility", "mean"),
+                    avg_unit_cost=("unit_cost", "mean"),
+                    total_cost=("unit_cost", "sum"),
+                )
+                .reset_index()
+            )
             st.dataframe(by_supplier, use_container_width=True)
         else:
             st.warning("Hiç match çıkmadı. target_matches / min_utility / capacity / policy değerlerini kontrol et.")
