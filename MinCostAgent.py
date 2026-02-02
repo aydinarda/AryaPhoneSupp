@@ -32,6 +32,7 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -80,7 +81,7 @@ class Policy:
 # -------------------------
 # Excel loading
 # -------------------------
-DEFAULT_XLSX_PATH = "Arya_Phones_Supplier_Selection.xlsx"
+DEFAULT_XLSX_PATH = (Path(__file__).resolve().parent / "Arya_Phones_Supplier_Selection.xlsx")
 
 
 def _find_sheet_pair(sheetnames: List[str]) -> Tuple[str, str]:

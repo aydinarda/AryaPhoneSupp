@@ -72,18 +72,39 @@ with tabs[1]:
     if not GUROBI_AVAILABLE:
         st.error("gurobipy is not installed in this environment. Add it to requirements.txt (and ensure a valid license).")
         st.stop()
+    # Load data (robust path resolution for Streamlit Cloud)
+    from pathlib import Path
+    import os
 
-    # Load data
-    try:
-        suppliers_df, users_df = _load_tables(DEFAULT_XLSX_PATH)
-        data_ok = True
-    except Exception:
-        data_ok = False
-        suppliers_df, users_df = pd.DataFrame(), pd.DataFrame()
+    workbook_candidates = []
 
-    if not data_ok:
-        st.error(f"Could not load '{DEFAULT_XLSX_PATH}'. Place it next to UI.py in your Streamlit repo.")
-        st.stop()
+    # 1) Environment variable override (optional)
+    env_path = os.getenv("ARYA_XLSX_PATH", "").strip()
+    if env_path:
+        workbook_candidates.append(Path(env_path))
+
+    # 2) Next to this file (repo root / module directory)
+    workbook_candidates.append(Path(__file__).resolve().parent / "Arya_Phones_Supplier_Selection.xlsx")
+
+    # 3) Current working directory (sometimes differs on Streamlit Cloud)
+    workbook_candidates.append(Path.cwd() / "Arya_Phones_Supplier_Selection.xlsx")
+
+    workbook_path = next((p for p in workbook_candidates if p.exists()), None)
+
+    suppliers_df, users_df = pd.DataFrame(), pd.DataFrame()
+
+    if workbook_path is not None:
+        try:
+            suppliers_df, users_df = _load_tables(str(workbook_path))
+        except Exception:
+            workbook_path = None  # fall back to uploader
+
+    if workbook_path is None:
+        uploaded = st.file_uploader("Upload the workbook (Arya_Phones_Supplier_Selection.xlsx)", type=["xlsx"])
+        if uploaded is None:
+            st.error("Workbook not found. Please upload 'Arya_Phones_Supplier_Selection.xlsx' (or set ARYA_XLSX_PATH).")
+            st.stop()
+        suppliers_df, users_df = _load_tables(uploaded)
 
     st.subheader("Optimization settings")
 
