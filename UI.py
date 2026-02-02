@@ -1,18 +1,16 @@
-from __future__ import annotations
-
 import streamlit as st
-import pandas as pd
+from pathlib import Path
 
-from MinCostAgent import (
+from MinCostAgent_STRICT import (
     DEFAULT_XLSX_PATH,
-    GUROBI_AVAILABLE,
     Policy,
     MaxProfitConfig,
     MaxProfitAgent,
     load_supplier_user_tables,
+    GUROBI_AVAILABLE,
 )
 
-st.set_page_config(page_title="Arya Case — Policy Playground", layout="wide")
+st.set_page_config(page_title="Arya Case", layout="wide")
 
 st.markdown(
     """
@@ -20,132 +18,80 @@ st.markdown(
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
-.block-container { padding-top: 1.25rem; padding-bottom: 2rem; max-width: 1200px; }
+div[data-testid="stSidebar"] {display: none;}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+if "policy" not in st.session_state:
+    st.session_state.policy = Policy()
 
-@st.cache_data(show_spinner=False)
-def _load_tables(xlsx_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    return load_supplier_user_tables(xlsx_path=xlsx_path)
+tab_policy, tab_profit = st.tabs(["Policy", "Max Profit Agent"])
 
+with tab_policy:
+    p = st.session_state.policy
 
-def _policy_widget() -> Policy:
-    policy_options = [0, 1, 2, 3, 4, 5]
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        p.env_mult = st.number_input("Environmental multiplier", min_value=0.0, value=float(p.env_mult), step=0.1)
+        p.social_mult = st.number_input("Social multiplier", min_value=0.0, value=float(p.social_mult), step=0.1)
+        p.cost_mult = st.number_input("Cost multiplier", min_value=0.0, value=float(p.cost_mult), step=0.1)
 
-    col1, col2 = st.columns(2, gap="large")
+    with c2:
+        p.strategic_mult = st.number_input("Strategic multiplier", min_value=0.0, value=float(p.strategic_mult), step=0.1)
+        p.improvement_mult = st.number_input("Improvement multiplier", min_value=0.0, value=float(p.improvement_mult), step=0.1)
+        p.low_quality_mult = st.number_input("Low-quality multiplier", min_value=0.0, value=float(p.low_quality_mult), step=0.1)
 
-    with col1:
-        st.subheader("Policy multipliers")
-        env = st.selectbox("Environmental multiplier", policy_options, index=1)
-        social = st.selectbox("Social multiplier", policy_options, index=1)
-        cost = st.selectbox("Cost multiplier", policy_options, index=1)
-        strategic = st.selectbox("Strategic multiplier", policy_options, index=1)
-        improvement = st.selectbox("Improvement multiplier", policy_options, index=1)
-        low_q = st.selectbox("Low-quality multiplier", policy_options, index=1)
+    with c3:
+        p.child_labor_penalty = st.number_input("Child labor penalty", min_value=0.0, value=float(p.child_labor_penalty), step=1.0)
+        p.banned_chem_penalty = st.number_input("Banned chemicals penalty", min_value=0.0, value=float(p.banned_chem_penalty), step=1.0)
 
-    with col2:
-        st.subheader("Policy penalties")
-        child = st.selectbox("Child labor penalty", policy_options, index=0)
-        banned = st.selectbox("Banned chemicals penalty", policy_options, index=0)
+    st.session_state.policy = p
 
-    return Policy(
-        env_mult=float(env),
-        social_mult=float(social),
-        cost_mult=float(cost),
-        strategic_mult=float(strategic),
-        improvement_mult=float(improvement),
-        low_quality_mult=float(low_q),
-        child_labor_penalty=float(child),
-        banned_chem_penalty=float(banned),
-    )
+with tab_profit:
+    excel_path = Path(DEFAULT_XLSX_PATH)
 
-
-tabs = st.tabs(["Policy", "Max Profit Agent"])
-
-with tabs[0]:
-    policy = _policy_widget()
-
-with tabs[1]:
-    if not GUROBI_AVAILABLE:
-        st.error("gurobipy is not installed in this environment. Add it to requirements.txt (and ensure a valid license).")
+    if not excel_path.exists():
+        st.error(f"Excel file not found: {excel_path.name}. Place it next to UI.py in your repo.")
         st.stop()
-    # Load data (robust path resolution for Streamlit Cloud)
-    from pathlib import Path
-    import os
 
-    workbook_candidates = []
+    if not GUROBI_AVAILABLE:
+        st.error("gurobipy is not installed in this environment. Add `gurobipy` to requirements.txt.")
+        st.stop()
 
-    # 1) Environment variable override (optional)
-    env_path = os.getenv("ARYA_XLSX_PATH", "").strip()
-    if env_path:
-        workbook_candidates.append(Path(env_path))
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        price_per_match = st.number_input("Selling price (P)", min_value=0.0, value=100.0, step=5.0)
+    with c2:
+        min_utility = st.number_input("Minimum utility threshold", value=0.0, step=1.0)
+    with c3:
+        suppliers_to_select = st.number_input("Suppliers to select (K)", min_value=1, value=1, step=1)
+    with c4:
+        last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1)
+    with c5:
+        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1)
 
-    # 2) Next to this file (repo root / module directory)
-    workbook_candidates.append(Path(__file__).resolve().parent / "Arya_Phones_Supplier_Selection.xlsx")
-
-    # 3) Current working directory (sometimes differs on Streamlit Cloud)
-    workbook_candidates.append(Path.cwd() / "Arya_Phones_Supplier_Selection.xlsx")
-
-    workbook_path = next((p for p in workbook_candidates if p.exists()), None)
-
-    suppliers_df, users_df = pd.DataFrame(), pd.DataFrame()
-
-    if workbook_path is not None:
+    if st.button("Optimize", type="primary", use_container_width=True):
         try:
-            suppliers_df, users_df = _load_tables(str(workbook_path))
-        except Exception:
-            workbook_path = None  # fall back to uploader
+            suppliers_df, users_df = load_supplier_user_tables(excel_path)
 
-    if workbook_path is None:
-        uploaded = st.file_uploader("Upload the workbook (Arya_Phones_Supplier_Selection.xlsx)", type=["xlsx"])
-        if uploaded is None:
-            st.error("Workbook not found. Please upload 'Arya_Phones_Supplier_Selection.xlsx' (or set ARYA_XLSX_PATH).")
-            st.stop()
-        suppliers_df, users_df = _load_tables(uploaded)
+            cfg = MaxProfitConfig(
+                last_n_users=int(last_n_users),
+                capacity=int(capacity),
+                suppliers_to_select=int(suppliers_to_select),
+                price_per_match=float(price_per_match),
+                min_utility=float(min_utility),
+                output_flag=0,
+            )
 
-    st.subheader("Optimization settings")
+            agent = MaxProfitAgent(suppliers_df, users_df, st.session_state.policy, cfg)
+            res = agent.solve()
 
-    colA, colB, colC = st.columns([1, 1, 1], gap="large")
+            st.metric("Objective value", f"{res['objective_value']:.3f}")
+            st.write("Chosen suppliers:", ", ".join(res["chosen_suppliers"]) if res["chosen_suppliers"] else "None")
+            st.write("Matched users:", f"{res['num_matched']} / {len(res['selected_users'])}")
+            st.dataframe(res["matches"], use_container_width=True, hide_index=True)
 
-    with colA:
-        price = st.selectbox("Selling price (P)", [50.0, 75.0, 100.0, 125.0, 150.0], index=2)
-        k = st.selectbox("Suppliers to select (K)", [1, 2, 3], index=0)
-
-    with colB:
-        last_n = st.selectbox("Optimize for last N users", [6, 8, 10], index=0)
-        capacity = st.selectbox("Capacity (max matches)", [2, 4, 6, 8, 10], index=2)
-
-    with colC:
-        min_utility = st.selectbox("Minimum utility (if matched)", [0.0, 0.5, 1.0, 1.5, 2.0], index=0)
-        show_log = st.selectbox("Solver log", ["Off", "On"], index=0)
-
-    run = st.button("Optimize", type="primary", disabled=not data_ok)
-
-    if run:
-        cfg = MaxProfitConfig(
-            last_n_users=int(last_n),
-            capacity=int(capacity),
-            suppliers_to_select=int(k),
-            price_per_match=float(price),
-            min_utility=float(min_utility),
-            output_flag=1 if show_log == "On" else 0,
-        )
-
-        agent = MaxProfitAgent(suppliers_df, users_df, policy=policy, cfg=cfg)
-        agent.build()
-        sol = agent.solve()
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Matched users", sol["num_matched"])
-        m2.metric("Objective (total margin)", f"{sol['objective_value']:.3f}")
-        m3.metric("Selected suppliers", str(len(sol['chosen_suppliers'])))
-        m4.metric("Users in scope", str(len(sol["selected_users"])))
-
-        st.markdown("**Selected suppliers**")
-        st.write(sol["chosen_suppliers"])
-
-        st.markdown("**Matches**")
-        st.dataframe(sol["matches"], use_container_width=True)
+        except Exception as e:
+            st.error(str(e))
