@@ -1,7 +1,7 @@
 import streamlit as st
 from pathlib import Path
 
-from MinCostAgent_STRICT import (
+from MinCostAgent import (
     DEFAULT_XLSX_PATH,
     Policy,
     MaxProfitConfig,
