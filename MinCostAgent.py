@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -169,7 +169,7 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df2
 
 
-def load_supplier_user_tables(xlsx_path: Optional[str | Path] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def load_supplier_user_tables(xlsx_path: Optional[Union[str, Path]] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     path = Path(xlsx_path) if xlsx_path is not None else DEFAULT_XLSX_PATH
     if not path.exists():
         raise FileNotFoundError(f"Excel file not found at: {path}")
