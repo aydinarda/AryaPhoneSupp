@@ -1,16 +1,29 @@
-import streamlit as st
+import random
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 from MinCostAgent import (
     DEFAULT_XLSX_PATH,
-    Policy,
-    MaxProfitConfig,
-    MaxProfitAgent,
-    MinCostConfig,
-    MinCostAgent,
-    load_supplier_user_tables,
     GUROBI_AVAILABLE,
+    MaxProfitAgent,
+    MaxProfitConfig,
+    MinCostAgent,
+    MinCostConfig,
+    Policy,
+    load_supplier_user_tables,
 )
+
+try:
+    import gurobipy as gp
+    from gurobipy import GRB
+    _HAS_GUROBI = True
+except Exception:
+    gp = None  # type: ignore
+    GRB = None  # type: ignore
+    _HAS_GUROBI = False
+
 
 st.set_page_config(page_title="Arya Case", layout="wide")
 
@@ -29,8 +42,13 @@ div[data-testid="stSidebar"] {display: none;}
 if "policy" not in st.session_state:
     st.session_state.policy = Policy()
 
-tab_policy, tab_profit, tab_mincost, tab_best_policy = st.tabs(["Policy", "Max Profit Agent", "Min Cost Agent", "Best governmental policy"])
+tab_policy, tab_profit, tab_mincost, tab_best_policy = st.tabs(
+    ["Policy", "Max Profit Agent", "Min Cost Agent", "Best governmental policy"]
+)
 
+# -----------------------------
+# Policy tab (UNCHANGED)
+# -----------------------------
 with tab_policy:
     p = st.session_state.policy
 
@@ -52,6 +70,9 @@ with tab_policy:
     st.session_state.policy = p
 
 
+# -----------------------------
+# Max Profit Agent tab (UNCHANGED)
+# -----------------------------
 with tab_profit:
     excel_path = Path(DEFAULT_XLSX_PATH)
 
@@ -100,6 +121,9 @@ with tab_profit:
             st.error(str(e))
 
 
+# -----------------------------
+# Min Cost Agent tab (UNCHANGED)
+# -----------------------------
 with tab_mincost:
     excel_path = Path(DEFAULT_XLSX_PATH)
 
@@ -113,26 +137,26 @@ with tab_mincost:
 
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        min_utility = st.number_input("Minimum utility threshold", value=0.0, step=1.0, key="mincost_minutil")
+        min_utility_m = st.number_input("Minimum utility threshold", value=0.0, step=1.0, key="mincost_minutil")
     with c2:
-        suppliers_to_select = st.number_input("Suppliers to select (K)", min_value=1, value=1, step=1, key="mincost_k")
+        suppliers_to_select_m = st.number_input("Suppliers to select (K)", min_value=1, value=1, step=1, key="mincost_k")
     with c3:
-        last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="mincost_lastn")
+        last_n_users_m = st.number_input("Last N users", min_value=1, value=6, step=1, key="mincost_lastn")
     with c4:
-        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="mincost_cap")
+        capacity_m = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="mincost_cap")
     with c5:
-        matches_to_make = st.number_input("Matches to make", min_value=0, value=6, step=1, key="mincost_m")
+        matches_to_make_m = st.number_input("Matches to make", min_value=0, value=6, step=1, key="mincost_m")
 
     if st.button("Optimize", type="primary", use_container_width=True, key="mincost_opt"):
         try:
             suppliers_df, users_df = load_supplier_user_tables(excel_path)
 
             cfg = MinCostConfig(
-                last_n_users=int(last_n_users),
-                capacity=int(capacity),
-                matches_to_make=int(matches_to_make),
-                suppliers_to_select=int(suppliers_to_select),
-                min_utility=float(min_utility),
+                last_n_users=int(last_n_users_m),
+                capacity=int(capacity_m),
+                matches_to_make=int(matches_to_make_m),
+                suppliers_to_select=int(suppliers_to_select_m),
+                min_utility=float(min_utility_m),
                 output_flag=0,
             )
 
@@ -148,16 +172,13 @@ with tab_mincost:
             st.error(str(e))
 
 
-# -------------------------------
-# Best governmental policy (NEW)
-# -------------------------------
+# -----------------------------
+# Best governmental policy tab (NEW, MILP)
+# -----------------------------
 with tab_best_policy:
-    st.markdown("### Best governmental policy")
-    st.caption(
-        "This page searches for two *policy presets*:\n"
-        "- **Best Growth Policy**: maximizes the Max Profit Agent objective.\n"
-        "- **Best Sustainable Policy**: maximizes the Max Utility Agent objective.\n"
-        "Both are evaluated on the same user/supplier data and constraints."
+    st.subheader("Best governmental policy")
+    st.markdown(
+        "**Maximize retailer utility** (retailer = MaxProfitAgent objective) **while government enforces world-goodness constraints**."
     )
 
     excel_path = Path(DEFAULT_XLSX_PATH)
@@ -165,146 +186,108 @@ with tab_best_policy:
         st.error(f"Excel file not found: {excel_path.name}. Place it next to UI.py in your repo.")
         st.stop()
 
-    if not GUROBI_AVAILABLE:
-        st.error("gurobipy is not installed in this environment. Add `gurobipy` to requirements.txt.")
+    if not GUROBI_AVAILABLE or not _HAS_GUROBI:
+        st.error("gurobipy is not available in this environment. Add `gurobipy` to requirements.txt.")
         st.stop()
 
-    # Import MaxUtilAgent lazily so the rest of the app doesn't depend on it unless this tab is used.
-    try:
-        from MaxUtilAgent import MaxUtilConfig, MaxUtilAgent
-        _HAS_MAXUTIL = True
-    except Exception:
-        _HAS_MAXUTIL = False
+    st.markdown(
+        r"""
+**Government MILP (policy selection):**
 
-    import random
-    import pandas as pd
+- Decision: choose exactly one policy from a candidate set \( \mathcal{P} \)
+- \(x_p \in \{0,1\}\) indicates which policy is chosen.
 
-    st.markdown("#### Evaluation setup")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        last_n_users = st.number_input("Last N users (evaluated)", min_value=1, value=11, step=1, key="bgp_lastn")
-    with c2:
-        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="bgp_cap")
-    with c3:
-        suppliers_to_select = st.number_input("Suppliers to select (K)", min_value=1, value=1, step=1, key="bgp_k")
-    with c4:
-        price_per_match = st.number_input("Selling price (P)", min_value=0.0, value=100.0, step=5.0, key="bgp_price")
-    with c5:
-        min_utility = st.number_input("Minimum utility threshold", value=0.0, step=1.0, key="bgp_minutil")
+\[
+\max \sum_{p\in\mathcal{P}} U_p x_p \;+\; \epsilon \sum_{p\in\mathcal{P}} G_p x_p
+\]
+\[
+\sum_{p} x_p = 1,\quad x_p \in \{0,1\}
+\]
+\[
+\sum_p EnvTot_p x_p \le \overline{EnvAvg}\sum_p Match_p x_p
+\]
+\[
+\sum_p SocTot_p x_p \le \overline{SocAvg}\sum_p Match_p x_p
+\]
+\[
+\sum_p ChildTot_p x_p \le \overline{Child},\quad
+\sum_p BanTot_p x_p \le \overline{Ban}
+\]
+\[
+\sum_p Match_p x_p \ge \underline{M}
+\]
 
-    st.markdown("#### Search space")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        n_candidates = st.number_input("Number of candidate policies", min_value=10, value=200, step=10, key="bgp_ncand")
-    with s2:
-        seed = st.number_input("Random seed", min_value=0, value=7, step=1, key="bgp_seed")
-    with s3:
+Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved under policy \(p\).
+"""
+    )
+
+    st.divider()
+
+    # ---- Controls
+    a, b, c, d = st.columns(4)
+    with a:
+        total_users = st.number_input("Total users considered (fixed)", min_value=2, value=11, step=1, disabled=True)
+    with b:
+        suppliers_to_select_best = st.number_input("Suppliers to select (K)", min_value=1, value=1, step=1, key="bgp_k")
+    with c:
+        min_utility_best = st.number_input("Minimum utility threshold", value=0.0, step=1.0, key="bgp_minutil")
+    with d:
+        price_per_match_best = st.number_input("Selling price (P)", min_value=0.0, value=100.0, step=5.0, key="bgp_price")
+
+    e1, e2, e3 = st.columns(3)
+    with e1:
+        n_candidates = st.slider("Number of candidate policies", min_value=10, max_value=300, value=80, step=10)
+    with e2:
+        seed = st.number_input("Random seed", min_value=0, value=42, step=1, key="bgp_seed")
+    with e3:
         penalty_max = st.number_input("Penalty max (child labor / banned chem)", min_value=0.0, value=100.0, step=10.0, key="bgp_penmax")
 
     include_current = st.checkbox("Include current policy from the Policy tab", value=True, key="bgp_inccur")
 
-    if not _HAS_MAXUTIL:
-        st.warning(
-            "MaxUtilAgent.py could not be imported. Sustainable policy search will be disabled until the module exists in your repo."
-        )
+    st.divider()
+    st.markdown("### World-goodness constraints (government)")
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        min_matches = st.number_input("Minimum matched users (M̲)", min_value=0, value=11, step=1, key="bgp_minm")
+        eps_tie = st.number_input("Tie-break ε (sustainability)", min_value=0.0, value=0.001, step=0.001, format="%.3f")
+    with f2:
+        use_env = st.checkbox("Constrain avg environmental risk", value=True)
+        env_avg_max = st.number_input("Max avg env risk (Env̄Avg)", value=3.0, step=0.1, disabled=not use_env)
+        use_soc = st.checkbox("Constrain avg social risk", value=True)
+        soc_avg_max = st.number_input("Max avg social risk (Soc̄Avg)", value=3.0, step=0.1, disabled=not use_soc)
+    with f3:
+        use_child = st.checkbox("Constrain child labor exposure", value=True)
+        child_max = st.number_input("Max total child labor (Child̄)", value=0.0, step=1.0, disabled=not use_child)
+        use_ban = st.checkbox("Constrain banned chemicals exposure", value=True)
+        ban_max = st.number_input("Max total banned chem (Ban̄)", value=0.0, step=1.0, disabled=not use_ban)
 
-    @st.cache_data(show_spinner=False)
-    def _evaluate_policy_batch(
-        excel_path_str: str,
-        cfg_profit: dict,
-        cfg_util: dict,
-        policy_dicts: list,
-    ) -> list:
-        suppliers_df, users_df = load_supplier_user_tables(Path(excel_path_str))
+    st.markdown("### World-goodness score weights (for ε tie-break only)")
+    w1, w2, w3, w4, w5 = st.columns(5)
+    with w1:
+        w_env = st.number_input("w_env", min_value=0.0, value=1.0, step=0.1)
+    with w2:
+        w_soc = st.number_input("w_social", min_value=0.0, value=1.0, step=0.1)
+    with w3:
+        w_child = st.number_input("w_child", min_value=0.0, value=10.0, step=1.0)
+    with w4:
+        w_ban = st.number_input("w_banned", min_value=0.0, value=10.0, step=1.0)
+    with w5:
+        w_lq = st.number_input("w_low_quality", min_value=0.0, value=1.0, step=0.1)
 
-        results = []
-        for pdict in policy_dicts:
-            pol = Policy()
-            for k, v in pdict.items():
-                setattr(pol, k, float(v))
-
-            row = {"policy": pdict}
-
-            # Growth eval (Max Profit)
-            try:
-                cfgp = MaxProfitConfig(
-                    last_n_users=int(cfg_profit["last_n_users"]),
-                    capacity=int(cfg_profit["capacity"]),
-                    suppliers_to_select=int(cfg_profit["suppliers_to_select"]),
-                    price_per_match=float(cfg_profit["price_per_match"]),
-                    min_utility=float(cfg_profit["min_utility"]),
-                    output_flag=0,
-                )
-                rp = MaxProfitAgent(suppliers_df, users_df, pol, cfgp).solve()
-                if int(rp.get("status", -1)) == 2:
-                    row["profit_obj"] = float(rp["objective_value"])
-                    row["profit_matched"] = int(rp["num_matched"])
-                    row["profit_suppliers"] = ", ".join(rp.get("chosen_suppliers", []))
-                else:
-                    row["profit_obj"] = None
-                    row["profit_matched"] = 0
-                    row["profit_suppliers"] = ""
-            except Exception:
-                row["profit_obj"] = None
-                row["profit_matched"] = 0
-                row["profit_suppliers"] = ""
-
-            # Sustainable eval (Max Utility)
-            if cfg_util.get("enabled", False):
-                try:
-                    cfgu = MaxUtilConfig(
-                        last_n_users=int(cfg_util["last_n_users"]),
-                        capacity=int(cfg_util["capacity"]),
-                        suppliers_to_select=int(cfg_util["suppliers_to_select"]),
-                        min_utility=float(cfg_util["min_utility"]),
-                        output_flag=0,
-                    )
-                    ru = MaxUtilAgent(suppliers_df, users_df, pol, cfgu).solve()
-                    if int(ru.get("status", -1)) == 2:
-                        row["util_obj"] = float(ru["objective_value"])
-                        row["util_matched"] = int(ru["num_matched"])
-                        row["util_suppliers"] = ", ".join(ru.get("chosen_suppliers", []))
-                    else:
-                        row["util_obj"] = None
-                        row["util_matched"] = 0
-                        row["util_suppliers"] = ""
-                except Exception:
-                    row["util_obj"] = None
-                    row["util_matched"] = 0
-                    row["util_suppliers"] = ""
-            else:
-                row["util_obj"] = None
-                row["util_matched"] = 0
-                row["util_suppliers"] = ""
-
-            results.append(row)
-
-        return results
-
-    def _make_candidate_policies(n: int, seed_: int, pen_max: float, include_current_: bool) -> list:
+    def make_candidate_policies(n: int, seed_: int, pen_max: float, include_current_: bool) -> list[dict]:
         rng = random.Random(int(seed_))
         mult_vals = [1, 2, 3, 4, 5]
 
-        # Two anchor presets (always included)
+        # anchors
         growth_anchor = {
-            "env_mult": 1,
-            "social_mult": 1,
-            "cost_mult": 5,
-            "strategic_mult": 5,
-            "improvement_mult": 3,
-            "low_quality_mult": 1,
-            "child_labor_penalty": 0,
-            "banned_chem_penalty": 0,
+            "env_mult": 1, "social_mult": 1, "cost_mult": 5,
+            "strategic_mult": 5, "improvement_mult": 3, "low_quality_mult": 1,
+            "child_labor_penalty": 0, "banned_chem_penalty": 0,
         }
         sustainable_anchor = {
-            "env_mult": 5,
-            "social_mult": 5,
-            "cost_mult": 1,
-            "strategic_mult": 2,
-            "improvement_mult": 3,
-            "low_quality_mult": 5,
-            "child_labor_penalty": float(pen_max),
-            "banned_chem_penalty": float(pen_max),
+            "env_mult": 5, "social_mult": 5, "cost_mult": 1,
+            "strategic_mult": 2, "improvement_mult": 3, "low_quality_mult": 5,
+            "child_labor_penalty": float(pen_max), "banned_chem_penalty": float(pen_max),
         }
 
         candidates = [growth_anchor, sustainable_anchor]
@@ -324,7 +307,7 @@ with tab_best_policy:
                 }
             )
 
-        # Random policies
+        # random
         for _ in range(max(0, int(n) - len(candidates))):
             candidates.append(
                 {
@@ -339,7 +322,7 @@ with tab_best_policy:
                 }
             )
 
-        # De-dup (stable)
+        # de-dup
         seen = set()
         uniq = []
         for d in candidates:
@@ -350,81 +333,197 @@ with tab_best_policy:
             uniq.append(d)
         return uniq
 
-    if st.button("Find best policies", type="primary", use_container_width=True, key="bgp_run"):
-        cfg_profit = {
-            "last_n_users": int(last_n_users),
-            "capacity": int(capacity),
-            "suppliers_to_select": int(suppliers_to_select),
-            "price_per_match": float(price_per_match),
-            "min_utility": float(min_utility),
-        }
-        cfg_util = {
-            "enabled": bool(_HAS_MAXUTIL),
-            "last_n_users": int(last_n_users),
-            "capacity": int(capacity),
-            "suppliers_to_select": int(suppliers_to_select),
-            "min_utility": float(min_utility),
+    def eval_policy(
+        suppliers_df: pd.DataFrame,
+        users_df: pd.DataFrame,
+        pdict: dict,
+        k: int,
+        price: float,
+        min_util: float,
+    ) -> dict:
+        pol = Policy()
+        for kk, vv in pdict.items():
+            setattr(pol, kk, float(vv))
+
+        cfg = MaxProfitConfig(
+            last_n_users=11,
+            capacity=11,
+            suppliers_to_select=int(k),
+            price_per_match=float(price),
+            min_utility=float(min_util),
+            output_flag=0,
+        )
+
+        res = MaxProfitAgent(suppliers_df, users_df, pol, cfg).solve()
+        matches = res["matches"].copy()
+
+        # exposures from chosen matches
+        if len(matches) > 0:
+            s = suppliers_df.set_index("supplier_id")
+            matches["env_risk"] = matches["supplier_id"].map(lambda sid: float(s.loc[str(sid), "env_risk"]))
+            matches["social_risk"] = matches["supplier_id"].map(lambda sid: float(s.loc[str(sid), "social_risk"]))
+            matches["child_labor"] = matches["supplier_id"].map(lambda sid: float(s.loc[str(sid), "child_labor"]))
+            matches["banned_chem"] = matches["supplier_id"].map(lambda sid: float(s.loc[str(sid), "banned_chem"]))
+            matches["low_quality"] = matches["supplier_id"].map(lambda sid: float(s.loc[str(sid), "low_quality"]))
+
+            env_tot = float(matches["env_risk"].sum())
+            soc_tot = float(matches["social_risk"].sum())
+            child_tot = float(matches["child_labor"].sum())
+            ban_tot = float(matches["banned_chem"].sum())
+            lq_tot = float(matches["low_quality"].sum())
+        else:
+            env_tot = soc_tot = child_tot = ban_tot = lq_tot = 0.0
+
+        m = int(res["num_matched"]) if res.get("num_matched") is not None else 0
+        env_avg = env_tot / m if m > 0 else 0.0
+        soc_avg = soc_tot / m if m > 0 else 0.0
+        lq_avg = lq_tot / m if m > 0 else 0.0
+
+        # world goodness score (higher better) — only for tie-break
+        goodness = -(
+            float(w_env) * env_avg
+            + float(w_soc) * soc_avg
+            + float(w_child) * child_tot
+            + float(w_ban) * ban_tot
+            + float(w_lq) * lq_avg
+        )
+
+        return {
+            "policy": pdict,
+            "profit_obj": float(res["objective_value"]),
+            "matched": m,
+            "chosen_suppliers": ", ".join(res.get("chosen_suppliers", [])),
+            "env_tot": env_tot,
+            "soc_tot": soc_tot,
+            "child_tot": child_tot,
+            "ban_tot": ban_tot,
+            "lq_tot": lq_tot,
+            "env_avg": env_avg,
+            "soc_avg": soc_avg,
+            "lq_avg": lq_avg,
+            "goodness": float(goodness),
+            "matches_df": matches,
         }
 
-        policy_dicts = _make_candidate_policies(int(n_candidates), int(seed), float(penalty_max), bool(include_current))
+    if st.button("Solve Government MILP", type="primary", use_container_width=True):
+        suppliers_df, users_df = load_supplier_user_tables(excel_path)
 
-        with st.spinner("Evaluating candidate policies..."):
-            rows = _evaluate_policy_batch(str(excel_path), cfg_profit, cfg_util, policy_dicts)
+        policy_dicts = make_candidate_policies(int(n_candidates), int(seed), float(penalty_max), bool(include_current))
+
+        rows = []
+        with st.spinner("Evaluating candidates (inner retailer MILP per policy)..."):
+            for pdict in policy_dicts:
+                rows.append(
+                    eval_policy(
+                        suppliers_df,
+                        users_df,
+                        pdict,
+                        k=int(suppliers_to_select_best),
+                        price=float(price_per_match_best),
+                        min_util=float(min_utility_best),
+                    )
+                )
 
         df = pd.DataFrame(
             [
                 {
                     **r["policy"],
                     "profit_obj": r["profit_obj"],
-                    "profit_matched": r["profit_matched"],
-                    "profit_suppliers": r["profit_suppliers"],
-                    "util_obj": r["util_obj"],
-                    "util_matched": r["util_matched"],
-                    "util_suppliers": r["util_suppliers"],
+                    "matched": r["matched"],
+                    "chosen_suppliers": r["chosen_suppliers"],
+                    "env_avg": r["env_avg"],
+                    "soc_avg": r["soc_avg"],
+                    "lq_avg": r["lq_avg"],
+                    "child_tot": r["child_tot"],
+                    "ban_tot": r["ban_tot"],
+                    "goodness": r["goodness"],
                 }
                 for r in rows
             ]
         )
 
-        # Best growth
-        df_growth = df.dropna(subset=["profit_obj"]).sort_values(["profit_obj", "profit_matched"], ascending=[False, False])
-        # Best sustainable
-        df_sus = df.dropna(subset=["util_obj"]).sort_values(["util_obj", "util_matched"], ascending=[False, False])
+        # Unconstrained best (pure maximize retailer utility)
+        df_growth = df.sort_values(["profit_obj", "matched"], ascending=[False, False]).reset_index(drop=True)
+        best_growth_idx = int(df_growth.index[0]) if len(df_growth) else None
+        best_growth = rows[df_growth.index[0]] if len(df_growth) else None
 
-        st.markdown("#### Results")
-        gcol, scol = st.columns(2)
+        # Government MILP selection among candidates
+        m = gp.Model("GovernmentPolicyMILP")
+        m.Params.OutputFlag = 0
 
-        with gcol:
-            st.markdown("##### Best Growth Policy")
-            if len(df_growth) == 0:
-                st.error("No feasible/optimal solutions found for growth objective in the candidate set.")
+        J = list(range(len(rows)))
+        x = m.addVars(J, vtype=GRB.BINARY, name="x")
+
+        # choose exactly one
+        m.addConstr(gp.quicksum(x[j] for j in J) == 1, name="choose_one")
+
+        # minimum matches
+        if int(min_matches) > 0:
+            m.addConstr(gp.quicksum(rows[j]["matched"] * x[j] for j in J) >= int(min_matches), name="min_matches")
+
+        # avg constraints: total <= max_avg * matches
+        if use_env:
+            m.addConstr(
+                gp.quicksum(rows[j]["env_tot"] * x[j] for j in J)
+                <= float(env_avg_max) * gp.quicksum(rows[j]["matched"] * x[j] for j in J),
+                name="env_avg",
+            )
+        if use_soc:
+            m.addConstr(
+                gp.quicksum(rows[j]["soc_tot"] * x[j] for j in J)
+                <= float(soc_avg_max) * gp.quicksum(rows[j]["matched"] * x[j] for j in J),
+                name="soc_avg",
+            )
+
+        if use_child:
+            m.addConstr(gp.quicksum(rows[j]["child_tot"] * x[j] for j in J) <= float(child_max), name="child_tot")
+        if use_ban:
+            m.addConstr(gp.quicksum(rows[j]["ban_tot"] * x[j] for j in J) <= float(ban_max), name="ban_tot")
+
+        # Objective: maximize retailer utility + epsilon * goodness (tie-break)
+        m.setObjective(
+            gp.quicksum(rows[j]["profit_obj"] * x[j] for j in J) + float(eps_tie) * gp.quicksum(rows[j]["goodness"] * x[j] for j in J),
+            GRB.MAXIMIZE,
+        )
+
+        m.optimize()
+
+        if m.Status != GRB.OPTIMAL:
+            st.error("Government MILP found no feasible policy under the chosen world constraints. Relax constraints or increase candidates.")
+            st.dataframe(df_growth.head(25), use_container_width=True, hide_index=True)
+            st.stop()
+
+        chosen_j = max(J, key=lambda j: x[j].X)
+        best_gov = rows[chosen_j]
+
+        # ---- Display
+        st.markdown("### Results")
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Maximize retailer utility (no world constraints)")
+            if best_growth is None:
+                st.error("No candidates evaluated.")
             else:
-                best_g = df_growth.iloc[0]
-                st.metric("Max Profit objective", f"{best_g['profit_obj']:.3f}")
-                st.write("Chosen suppliers:", best_g.get("profit_suppliers", "") or "None")
-                st.write("Matched users:", int(best_g.get("profit_matched", 0)))
-                st.json({k: best_g[k] for k in [
-                    "env_mult","social_mult","cost_mult","strategic_mult","improvement_mult","low_quality_mult","child_labor_penalty","banned_chem_penalty"
-                ]})
+                st.metric("Retailer utility (objective)", f"{best_growth['profit_obj']:.3f}")
+                st.write("Matched users:", best_growth["matched"])
+                st.write("Chosen suppliers:", best_growth["chosen_suppliers"] or "None")
+                st.write("Env avg:", f"{best_growth['env_avg']:.3f}", "| Social avg:", f"{best_growth['soc_avg']:.3f}")
+                st.write("Child total:", f"{best_growth['child_tot']:.3f}", "| Banned total:", f"{best_growth['ban_tot']:.3f}")
+                st.write("Policy:")
+                st.json(best_growth["policy"])
+                st.dataframe(best_growth["matches_df"], use_container_width=True, hide_index=True)
 
-        with scol:
-            st.markdown("##### Best Sustainable Policy")
-            if not _HAS_MAXUTIL:
-                st.error("MaxUtilAgent module is missing, so sustainable policy cannot be computed.")
-            elif len(df_sus) == 0:
-                st.error("No feasible/optimal solutions found for sustainable objective in the candidate set.")
-            else:
-                best_s = df_sus.iloc[0]
-                st.metric("Max Utility objective", f"{best_s['util_obj']:.3f}")
-                st.write("Chosen suppliers:", best_s.get("util_suppliers", "") or "None")
-                st.write("Matched users:", int(best_s.get("util_matched", 0)))
-                st.json({k: best_s[k] for k in [
-                    "env_mult","social_mult","cost_mult","strategic_mult","improvement_mult","low_quality_mult","child_labor_penalty","banned_chem_penalty"
-                ]})
+        with right:
+            st.markdown("#### Government MILP: maximize retailer utility + enforce world goodness")
+            st.metric("Retailer utility (objective)", f"{best_gov['profit_obj']:.3f}")
+            st.write("Matched users:", best_gov["matched"])
+            st.write("Chosen suppliers:", best_gov["chosen_suppliers"] or "None")
+            st.write("Env avg:", f"{best_gov['env_avg']:.3f}", "| Social avg:", f"{best_gov['soc_avg']:.3f}")
+            st.write("Child total:", f"{best_gov['child_tot']:.3f}", "| Banned total:", f"{best_gov['ban_tot']:.3f}")
+            st.write("Policy:")
+            st.json(best_gov["policy"])
+            st.dataframe(best_gov["matches_df"], use_container_width=True, hide_index=True)
 
-        st.markdown("##### Top candidates (growth)")
-        st.dataframe(df_growth.head(10), use_container_width=True, hide_index=True)
-
-        if _HAS_MAXUTIL:
-            st.markdown("##### Top candidates (sustainable)")
-            st.dataframe(df_sus.head(10), use_container_width=True, hide_index=True)
+        st.markdown("### Evaluated candidates (top by retailer utility)")
+        st.dataframe(df_growth.head(50), use_container_width=True, hide_index=True)
