@@ -23,6 +23,18 @@ except Exception:
     GRB = None  # type: ignore
     _HAS_GUROBI = False
 
+# -----------------------------
+# Fixed world-goodness weights (used only for ε tie-break)
+# -----------------------------
+WORLD_GOODNESS_WEIGHTS = {
+    "w_env": 1.0,
+    "w_soc": 1.0,
+    "w_child": 10.0,
+    "w_ban": 10.0,
+    "w_lq": 1.0,
+}
+
+
 
 def render_best_governmental_policy() -> None:
     """
@@ -51,36 +63,7 @@ def render_best_governmental_policy() -> None:
         st.error("gurobipy is not available in this environment. Add `gurobipy` to requirements.txt.")
         st.stop()
 
-    st.markdown(
-        r"""
-**Government MILP (policy selection):**
-
-- Decision: choose exactly one policy from a candidate set \( \mathcal{P} \)
-- \(x_p \in \{0,1\}\) indicates which policy is chosen.
-
-\[
-\max \sum_{p\in\mathcal{P}} U_p x_p \;+\; \epsilon \sum_{p\in\mathcal{P}} G_p x_p
-\]
-\[
-\sum_{p} x_p = 1,\quad x_p \in \{0,1\}
-\]
-\[
-\sum_p EnvTot_p x_p \le \overline{EnvAvg}\sum_p Match_p x_p
-\]
-\[
-\sum_p SocTot_p x_p \le \overline{SocAvg}\sum_p Match_p x_p
-\]
-\[
-\sum_p ChildTot_p x_p \le \overline{Child},\quad
-\sum_p BanTot_p x_p \le \overline{Ban}
-\]
-\[
-\sum_p Match_p x_p \ge \underline{M}
-\]
-
-Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved under policy \(p\).
-"""
-    )
+   
 
     st.divider()
 
@@ -114,31 +97,18 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
 
     f1, f2, f3 = st.columns(3)
     with f1:
-        min_matches = st.number_input("Minimum matched users (M̲)", min_value=0, value=11, step=1, key="bgp_minm")
+        min_matches = st.number_input("Minimum matched users ", min_value=0, value=11, step=1, key="bgp_minm")
         eps_tie = st.number_input("Tie-break ε (sustainability)", min_value=0.0, value=0.001, step=0.001, format="%.3f", key="bgp_eps")
     with f2:
         use_env = st.checkbox("Constrain avg environmental risk", value=True, key="bgp_use_env")
-        env_avg_max = st.number_input("Max avg env risk (Env̄Avg)", value=3.0, step=0.1, disabled=not use_env, key="bgp_envavg")
+        env_avg_max = st.number_input("Max avg env risk (EnvAvg)", value=3.0, step=0.1, disabled=not use_env, key="bgp_envavg")
         use_soc = st.checkbox("Constrain avg social risk", value=True, key="bgp_use_soc")
-        soc_avg_max = st.number_input("Max avg social risk (Soc̄Avg)", value=3.0, step=0.1, disabled=not use_soc, key="bgp_socavg")
+        soc_avg_max = st.number_input("Max avg social risk (SocAvg)", value=3.0, step=0.1, disabled=not use_soc, key="bgp_socavg")
     with f3:
         use_child = st.checkbox("Constrain child labor exposure", value=True, key="bgp_use_child")
-        child_max = st.number_input("Max total child labor (Child̄)", value=0.0, step=1.0, disabled=not use_child, key="bgp_childmax")
+        child_max = st.number_input("Max total child labor (Child)", value=0.0, step=1.0, disabled=not use_child, key="bgp_childmax")
         use_ban = st.checkbox("Constrain banned chemicals exposure", value=True, key="bgp_use_ban")
-        ban_max = st.number_input("Max total banned chem (Ban̄)", value=0.0, step=0.1, disabled=not use_ban, key="bgp_banmax")
-
-    st.markdown("### World-goodness score weights (for ε tie-break only)")
-    w1, w2, w3, w4, w5 = st.columns(5)
-    with w1:
-        w_env = st.number_input("w_env", min_value=0.0, value=1.0, step=0.1, key="bgp_w_env")
-    with w2:
-        w_soc = st.number_input("w_social", min_value=0.0, value=1.0, step=0.1, key="bgp_w_soc")
-    with w3:
-        w_child = st.number_input("w_child", min_value=0.0, value=10.0, step=1.0, key="bgp_w_child")
-    with w4:
-        w_ban = st.number_input("w_banned", min_value=0.0, value=10.0, step=1.0, key="bgp_w_ban")
-    with w5:
-        w_lq = st.number_input("w_low_quality", min_value=0.0, value=1.0, step=0.1, key="bgp_w_lq")
+        ban_max = st.number_input("Max total banned chem (Ban)", value=0.0, step=0.1, disabled=not use_ban, key="bgp_banmax")
 
     # -----------------------------
     # Helpers (kept local)
@@ -321,13 +291,7 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
         try:
             suppliers_df, users_df = load_supplier_user_tables(excel_path)
 
-            weights = {
-                "w_env": float(w_env),
-                "w_soc": float(w_soc),
-                "w_child": float(w_child),
-                "w_ban": float(w_ban),
-                "w_lq": float(w_lq),
-            }
+            weights = WORLD_GOODNESS_WEIGHTS
 
             policy_dicts = make_candidate_policies(int(n_candidates), int(seed), float(penalty_max), bool(include_current))
 
@@ -492,13 +456,7 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
                 if st.button("Evaluate current policy now", key="bgp_eval_current"):
                     try:
                         suppliers_df, users_df = load_supplier_user_tables(excel_path)
-                        weights = {
-                            "w_env": float(w_env),
-                            "w_soc": float(w_soc),
-                            "w_child": float(w_child),
-                            "w_ban": float(w_ban),
-                            "w_lq": float(w_lq),
-                        }
+                        weights = WORLD_GOODNESS_WEIGHTS
                         cur_dict = _policy_obj_to_dict(st.session_state.policy)
                         cur_res = eval_policy(
                             suppliers_df,
@@ -537,13 +495,7 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
             if st.button("Evaluate custom policy", key="bgp_eval_custom"):
                 try:
                     suppliers_df, users_df = load_supplier_user_tables(excel_path)
-                    weights = {
-                        "w_env": float(w_env),
-                        "w_soc": float(w_soc),
-                        "w_child": float(w_child),
-                        "w_ban": float(w_ban),
-                        "w_lq": float(w_lq),
-                    }
+                    weights = WORLD_GOODNESS_WEIGHTS
                     custom_dict = {
                         "env_mult": float(env_mult_m),
                         "social_mult": float(social_mult_m),

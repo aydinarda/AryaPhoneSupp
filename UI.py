@@ -24,6 +24,18 @@ except Exception:
     GRB = None  # type: ignore
     _HAS_GUROBI = False
 
+# -----------------------------
+# Fixed world-goodness weights (used only for ε tie-break)
+# -----------------------------
+WORLD_GOODNESS_WEIGHTS = {
+    "w_env": 1.0,
+    "w_soc": 1.0,
+    "w_child": 10.0,
+    "w_ban": 10.0,
+    "w_lq": 1.0,
+}
+
+
 
 st.set_page_config(page_title="Arya Case", layout="wide")
 
@@ -261,19 +273,6 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
         use_ban = st.checkbox("Constrain banned chemicals exposure", value=True)
         ban_max = st.number_input("Max total banned chem (Ban̄)", value=0.0, step=1.0, disabled=not use_ban)
 
-    st.markdown("### World-goodness score weights (for ε tie-break only)")
-    w1, w2, w3, w4, w5 = st.columns(5)
-    with w1:
-        w_env = st.number_input("w_env", min_value=0.0, value=1.0, step=0.1)
-    with w2:
-        w_soc = st.number_input("w_social", min_value=0.0, value=1.0, step=0.1)
-    with w3:
-        w_child = st.number_input("w_child", min_value=0.0, value=10.0, step=1.0)
-    with w4:
-        w_ban = st.number_input("w_banned", min_value=0.0, value=10.0, step=1.0)
-    with w5:
-        w_lq = st.number_input("w_low_quality", min_value=0.0, value=1.0, step=0.1)
-
     def make_candidate_policies(n: int, seed_: int, pen_max: float, include_current_: bool) -> list[dict]:
         rng = random.Random(int(seed_))
         mult_vals = [1, 2, 3, 4, 5]
@@ -381,11 +380,11 @@ Where \(U_p\) comes from the **inner retailer MILP** (MaxProfitAgent) solved und
 
         # world goodness score (higher better) — only for tie-break
         goodness = -(
-            float(w_env) * env_avg
-            + float(w_soc) * soc_avg
-            + float(w_child) * child_tot
-            + float(w_ban) * ban_tot
-            + float(w_lq) * lq_avg
+            float(WORLD_GOODNESS_WEIGHTS["w_env"]) * env_avg
+            + float(WORLD_GOODNESS_WEIGHTS["w_soc"]) * soc_avg
+            + float(WORLD_GOODNESS_WEIGHTS["w_child"]) * child_tot
+            + float(WORLD_GOODNESS_WEIGHTS["w_ban"]) * ban_tot
+            + float(WORLD_GOODNESS_WEIGHTS["w_lq"]) * lq_avg
         )
 
         return {
