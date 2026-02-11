@@ -160,10 +160,31 @@ def render_best_governmental_policy() -> None:
     rows: List[Dict[str, Any]] = st.session_state["bgp_rows"]
     df: pd.DataFrame = st.session_state["bgp_df"]
 
+    # Keep only feasible retailer solutions for recommendation / plots.
+    df_feas = df[df.get("feasible", 1) == 1].copy()
+    infeas_count = int(len(df) - len(df_feas))
+
+    if len(df_feas) == 0:
+        st.error(
+            "No feasible retailer solution was found for any policy option under the current scenario settings. "
+            "Try lowering the minimum utility threshold or changing K."
+        )
+        st.dataframe(
+            df[["__id", "feasible", "error"]].copy(),
+            use_container_width=True,
+            hide_index=True,
+        )
+        return
+
+    if infeas_count > 0:
+        st.warning(f"{infeas_count} policy option(s) were infeasible for the retailer and were excluded from selection.")
+
+
+
     # -----------------------------
     # Derive hidden regulation targets from the slider (no student knobs)
     # -----------------------------
-    limits = _limits_from_priority(df, alpha=alpha)
+    limits = _limits_from_priority(df_feas, alpha=alpha)
 
     # -----------------------------
     # Pick the three headline policies
@@ -171,10 +192,10 @@ def render_best_governmental_policy() -> None:
     #   - Best Sustainable: max goodness (prefer full matching if possible)
     #   - Recommended: government MILP (hard; if infeasible -> backup)
     # -----------------------------
-    best_growth_id = int(df.sort_values(["profit_obj", "matched"], ascending=[False, False]).iloc[0]["__id"])
-    best_sust_id = _best_sustainable_id(df)
+    best_growth_id = int(df_feas.sort_values(["profit_obj", "matched"], ascending=[False, False]).iloc[0]["__id"])
+    best_sust_id = _best_sustainable_id(df_feas)
 
-    recommended_id, used_backup, slack_info = _solve_government_selection_milp(df, limits)
+    recommended_id, used_backup, slack_info = _solve_government_selection_milp(df_feas, limits)
 
     # -----------------------------
     # Headline cards (Design 1)
@@ -211,7 +232,7 @@ def render_best_governmental_policy() -> None:
     st.caption("Each point is a policy option. X-axis: retailer utility. Y-axis: world goodness.")
 
     _render_pareto_plot(
-        df,
+        df_feas,
         highlight_ids=[best_growth_id, recommended_id, best_sust_id],
         labels={best_growth_id: "Growth", recommended_id: "Recommended", best_sust_id: "Sustainable"},
     )
@@ -222,7 +243,7 @@ def render_best_governmental_policy() -> None:
         r = rows[opt_id]
         return f"#{opt_id} | U={r['profit_obj']:.2f} | G={r['goodness']:.2f} | matched={r['matched']} | env_avg={r['env_avg']:.2f} | soc_avg={r['soc_avg']:.2f}"
 
-    candidate_ids = list(df.sort_values(["profit_obj"], ascending=False)["__id"].astype(int).tolist())
+    candidate_ids = list(df_feas.sort_values(["profit_obj"], ascending=False)["__id"].astype(int).tolist())
     default_pick = recommended_id
     picked_id = st.selectbox(
         "Policy option",
@@ -362,6 +383,11 @@ def _require_columns(df: pd.DataFrame, cols: List[str], df_name: str) -> None:
 
 
 def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict[str, float], scenario: ScenarioSettings) -> Dict[str, Any]:
+    """Evaluate one policy option by solving the retailer (inner) MILP.
+
+    IMPORTANT: The retailer MILP can be infeasible for some policy+scenario settings.
+    We must never crash the whole Streamlit app when that happens.
+    """
     pol = _policy_dict_to_obj(pdict)
 
     cfg = MaxProfitConfig(
@@ -373,28 +399,51 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         output_flag=0,
     )
 
-    res = MaxProfitAgent(suppliers_df, users_df, pol, cfg).solve()
-    matches = res["matches"].copy()
+    # Try solve; if infeasible/failed, return a marked row (so the rest of the page can continue).
+    feasible = True
+    error_msg = ""
+    try:
+        res = MaxProfitAgent(suppliers_df, users_df, pol, cfg).solve()
+        matches = res["matches"].copy()
+    except Exception as e:
+        feasible = False
+        error_msg = str(e)
+        res = {
+            "objective_value": -1.0e12,
+            "num_matched": 0,
+            "chosen_suppliers": [],
+            "matches": pd.DataFrame(columns=["supplier_id"]),
+        }
+        matches = res["matches"].copy()
 
-    _require_columns(
-        suppliers_df,
-        ["supplier_id", "env_risk", "social_risk", "child_labor", "banned_chem", "low_quality"],
-        "suppliers_df",
-    )
-    _require_columns(matches, ["supplier_id"], "matches")
+    # If data is malformed, show it as an option-level error instead of crashing the app.
+    try:
+        _require_columns(
+            suppliers_df,
+            ["supplier_id", "env_risk", "social_risk", "child_labor", "banned_chem", "low_quality"],
+            "suppliers_df",
+        )
+    except Exception as e:
+        feasible = False
+        error_msg = error_msg or str(e)
 
     sup = suppliers_df.copy()
-    sup["supplier_id"] = sup["supplier_id"].astype(str)
-    sup = sup.set_index("supplier_id")
+    if "supplier_id" in sup.columns:
+        sup["supplier_id"] = sup["supplier_id"].astype(str)
+        sup = sup.set_index("supplier_id")
 
-    matches["supplier_id"] = matches["supplier_id"].astype(str)
+    if "supplier_id" in matches.columns:
+        matches["supplier_id"] = matches["supplier_id"].astype(str)
 
-    if len(matches) > 0:
-        env_map = sup["env_risk"].astype(float).to_dict()
-        soc_map = sup["social_risk"].astype(float).to_dict()
-        child_map = sup["child_labor"].astype(float).to_dict()
-        ban_map = sup["banned_chem"].astype(float).to_dict()
-        lq_map = sup["low_quality"].astype(float).to_dict()
+    # Default metrics for failed / empty solution
+    env_tot = soc_tot = child_tot = ban_tot = lq_tot = 0.0
+
+    if feasible and len(matches) > 0 and "supplier_id" in matches.columns and "env_risk" in sup.columns:
+        env_map = sup.get("env_risk", pd.Series(dtype=float)).astype(float).to_dict()
+        soc_map = sup.get("social_risk", pd.Series(dtype=float)).astype(float).to_dict()
+        child_map = sup.get("child_labor", pd.Series(dtype=float)).astype(float).to_dict()
+        ban_map = sup.get("banned_chem", pd.Series(dtype=float)).astype(float).to_dict()
+        lq_map = sup.get("low_quality", pd.Series(dtype=float)).astype(float).to_dict()
 
         matches["env_risk"] = matches["supplier_id"].map(env_map).fillna(0.0)
         matches["social_risk"] = matches["supplier_id"].map(soc_map).fillna(0.0)
@@ -407,8 +456,6 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         child_tot = float(matches["child_labor"].sum())
         ban_tot = float(matches["banned_chem"].sum())
         lq_tot = float(matches["low_quality"].sum())
-    else:
-        env_tot = soc_tot = child_tot = ban_tot = lq_tot = 0.0
 
     m = int(res.get("num_matched", 0) or 0)
     env_avg = env_tot / m if m > 0 else 0.0
@@ -425,11 +472,17 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         + w["w_lq"] * lq_avg
     )
 
+    if not feasible:
+        # Make failed options dominated in both axes so they are never picked as "best".
+        goodness = -1.0e12
+
     return {
         "policy": pdict,
-        "profit_obj": float(res["objective_value"]),
+        "feasible": bool(feasible),
+        "error": error_msg,
+        "profit_obj": float(res.get("objective_value", -1.0e12)),
         "matched": int(m),
-        "chosen_suppliers": ", ".join(res.get("chosen_suppliers", [])),
+        "chosen_suppliers": ", ".join(res.get("chosen_suppliers", [])) if feasible else "",
         "env_tot": env_tot,
         "soc_tot": soc_tot,
         "child_tot": child_tot,
@@ -446,7 +499,9 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
 def _rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     out = []
     for j, r in enumerate(rows):
-        d = {"__id": j}
+        d: Dict[str, Any] = {"__id": j}
+        d["feasible"] = int(bool(r.get("feasible", True)))
+        d["error"] = r.get("error", "") or ""
         d.update({k: float(v) for k, v in r["policy"].items()})
         for k in ["profit_obj", "matched", "env_avg", "soc_avg", "lq_avg", "child_tot", "ban_tot", "goodness"]:
             d[k] = float(r[k]) if k != "matched" else int(r[k])
