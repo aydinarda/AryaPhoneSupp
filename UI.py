@@ -55,7 +55,7 @@ if "policy" not in st.session_state:
     st.session_state.policy = Policy()
 
 tab_policy, tab_profit, tab_mincost, tab_best_policy = st.tabs(
-    ["Policy", "Max Profit Agent", "Min Cost Agent", "Best governmental policy"]
+    ["Policy", "Min Cost Agent", "Max Profit Agent", "Best governmental policy"]
 )
 
 # -----------------------------
