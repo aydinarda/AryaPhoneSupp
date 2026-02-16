@@ -245,10 +245,7 @@ class MaxProfitAgent:
             + max_u["w_improvement"] * max_s["improvement"]
             + max_u["w_low_quality"] * max_s["low_quality"]
         )
-        pen_max = float(
-            (p.child_labor_penalty * s["child_labor"] + p.banned_chem_penalty * s["banned_chem"]).max()
-        )
-        return float(pref_max + pen_max + 10.0)
+        return float(pref_max + 10.0)
 
     def build(self, name: str = "MaxProfitAgent") -> "gp.Model":
         cfg = self.cfg
@@ -282,6 +279,16 @@ class MaxProfitAgent:
         y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
         z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
 
+        # Hard bans (policy toggles): if flag==1, suppliers with the forbidden attribute cannot be selected/matched.
+        if float(pol.child_labor_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_child[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
+        if float(pol.banned_chem_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_banned[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
+
         m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
 
         for u in Users:
@@ -303,18 +310,13 @@ class MaxProfitAgent:
                     + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
                     + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
                 )
-                policy_penalty = (pol.child_labor_penalty * s_child[i]) + (pol.banned_chem_penalty * s_banned[i])
-                utility = user_pref - policy_penalty
+                utility = user_pref
                 m.addConstr(utility >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"utility[{i},{u}]")
 
+        # Profit = (matched_people * unit_price) - (cost_multiplier * cost)
         cost_prod = {i: float(pol.cost_mult * s_cost[i]) for i in Suppliers}
-        tariff_i = {
-            i: float(pol.child_labor_penalty * s_child[i] + pol.banned_chem_penalty * s_banned[i]) for i in Suppliers
-        }
-        margin_i = {i: float(cfg.price_per_match - cost_prod[i] - tariff_i[i]) for i in Suppliers}
-
-        Z_margin = gp.quicksum(margin_i[i] * z[i, u] for i in Suppliers for u in Users)
-        m.setObjective(Z_margin, GRB.MAXIMIZE)
+        Z_profit = gp.quicksum((float(cfg.price_per_match) - cost_prod[i]) * z[i, u] for i in Suppliers for u in Users)
+        m.setObjective(Z_profit, GRB.MAXIMIZE)
 
         self.model, self.y, self.z = m, y, z
         return m
@@ -341,11 +343,9 @@ class MaxProfitAgent:
         u = self.users.set_index("user_id")
 
         if len(df):
-            df["tariff"] = df["supplier_id"].map(
-                lambda sid: float(pol.child_labor_penalty * s.loc[sid, "child_labor"] + pol.banned_chem_penalty * s.loc[sid, "banned_chem"])
-            )
+            df["tariff"] = 0.0
             df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
-            df["margin"] = float(self.cfg.price_per_match) - df["cost_prod"] - df["tariff"]
+            df["margin"] = float(self.cfg.price_per_match) - df["cost_prod"]
 
             def _utility(row: pd.Series) -> float:
                 sid = row["supplier_id"]
@@ -358,8 +358,7 @@ class MaxProfitAgent:
                     + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
                     + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
                 )
-                penalty = float(pol.child_labor_penalty * s.loc[sid, "child_labor"] + pol.banned_chem_penalty * s.loc[sid, "banned_chem"])
-                return float(user_pref - penalty)
+                return float(user_pref)
 
             df["utility"] = df.apply(_utility, axis=1)
             df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
@@ -418,8 +417,11 @@ class MinCostAgent:
     Objective:
       minimize total effective cost:
         sum_{i,u} ( cost_mult*cost_score[i]
-                    + child_labor_penalty*child_labor[i]
-                    + banned_chem_penalty*banned_chem[i] ) * z[i,u]
+                  ) * z[i,u]
+
+    Hard bans (policy toggles):
+      - If child_labor_penalty == 1 => suppliers with child_labor==1 cannot be selected/matched
+      - If banned_chem_penalty == 1 => suppliers with banned_chem==1 cannot be selected/matched
 
     Constraints:
       - EXACTLY K suppliers selected: sum_i y[i] == K
@@ -494,10 +496,7 @@ class MinCostAgent:
             + max_u["w_improvement"] * max_s["improvement"]
             + max_u["w_low_quality"] * max_s["low_quality"]
         )
-        pen_max = float(
-            (p.child_labor_penalty * s["child_labor"] + p.banned_chem_penalty * s["banned_chem"]).max()
-        )
-        return float(pref_max + pen_max + 10.0)
+        return float(pref_max + 10.0)
 
     def build(self, name: str = "MinCostAgent") -> "gp.Model":
         cfg = self.cfg
@@ -531,6 +530,16 @@ class MinCostAgent:
         y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
         z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
 
+        # Hard bans (policy toggles): if flag==1, suppliers with the forbidden attribute cannot be selected/matched.
+        if float(pol.child_labor_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_child[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
+        if float(pol.banned_chem_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_banned[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
+
         m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
 
         for u in Users:
@@ -560,16 +569,12 @@ class MinCostAgent:
                     + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
                     + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
                 )
-                policy_penalty = (pol.child_labor_penalty * s_child[i]) + (pol.banned_chem_penalty * s_banned[i])
-                utility = user_pref - policy_penalty
+                utility = user_pref
                 m.addConstr(utility >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"utility[{i},{u}]")
 
         cost_prod = {i: float(pol.cost_mult * s_cost[i]) for i in Suppliers}
-        tariff_i = {
-            i: float(pol.child_labor_penalty * s_child[i] + pol.banned_chem_penalty * s_banned[i]) for i in Suppliers
-        }
 
-        m.setObjective( gp.quicksum((cost_prod[i] + tariff_i[i]) * z[i, u] for i in Suppliers for u in Users), GRB.MINIMIZE)
+        m.setObjective(gp.quicksum(cost_prod[i] * z[i, u] for i in Suppliers for u in Users), GRB.MINIMIZE)
 
         self.model, self.y, self.z = m, y, z
         return m
@@ -596,14 +601,9 @@ class MinCostAgent:
         u = self.users.set_index("user_id")
 
         if len(df):
-            df["tariff"] = df["supplier_id"].map(
-                lambda sid: float(
-                    pol.child_labor_penalty * s.loc[sid, "child_labor"]
-                    + pol.banned_chem_penalty * s.loc[sid, "banned_chem"]
-                )
-            )
+            df["tariff"] = 0.0
             df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
-            df["total_cost"] = df["cost_prod"] + df["tariff"]
+            df["total_cost"] = df["cost_prod"]
 
             def _utility(row: pd.Series) -> float:
                 sid = row["supplier_id"]
@@ -616,11 +616,7 @@ class MinCostAgent:
                     + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
                     + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
                 )
-                penalty = float(
-                    pol.child_labor_penalty * s.loc[sid, "child_labor"]
-                    + pol.banned_chem_penalty * s.loc[sid, "banned_chem"]
-                )
-                return float(user_pref - penalty)
+                return float(user_pref)
 
             df["utility"] = df.apply(_utility, axis=1)
             df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
