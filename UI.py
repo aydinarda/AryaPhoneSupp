@@ -34,7 +34,7 @@ tab_policy, tab_profit, tab_mincost, tab_best_policy = st.tabs(["Policy", "Max P
 with tab_policy:
     p = st.session_state.policy
 
-    LEVELS = {"Low": 1.0, "Mid": 5.0, "High": 10.0}
+    LEVELS = {"Low": 1.0, "Mid": 3.0, "High": 5.0}
     _LEVEL_OPTIONS = ["Low", "Mid", "High"]
 
     def _level_from_value(v) -> str:
