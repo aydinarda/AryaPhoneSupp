@@ -231,8 +231,5 @@ with tab_mincost:
 # Best governmental policy (imported)
 # -------------------------------
 with tab_best_policy:
-    try:
-        from BestGovPol import render_best_governmental_policy
-        render_best_governmental_policy()
-    except Exception as e:
-        st.error(str(e))
+    from BestGovPol import render_best_governmental_policy
+    render_best_governmental_policy()
