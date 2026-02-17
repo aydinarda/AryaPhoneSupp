@@ -50,7 +50,7 @@ PENALTY_LEVELS = [0, 1]
 # When using a pre-generated pool, we sample a fixed number of candidates for speed.
 POOL_FILENAME = "policy_pool.xlsx"
 POOL_SHEET = "policies"  # falls back to first sheet if missing
-POOL_SAMPLE_N = 10000  # hidden; keep runtime reasonable
+POOL_SAMPLE_N = 1000  # hidden; keep runtime reasonable
 
 # Map multiplier levels to regulation strictness (used INSIDE the retailer MILP)
 # Higher strictness => lower allowed average risk.
