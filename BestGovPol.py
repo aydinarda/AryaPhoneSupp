@@ -249,31 +249,23 @@ def render_best_governmental_policy() -> None:
     # Trade-off plots
     # -----------------------------
     st.divider()
-    st.markdown("### Trade-off maps (Policy options)")
-    st.caption("Each point is a policy option. Compare different objectives under different regulations.")
-
-    # Plot 1: Profit vs Goodness
-    _render_scatter(
-        df_feas,
-        x_col="profit",
-        y_col="goodness",
-        x_label="Profit (matches·price − cost_mult·cost)",
-        y_label="World goodness (higher is better)",
-        highlight_ids=[best_growth_id, recommended_id, best_sust_id],
-        labels={best_growth_id: "Growth", recommended_id: "Recommended", best_sust_id: "Sustainable"},
+    st.markdown("### Utility–Profit trade-off (Policy options)")
+    st.caption(
+        "Each point is a policy option. Higher is better on both axes. "
+        "The outlined points show the (approx.) Pareto frontier in this 2D view."
     )
 
-    # Plot 2: Utility vs Profit (what you asked for)
-    with st.expander("Show Utility vs Profit (trade-off)", expanded=False):
-        _render_scatter(
-            df_feas,
-            x_col="utility_sum",
-            y_col="profit",
-            x_label="Total utility (sum over matches)",
-            y_label="Profit",
-            highlight_ids=[best_growth_id, recommended_id, best_sust_id],
-            labels={best_growth_id: "Growth", recommended_id: "Recommended", best_sust_id: "Sustainable"},
-        )
+    _render_scatter(
+        df_feas,
+        x_col="utility_sum",
+        y_col="profit",
+        x_label="Total utility (sum over matches)",
+        y_label="Profit (matches·price − cost_mult·cost)",
+        highlight_ids=[best_growth_id, recommended_id, best_sust_id],
+        labels={best_growth_id: "Growth", recommended_id: "Recommended", best_sust_id: "Sustainable"},
+        show_pareto=True,
+    )
+
 
     # Exploration widget
     st.markdown("### Explore a policy option")
@@ -985,14 +977,37 @@ def _render_scatter(
     y_label: str,
     highlight_ids: List[int],
     labels: Dict[int, str],
+    show_pareto: bool = False,
 ) -> None:
     import matplotlib.pyplot as plt
 
-    x = df[x_col].astype(float).values
-    y = df[y_col].astype(float).values
+    x = pd.to_numeric(df[x_col], errors="coerce").fillna(0.0).astype(float).values
+    y = pd.to_numeric(df[y_col], errors="coerce").fillna(0.0).astype(float).values
 
     fig, ax = plt.subplots()
     ax.scatter(x, y, alpha=0.6)
+
+    # Optional: approximate 2D Pareto frontier (maximize both x and y)
+    if show_pareto and len(df) > 0:
+        d = df[["__id", x_col, y_col]].copy()
+        d[x_col] = pd.to_numeric(d[x_col], errors="coerce").fillna(0.0).astype(float)
+        d[y_col] = pd.to_numeric(d[y_col], errors="coerce").fillna(0.0).astype(float)
+        d = d.sort_values(x_col, ascending=False)
+
+        best_y = float("-inf")
+        pf = []
+        for _, r in d.iterrows():
+            yy = float(r[y_col])
+            if yy > best_y + 1e-12:
+                best_y = yy
+                pf.append((float(r[x_col]), yy))
+
+        pf.sort(key=lambda t: t[0])
+        if len(pf) >= 2:
+            px, py = zip(*pf)
+            # Outlined squares + dashed connector to make the frontier visually distinct (no custom colors).
+            ax.scatter(px, py, marker="s", s=70, facecolors="none")
+            ax.plot(px, py, linestyle="--")
 
     marker_map = {0: "X", 1: "o", 2: "^"}
     for k, pid in enumerate(highlight_ids[:3]):
