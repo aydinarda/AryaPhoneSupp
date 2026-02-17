@@ -34,20 +34,99 @@ tab_policy, tab_profit, tab_mincost, tab_best_policy = st.tabs(["Policy", "Max P
 with tab_policy:
     p = st.session_state.policy
 
+    LEVELS = {"Low": 1.0, "Mid": 3.0, "High": 5.0}
+    _LEVEL_OPTIONS = ["Low", "Mid", "High"]
+
+    def _level_from_value(v) -> str:
+        """Pick the closest level to the existing numeric value (robust to older saves)."""
+        try:
+            v = float(v)
+        except Exception:
+            return "Mid"
+        return min(_LEVEL_OPTIONS, key=lambda k: abs(LEVELS[k] - v))
+
+    def _yn_from_value(v) -> str:
+        try:
+            return "Yes" if float(v) >= 0.5 else "No"
+        except Exception:
+            return "No"
+
     c1, c2, c3 = st.columns(3)
+
     with c1:
-        p.env_mult = st.number_input("Environmental multiplier", min_value=0.0, value=float(p.env_mult), step=0.1)
-        p.social_mult = st.number_input("Social multiplier", min_value=0.0, value=float(p.social_mult), step=0.1)
-        p.cost_mult = st.number_input("Cost multiplier", min_value=0.0, value=float(p.cost_mult), step=0.1)
+        env_level = st.radio(
+            "Environmental multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.env_mult)),
+            horizontal=True,
+            key="policy_env_level",
+        )
+        social_level = st.radio(
+            "Social multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.social_mult)),
+            horizontal=True,
+            key="policy_social_level",
+        )
+        cost_level = st.radio(
+            "Cost multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.cost_mult)),
+            horizontal=True,
+            key="policy_cost_level",
+        )
+
+        p.env_mult = LEVELS[env_level]
+        p.social_mult = LEVELS[social_level]
+        p.cost_mult = LEVELS[cost_level]
 
     with c2:
-        p.strategic_mult = st.number_input("Strategic multiplier", min_value=0.0, value=float(p.strategic_mult), step=0.1)
-        p.improvement_mult = st.number_input("Improvement multiplier", min_value=0.0, value=float(p.improvement_mult), step=0.1)
-        p.low_quality_mult = st.number_input("Low-quality multiplier", min_value=0.0, value=float(p.low_quality_mult), step=0.1)
+        strategic_level = st.radio(
+            "Strategic multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.strategic_mult)),
+            horizontal=True,
+            key="policy_strategic_level",
+        )
+        improvement_level = st.radio(
+            "Improvement multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.improvement_mult)),
+            horizontal=True,
+            key="policy_improvement_level",
+        )
+        lowq_level = st.radio(
+            "Low-quality multiplier",
+            options=_LEVEL_OPTIONS,
+            index=_LEVEL_OPTIONS.index(_level_from_value(p.low_quality_mult)),
+            horizontal=True,
+            key="policy_lowq_level",
+        )
+
+        p.strategic_mult = LEVELS[strategic_level]
+        p.improvement_mult = LEVELS[improvement_level]
+        p.low_quality_mult = LEVELS[lowq_level]
 
     with c3:
-        p.child_labor_penalty = st.number_input("Child labor penalty", min_value=0.0, value=float(p.child_labor_penalty), step=1.0)
-        p.banned_chem_penalty = st.number_input("Banned chemicals penalty", min_value=0.0, value=float(p.banned_chem_penalty), step=1.0)
+        yn_options = ["Yes", "No"]
+
+        child_choice = st.radio(
+            "Child labor penalty",
+            options=yn_options,
+            index=yn_options.index(_yn_from_value(p.child_labor_penalty)),
+            horizontal=True,
+            key="policy_child_labor",
+        )
+        banned_choice = st.radio(
+            "Banned chemicals penalty",
+            options=yn_options,
+            index=yn_options.index(_yn_from_value(p.banned_chem_penalty)),
+            horizontal=True,
+            key="policy_banned_chem",
+        )
+
+        p.child_labor_penalty = 1.0 if child_choice == "Yes" else 0.0
+        p.banned_chem_penalty = 1.0 if banned_choice == "Yes" else 0.0
 
     st.session_state.policy = p
 
@@ -152,50 +231,8 @@ with tab_mincost:
 # Best governmental policy (imported)
 # -------------------------------
 with tab_best_policy:
-    from BestGovPol import render_best_governmental_policy
-
-    # -------------------------------
-    # Best governmental policy: policy pool hook
-    # -------------------------------
-    default_pool = Path("policy_pool.xlsx")
-    pool_path = None
-
-    with st.expander("Policy pool (teacher)", expanded=False):
-        uploaded = st.file_uploader("Upload policy_pool.xlsx (optional)", type=["xlsx"], key="bgp_pool_uploader")
-        if uploaded is not None:
-            pool_path = Path(".uploaded_policy_pool.xlsx")
-            pool_path.write_bytes(uploaded.getbuffer())
-            st.success(f"Using uploaded pool: {pool_path.name}")
-        elif default_pool.exists():
-            pool_path = default_pool
-            st.info(f"Using pool from repo: {default_pool.name}")
-        else:
-            st.warning("No policy_pool.xlsx found. The page will fall back to a small deterministic option set.")
-
-        pool_sample_n = st.number_input(
-            "How many policies to evaluate from the pool (0 = all)",
-            min_value=0,
-            value=0,
-            step=100,
-            key="bgp_pool_n",
-        )
-        pool_sampling = st.selectbox(
-            "Sampling method",
-            options=["deterministic_first", "random"],
-            index=0,
-            key="bgp_pool_sampling",
-        )
-        pool_seed = st.number_input(
-            "Random seed (used only for random sampling)",
-            min_value=0,
-            value=42,
-            step=1,
-            key="bgp_pool_seed",
-        )
-
-    render_best_governmental_policy(
-        policy_pool_path=str(pool_path) if pool_path is not None else None,
-        pool_sample_n=int(pool_sample_n) if int(pool_sample_n) > 0 else None,
-        pool_sampling=str(pool_sampling),
-        pool_seed=int(pool_seed),
-    )
+    try:
+        from BestGovPol import render_best_governmental_policy
+        render_best_governmental_policy()
+    except Exception as e:
+        st.error(str(e))
