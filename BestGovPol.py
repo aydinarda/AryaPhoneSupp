@@ -44,8 +44,8 @@ WORLD_GOODNESS_WEIGHTS: Dict[str, float] = {
 TOTAL_USERS = 11
 
 # Candidate generation ranges (hidden from students)
-PENALTY_MAX = 100.0
-PENALTY_STEP = 25.0  # deterministic "neighborhood" step
+PENALTY_MAX = 1.0
+PENALTY_STEP = 1.0  # deterministic "neighborhood" step
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class GovLimits:
     min_matches: int = TOTAL_USERS
 
 
-def render_best_governmental_policy() -> None:
+def render_best_governmental_policy(policy_pool_path: str | None = None, pool_sample_n: int | None = None, pool_sampling: str = "deterministic_first", pool_seed: int = 42) -> None:
     """Render the student-facing 'Best governmental policy' page (Design 1 + 2 mix).
 
     - Student sees ONLY one main slider (growth <-> sustainability).
@@ -145,9 +145,30 @@ def render_best_governmental_policy() -> None:
     if run:
         with st.spinner("Evaluating policy options (solving retailer MILP per option)..."):
             suppliers_df, users_df = load_supplier_user_tables(excel_path)
-            options = _make_policy_options(current_policy_dict)
-            rows = [_eval_policy(suppliers_df, users_df, opt, scenario) for opt in options]
-            df = _rows_to_df(rows)
+
+            options, opt_info = _select_policy_options(
+                current=current_policy_dict,
+                policy_pool_path=policy_pool_path,
+                pool_sample_n=pool_sample_n,
+                pool_sampling=pool_sampling,
+                pool_seed=pool_seed,
+            )
+
+            rows: List[Dict[str, Any]] = []
+            infeasible: List[Dict[str, Any]] = []
+
+            for opt in options:
+                try:
+                    rows.append(_eval_policy(suppliers_df, users_df, opt, scenario))
+                except Exception as e:
+                    infeasible.append({"policy": opt, "error": str(e)})
+
+            df = _rows_to_df(rows) if len(rows) > 0 else pd.DataFrame()
+
+        st.session_state["bgp_rows"] = rows
+        st.session_state["bgp_df"] = df
+        st.session_state["bgp_infeasible"] = infeasible
+        st.session_state["bgp_opt_info"] = opt_info
 
         st.session_state["bgp_rows"] = rows
         st.session_state["bgp_df"] = df
@@ -160,31 +181,44 @@ def render_best_governmental_policy() -> None:
     rows: List[Dict[str, Any]] = st.session_state["bgp_rows"]
     df: pd.DataFrame = st.session_state["bgp_df"]
 
-    # Keep only feasible retailer solutions for recommendation / plots.
-    df_feas = df[df.get("feasible", 1) == 1].copy()
-    infeas_count = int(len(df) - len(df_feas))
+    opt_info: Dict[str, Any] = st.session_state.get("bgp_opt_info", {}) or {}
+    infeasible: List[Dict[str, Any]] = st.session_state.get("bgp_infeasible", []) or []
 
-    if len(df_feas) == 0:
-        st.error(
-            "No feasible retailer solution was found for any policy option under the current scenario settings. "
-            "Try lowering the minimum utility threshold or changing K."
-        )
-        st.dataframe(
-            df[["__id", "feasible", "error"]].copy(),
-            use_container_width=True,
-            hide_index=True,
-        )
+    if opt_info:
+        src = opt_info.get("source", "generated")
+        pool_total = opt_info.get("pool_total", None)
+        evaluating = opt_info.get("evaluating", None)
+        sampling = opt_info.get("sampling", None)
+        msg = f"Candidates: **{src}**"
+        if pool_total is not None:
+            msg += f" (pool size: {int(pool_total)})"
+        if sampling:
+            msg += f" • sampling: {sampling}"
+        if evaluating is not None:
+            msg += f" • evaluated: {int(evaluating)}"
+        msg += f" • infeasible skipped: {len(infeasible)}"
+        st.caption(msg)
+
+    if len(infeasible) > 0:
+        with st.expander(f"Infeasible policies skipped ({len(infeasible)})", expanded=False):
+            # show a compact table
+            show = infeasible[:50]
+            flat = []
+            for r in show:
+                d = {k: float(v) for k, v in r.get("policy", {}).items()}
+                d["error"] = r.get("error", "")
+                flat.append(d)
+            st.dataframe(pd.DataFrame(flat), use_container_width=True, hide_index=True)
+
+    if df is None or df.empty:
+        st.error("No feasible policy was found in the evaluated set. Try evaluating more policies from the pool or relaxing the scenario settings.")
         return
-
-    if infeas_count > 0:
-        st.warning(f"{infeas_count} policy option(s) were infeasible for the retailer and were excluded from selection.")
-
 
 
     # -----------------------------
     # Derive hidden regulation targets from the slider (no student knobs)
     # -----------------------------
-    limits = _limits_from_priority(df_feas, alpha=alpha)
+    limits = _limits_from_priority(df, alpha=alpha)
 
     # -----------------------------
     # Pick the three headline policies
@@ -192,10 +226,10 @@ def render_best_governmental_policy() -> None:
     #   - Best Sustainable: max goodness (prefer full matching if possible)
     #   - Recommended: government MILP (hard; if infeasible -> backup)
     # -----------------------------
-    best_growth_id = int(df_feas.sort_values(["profit_obj", "matched"], ascending=[False, False]).iloc[0]["__id"])
-    best_sust_id = _best_sustainable_id(df_feas)
+    best_growth_id = int(df.sort_values(["profit_obj", "matched"], ascending=[False, False]).iloc[0]["__id"])
+    best_sust_id = _best_sustainable_id(df)
 
-    recommended_id, used_backup, slack_info = _solve_government_selection_milp(df_feas, limits)
+    recommended_id, used_backup, slack_info = _solve_government_selection_milp(df, limits)
 
     # -----------------------------
     # Headline cards (Design 1)
@@ -232,7 +266,7 @@ def render_best_governmental_policy() -> None:
     st.caption("Each point is a policy option. X-axis: retailer utility. Y-axis: world goodness.")
 
     _render_pareto_plot(
-        df_feas,
+        df,
         highlight_ids=[best_growth_id, recommended_id, best_sust_id],
         labels={best_growth_id: "Growth", recommended_id: "Recommended", best_sust_id: "Sustainable"},
     )
@@ -243,7 +277,7 @@ def render_best_governmental_policy() -> None:
         r = rows[opt_id]
         return f"#{opt_id} | U={r['profit_obj']:.2f} | G={r['goodness']:.2f} | matched={r['matched']} | env_avg={r['env_avg']:.2f} | soc_avg={r['soc_avg']:.2f}"
 
-    candidate_ids = list(df_feas.sort_values(["profit_obj"], ascending=False)["__id"].astype(int).tolist())
+    candidate_ids = list(df.sort_values(["profit_obj"], ascending=False)["__id"].astype(int).tolist())
     default_pick = recommended_id
     picked_id = st.selectbox(
         "Policy option",
@@ -294,78 +328,122 @@ def _clamp_float(v: float, lo: float, hi: float) -> float:
 
 
 def _canonicalize_policy_dict(p: Dict[str, float]) -> Dict[str, float]:
-    # enforce the intended discrete-ish domain for multipliers and bounded penalties
+    """Canonicalize a policy dict to the intended discrete student domain.
+
+    - Multipliers snap to {1, 5, 10}
+    - Penalties are binary {0, 1} (No/Yes)
+    """
     mult_keys = ["env_mult", "social_mult", "cost_mult", "strategic_mult", "improvement_mult", "low_quality_mult"]
+    allowed_levels = [1.0, 5.0, 10.0]
+
+    def _snap_level(v: Any) -> float:
+        try:
+            x = float(v)
+        except Exception:
+            x = 5.0
+        best = allowed_levels[0]
+        best_d = abs(best - x)
+        for a in allowed_levels[1:]:
+            d = abs(a - x)
+            # tie-break towards higher level (e.g., 3 -> 5)
+            if d < best_d - 1e-12 or (abs(d - best_d) <= 1e-12 and a > best):
+                best, best_d = a, d
+        return float(best)
+
     out: Dict[str, float] = {}
     for k in mult_keys:
-        out[k] = float(_clamp_int(p.get(k, 3.0), 1, 5))
-    out["child_labor_penalty"] = float(_clamp_float(p.get("child_labor_penalty", 0.0), 0.0, PENALTY_MAX))
-    out["banned_chem_penalty"] = float(_clamp_float(p.get("banned_chem_penalty", 0.0), 0.0, PENALTY_MAX))
+        out[k] = _snap_level(p.get(k, 5.0))
+
+    def _to01(v: Any) -> float:
+        try:
+            return 1.0 if float(v) >= 0.5 else 0.0
+        except Exception:
+            return 0.0
+
+    out["child_labor_penalty"] = _to01(p.get("child_labor_penalty", 0.0))
+    out["banned_chem_penalty"] = _to01(p.get("banned_chem_penalty", 0.0))
     return out
 
-
 def _make_policy_options(current: Dict[str, float]) -> List[Dict[str, float]]:
-    """Deterministic (student-friendly) policy options:
-    - Growth anchor
-    - Sustainable anchor
-    - Current policy
-    - Single-parameter neighbors around current (±1 for multipliers; ±PENALTY_STEP for penalties)
-    - A few coupled neighbors (env+social; child+banned)
+    """Fallback deterministic option set (used only if a policy pool is not provided).
+
+    Domain:
+      - Multipliers in {1, 5, 10}
+      - Penalties in {0, 1}
+
+    Options included:
+      - Growth anchor
+      - Sustainable anchor
+      - Current policy
+      - Neighbors by moving ONE multiplier to the next/prev level
+      - Neighbors by toggling ONE penalty (0 <-> 1)
+      - A couple of coupled moves (env+social, child+banned)
     """
     cur = _canonicalize_policy_dict(current)
 
-    growth_anchor = {
-        "env_mult": 1, "social_mult": 1, "cost_mult": 5,
-        "strategic_mult": 5, "improvement_mult": 3, "low_quality_mult": 1,
-        "child_labor_penalty": 0, "banned_chem_penalty": 0,
-    }
-    sust_anchor = {
-        "env_mult": 5, "social_mult": 5, "cost_mult": 1,
-        "strategic_mult": 2, "improvement_mult": 3, "low_quality_mult": 5,
-        "child_labor_penalty": PENALTY_MAX, "banned_chem_penalty": PENALTY_MAX,
-    }
-
-    options: List[Dict[str, float]] = []
-    options.append(_canonicalize_policy_dict(growth_anchor))
-    options.append(_canonicalize_policy_dict(sust_anchor))
-    options.append(cur)
-
+    levels = [1.0, 5.0, 10.0]
     mult_keys = ["env_mult", "social_mult", "cost_mult", "strategic_mult", "improvement_mult", "low_quality_mult"]
 
-    # single-key neighbors
+    growth_anchor = _canonicalize_policy_dict(
+        {
+            "env_mult": 1,
+            "social_mult": 1,
+            "cost_mult": 10,
+            "strategic_mult": 10,
+            "improvement_mult": 5,
+            "low_quality_mult": 1,
+            "child_labor_penalty": 0,
+            "banned_chem_penalty": 0,
+        }
+    )
+    sust_anchor = _canonicalize_policy_dict(
+        {
+            "env_mult": 10,
+            "social_mult": 10,
+            "cost_mult": 1,
+            "strategic_mult": 5,
+            "improvement_mult": 5,
+            "low_quality_mult": 10,
+            "child_labor_penalty": 1,
+            "banned_chem_penalty": 1,
+        }
+    )
+
+    options: List[Dict[str, float]] = [growth_anchor, sust_anchor, cur]
+
+    # single-key multiplier neighbors (adjacent in the level list)
     for k in mult_keys:
-        base = int(cur[k])
-        for d in (-1, 1):
-            v = _clamp_int(base + d, 1, 5)
-            p = dict(cur)
-            p[k] = float(v)
-            options.append(_canonicalize_policy_dict(p))
+        base = float(cur[k])
+        # base should already be snapped, but guard anyway
+        if base not in levels:
+            base = min(levels, key=lambda a: abs(a - base))
+        idx = levels.index(base)
+        for nidx in (idx - 1, idx + 1):
+            if 0 <= nidx < len(levels):
+                p = dict(cur)
+                p[k] = float(levels[nidx])
+                options.append(_canonicalize_policy_dict(p))
 
-    # penalty neighbors
+    # single-key penalty toggles
     for pk in ("child_labor_penalty", "banned_chem_penalty"):
-        base = float(cur[pk])
-        for d in (-PENALTY_STEP, PENALTY_STEP):
-            p = dict(cur)
-            p[pk] = float(_clamp_float(base + d, 0.0, PENALTY_MAX))
-            options.append(_canonicalize_policy_dict(p))
-
-    # coupled env/social neighbors
-    for d in (-1, 1):
         p = dict(cur)
-        p["env_mult"] = float(_clamp_int(int(cur["env_mult"]) + d, 1, 5))
-        p["social_mult"] = float(_clamp_int(int(cur["social_mult"]) + d, 1, 5))
+        p[pk] = 1.0 - float(cur[pk])
         options.append(_canonicalize_policy_dict(p))
 
-    # coupled child/banned neighbors
-    for d in (-PENALTY_STEP, PENALTY_STEP):
-        p = dict(cur)
-        p["child_labor_penalty"] = float(_clamp_float(float(cur["child_labor_penalty"]) + d, 0.0, PENALTY_MAX))
-        p["banned_chem_penalty"] = float(_clamp_float(float(cur["banned_chem_penalty"]) + d, 0.0, PENALTY_MAX))
-        options.append(_canonicalize_policy_dict(p))
+    # coupled moves
+    p = dict(cur)
+    p["env_mult"] = 10.0 if float(cur["env_mult"]) < 10.0 else 5.0
+    p["social_mult"] = 10.0 if float(cur["social_mult"]) < 10.0 else 5.0
+    options.append(_canonicalize_policy_dict(p))
 
-    # de-dup
-    seen = set()
+    p = dict(cur)
+    p["child_labor_penalty"] = 1.0 - float(cur["child_labor_penalty"])
+    p["banned_chem_penalty"] = 1.0 - float(cur["banned_chem_penalty"])
+    options.append(_canonicalize_policy_dict(p))
+
+    # De-duplicate
     uniq: List[Dict[str, float]] = []
+    seen = set()
     for p in options:
         key = tuple(sorted((k, float(v)) for k, v in p.items()))
         if key in seen:
@@ -375,19 +453,125 @@ def _make_policy_options(current: Dict[str, float]) -> List[Dict[str, float]]:
 
     return uniq
 
-
 def _require_columns(df: pd.DataFrame, cols: List[str], df_name: str) -> None:
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise ValueError(f"{df_name} missing required columns: {missing}")
 
 
-def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict[str, float], scenario: ScenarioSettings) -> Dict[str, Any]:
-    """Evaluate one policy option by solving the retailer (inner) MILP.
 
-    IMPORTANT: The retailer MILP can be infeasible for some policy+scenario settings.
-    We must never crash the whole Streamlit app when that happens.
+def _load_policy_pool_df(path: Path) -> pd.DataFrame:
+    xls = pd.ExcelFile(path)
+    sheet = "policies" if "policies" in xls.sheet_names else xls.sheet_names[0]
+    return pd.read_excel(xls, sheet_name=sheet)
+
+
+def _select_policy_options(
+    current: Dict[str, float],
+    policy_pool_path: str | None,
+    pool_sample_n: int | None,
+    pool_sampling: str,
+    pool_seed: int,
+) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+    """Return (options, info) where options are canonicalized policy dicts.
+
+    If a pool path is provided and readable, policies are read from it.
+    Otherwise, falls back to deterministic neighborhood generation around `current`.
     """
+    info: Dict[str, Any] = {"source": "generated", "pool_total": None, "evaluating": None, "sampling": None}
+
+    options: List[Dict[str, float]] = []
+
+    # Try pool
+    if policy_pool_path:
+        p = Path(policy_pool_path)
+        if p.exists():
+            df_pool = _load_policy_pool_df(p)
+            required = [
+                "env_mult",
+                "social_mult",
+                "cost_mult",
+                "strategic_mult",
+                "improvement_mult",
+                "low_quality_mult",
+                "child_labor_penalty",
+                "banned_chem_penalty",
+            ]
+            _require_columns(df_pool, required, "policy_pool")
+            info["source"] = f"pool:{p.name}"
+            info["pool_total"] = int(len(df_pool))
+
+            if pool_sample_n and int(pool_sample_n) > 0 and int(pool_sample_n) < len(df_pool):
+                n = int(pool_sample_n)
+                if str(pool_sampling).lower().startswith("rand"):
+                    df_sel = df_pool.sample(n=n, random_state=int(pool_seed))
+                    info["sampling"] = "random"
+                else:
+                    df_sel = df_pool.head(n)
+                    info["sampling"] = "deterministic_first"
+            else:
+                df_sel = df_pool
+                info["sampling"] = "all"
+
+            info["evaluating"] = int(len(df_sel))
+            options = [_canonicalize_policy_dict(d) for d in df_sel[required].to_dict(orient="records")]
+        else:
+            info["source"] = "generated (pool path not found)"
+
+    # Fallback generation
+    if not options:
+        cur = _canonicalize_policy_dict(current)
+        options = _make_policy_options(cur)
+        info["source"] = "generated"
+        info["pool_total"] = None
+        info["evaluating"] = int(len(options))
+        info["sampling"] = "generated"
+
+    # Ensure anchors + current are included
+    growth_anchor = {
+        "env_mult": 1,
+        "social_mult": 1,
+        "cost_mult": 10,
+        "strategic_mult": 10,
+        "improvement_mult": 5,
+        "low_quality_mult": 1,
+        "child_labor_penalty": 0,
+        "banned_chem_penalty": 0,
+    }
+    sust_anchor = {
+        "env_mult": 10,
+        "social_mult": 10,
+        "cost_mult": 1,
+        "strategic_mult": 5,
+        "improvement_mult": 5,
+        "low_quality_mult": 10,
+        "child_labor_penalty": 1,
+        "banned_chem_penalty": 1,
+    }
+
+    options.extend(
+        [
+            _canonicalize_policy_dict(growth_anchor),
+            _canonicalize_policy_dict(sust_anchor),
+            _canonicalize_policy_dict(current),
+        ]
+    )
+
+    # De-duplicate
+    uniq: List[Dict[str, float]] = []
+    seen = set()
+    for p in options:
+        key = tuple(sorted((k, float(v)) for k, v in p.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+
+    info["evaluating"] = int(len(uniq)) if info.get("evaluating") is None else int(info["evaluating"])
+    return uniq, info
+
+
+def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict[str, float], scenario: ScenarioSettings) -> Dict[str, Any]:
     pol = _policy_dict_to_obj(pdict)
 
     cfg = MaxProfitConfig(
@@ -399,51 +583,28 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         output_flag=0,
     )
 
-    # Try solve; if infeasible/failed, return a marked row (so the rest of the page can continue).
-    feasible = True
-    error_msg = ""
-    try:
-        res = MaxProfitAgent(suppliers_df, users_df, pol, cfg).solve()
-        matches = res["matches"].copy()
-    except Exception as e:
-        feasible = False
-        error_msg = str(e)
-        res = {
-            "objective_value": -1.0e12,
-            "num_matched": 0,
-            "chosen_suppliers": [],
-            "matches": pd.DataFrame(columns=["supplier_id"]),
-        }
-        matches = res["matches"].copy()
+    res = MaxProfitAgent(suppliers_df, users_df, pol, cfg).solve()
+    matches = res["matches"].copy()
 
-    # If data is malformed, show it as an option-level error instead of crashing the app.
-    try:
-        _require_columns(
-            suppliers_df,
-            ["supplier_id", "env_risk", "social_risk", "child_labor", "banned_chem", "low_quality"],
-            "suppliers_df",
-        )
-    except Exception as e:
-        feasible = False
-        error_msg = error_msg or str(e)
+    _require_columns(
+        suppliers_df,
+        ["supplier_id", "env_risk", "social_risk", "child_labor", "banned_chem", "low_quality"],
+        "suppliers_df",
+    )
+    _require_columns(matches, ["supplier_id"], "matches")
 
     sup = suppliers_df.copy()
-    if "supplier_id" in sup.columns:
-        sup["supplier_id"] = sup["supplier_id"].astype(str)
-        sup = sup.set_index("supplier_id")
+    sup["supplier_id"] = sup["supplier_id"].astype(str)
+    sup = sup.set_index("supplier_id")
 
-    if "supplier_id" in matches.columns:
-        matches["supplier_id"] = matches["supplier_id"].astype(str)
+    matches["supplier_id"] = matches["supplier_id"].astype(str)
 
-    # Default metrics for failed / empty solution
-    env_tot = soc_tot = child_tot = ban_tot = lq_tot = 0.0
-
-    if feasible and len(matches) > 0 and "supplier_id" in matches.columns and "env_risk" in sup.columns:
-        env_map = sup.get("env_risk", pd.Series(dtype=float)).astype(float).to_dict()
-        soc_map = sup.get("social_risk", pd.Series(dtype=float)).astype(float).to_dict()
-        child_map = sup.get("child_labor", pd.Series(dtype=float)).astype(float).to_dict()
-        ban_map = sup.get("banned_chem", pd.Series(dtype=float)).astype(float).to_dict()
-        lq_map = sup.get("low_quality", pd.Series(dtype=float)).astype(float).to_dict()
+    if len(matches) > 0:
+        env_map = sup["env_risk"].astype(float).to_dict()
+        soc_map = sup["social_risk"].astype(float).to_dict()
+        child_map = sup["child_labor"].astype(float).to_dict()
+        ban_map = sup["banned_chem"].astype(float).to_dict()
+        lq_map = sup["low_quality"].astype(float).to_dict()
 
         matches["env_risk"] = matches["supplier_id"].map(env_map).fillna(0.0)
         matches["social_risk"] = matches["supplier_id"].map(soc_map).fillna(0.0)
@@ -456,6 +617,8 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         child_tot = float(matches["child_labor"].sum())
         ban_tot = float(matches["banned_chem"].sum())
         lq_tot = float(matches["low_quality"].sum())
+    else:
+        env_tot = soc_tot = child_tot = ban_tot = lq_tot = 0.0
 
     m = int(res.get("num_matched", 0) or 0)
     env_avg = env_tot / m if m > 0 else 0.0
@@ -472,17 +635,11 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
         + w["w_lq"] * lq_avg
     )
 
-    if not feasible:
-        # Make failed options dominated in both axes so they are never picked as "best".
-        goodness = -1.0e12
-
     return {
         "policy": pdict,
-        "feasible": bool(feasible),
-        "error": error_msg,
-        "profit_obj": float(res.get("objective_value", -1.0e12)),
+        "profit_obj": float(res["objective_value"]),
         "matched": int(m),
-        "chosen_suppliers": ", ".join(res.get("chosen_suppliers", [])) if feasible else "",
+        "chosen_suppliers": ", ".join(res.get("chosen_suppliers", [])),
         "env_tot": env_tot,
         "soc_tot": soc_tot,
         "child_tot": child_tot,
@@ -499,9 +656,7 @@ def _eval_policy(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pdict: Dict
 def _rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     out = []
     for j, r in enumerate(rows):
-        d: Dict[str, Any] = {"__id": j}
-        d["feasible"] = int(bool(r.get("feasible", True)))
-        d["error"] = r.get("error", "") or ""
+        d = {"__id": j}
         d.update({k: float(v) for k, v in r["policy"].items()})
         for k in ["profit_obj", "matched", "env_avg", "soc_avg", "lq_avg", "child_tot", "ban_tot", "goodness"]:
             d[k] = float(r[k]) if k != "matched" else int(r[k])
