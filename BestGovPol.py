@@ -44,8 +44,14 @@ WORLD_GOODNESS_WEIGHTS: Dict[str, float] = {
 TOTAL_USERS = 11
 
 # Candidate generation ranges (hidden from students)
-PENALTY_MAX = 100.0
-PENALTY_STEP = 25.0  # deterministic "neighborhood" step
+# Multipliers are discrete: low/mid/high -> 1/5/10
+MULT_LEVELS = [1, 5, 10]
+# Penalties are binary in the policy UI: No=0, Yes=1
+PENALTY_LEVELS = [0, 1]
+# When using a pre-generated pool, we sample a fixed number of candidates for speed.
+POOL_FILENAME = "policy_pool.xlsx"
+POOL_SHEET = "policies"  # falls back to first sheet if missing
+POOL_SAMPLE_N = 400  # hidden; keep runtime reasonable
 
 
 @dataclass(frozen=True)
@@ -285,6 +291,32 @@ def _policy_dict_to_obj(pdict: Dict[str, float]) -> Policy:
     return pol
 
 
+def _snap_to_levels(v: float, levels: List[int]) -> int:
+    """Snap a numeric value to the nearest allowed discrete level."""
+    try:
+        x = float(v)
+    except Exception:
+        x = float(levels[0])
+    return int(min(levels, key=lambda a: abs(a - x)))
+
+
+@st.cache_data(show_spinner=False)
+def _read_policy_pool(path: str) -> pd.DataFrame:
+    """Read a policy pool file (xlsx). Cached for speed."""
+    xls = pd.ExcelFile(path)
+    sheet = POOL_SHEET if POOL_SHEET in xls.sheet_names else xls.sheet_names[0]
+    return pd.read_excel(xls, sheet_name=sheet)
+
+
+def _pool_path_default() -> Path:
+    # policy_pool.xlsx is expected to live next to this file (repo root also OK if you pass an absolute/relative path)
+    here = Path(__file__).resolve().parent
+    cand = here / POOL_FILENAME
+    if cand.exists():
+        return cand
+    # fallback: current working dir (Streamlit runs from repo root)
+    return Path(POOL_FILENAME)
+
 def _clamp_int(v: float, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(v))))
 
@@ -294,35 +326,80 @@ def _clamp_float(v: float, lo: float, hi: float) -> float:
 
 
 def _canonicalize_policy_dict(p: Dict[str, float]) -> Dict[str, float]:
-    # enforce the intended discrete-ish domain for multipliers and bounded penalties
+    """Enforce the intended discrete domain.
+    - multipliers: {1, 5, 10}
+    - penalties: {0, 1}
+    """
     mult_keys = ["env_mult", "social_mult", "cost_mult", "strategic_mult", "improvement_mult", "low_quality_mult"]
     out: Dict[str, float] = {}
     for k in mult_keys:
-        out[k] = float(_clamp_int(p.get(k, 3.0), 1, 5))
-    out["child_labor_penalty"] = float(_clamp_float(p.get("child_labor_penalty", 0.0), 0.0, PENALTY_MAX))
-    out["banned_chem_penalty"] = float(_clamp_float(p.get("banned_chem_penalty", 0.0), 0.0, PENALTY_MAX))
+        out[k] = float(_snap_to_levels(p.get(k, MULT_LEVELS[0]), MULT_LEVELS))
+    out["child_labor_penalty"] = float(_snap_to_levels(p.get("child_labor_penalty", 0), PENALTY_LEVELS))
+    out["banned_chem_penalty"] = float(_snap_to_levels(p.get("banned_chem_penalty", 0), PENALTY_LEVELS))
     return out
 
 
 def _make_policy_options(current: Dict[str, float]) -> List[Dict[str, float]]:
-    """Deterministic (student-friendly) policy options:
-    - Growth anchor
-    - Sustainable anchor
-    - Current policy
-    - Single-parameter neighbors around current (±1 for multipliers; ±PENALTY_STEP for penalties)
-    - A few coupled neighbors (env+social; child+banned)
+    """Policy options for evaluation.
+
+    Preferred: read from a pre-generated pool (policy_pool.xlsx) and sample deterministically.
+    Fallback (if pool missing/unreadable): small deterministic neighborhood around current.
+
+    All knobs remain hidden from students.
     """
     cur = _canonicalize_policy_dict(current)
 
+    # --- Try: pool-based options (recommended) ---
+    pool_path = _pool_path_default()
+    if pool_path.exists():
+        try:
+            pool_df = _read_policy_pool(str(pool_path))
+            # accept only required columns
+            needed = [
+                "env_mult","social_mult","cost_mult","strategic_mult","improvement_mult","low_quality_mult",
+                "child_labor_penalty","banned_chem_penalty"
+            ]
+            missing = [c for c in needed if c not in pool_df.columns]
+            if not missing:
+                pool = pool_df[needed].copy()
+
+                # canonicalize/snap (important if pool was produced with labels or floats)
+                for k in needed:
+                    pool[k] = pool[k].apply(lambda x: _canonicalize_policy_dict({k: x}).get(k, x))
+
+                # deterministic sample (no UI seed): depends on current policy only
+                seed = int(_hash_policy_dict(cur)[:8], 16)
+                n = int(min(max(1, POOL_SAMPLE_N), len(pool)))
+                sampled = pool.sample(n=n, random_state=seed) if len(pool) > n else pool
+
+                options = [ _canonicalize_policy_dict(row.to_dict()) for _, row in sampled.iterrows() ]
+                # always include current as a candidate
+                options.append(cur)
+
+                # de-dup
+                seen = set()
+                uniq: List[Dict[str, float]] = []
+                for p in options:
+                    key = tuple(sorted((k, float(v)) for k, v in p.items()))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    uniq.append(p)
+                return uniq
+        except Exception:
+            # silently fall back; keep student-facing UI clean
+            pass
+
+    # --- Fallback: neighborhood options (small but deterministic) ---
     growth_anchor = {
-        "env_mult": 1, "social_mult": 1, "cost_mult": 5,
-        "strategic_mult": 5, "improvement_mult": 3, "low_quality_mult": 1,
+        "env_mult": 1, "social_mult": 1, "cost_mult": 10,
+        "strategic_mult": 10, "improvement_mult": 5, "low_quality_mult": 1,
         "child_labor_penalty": 0, "banned_chem_penalty": 0,
     }
     sust_anchor = {
-        "env_mult": 5, "social_mult": 5, "cost_mult": 1,
-        "strategic_mult": 2, "improvement_mult": 3, "low_quality_mult": 5,
-        "child_labor_penalty": PENALTY_MAX, "banned_chem_penalty": PENALTY_MAX,
+        "env_mult": 10, "social_mult": 10, "cost_mult": 1,
+        "strategic_mult": 5, "improvement_mult": 5, "low_quality_mult": 10,
+        "child_labor_penalty": 1, "banned_chem_penalty": 1,
     }
 
     options: List[Dict[str, float]] = []
@@ -332,36 +409,36 @@ def _make_policy_options(current: Dict[str, float]) -> List[Dict[str, float]]:
 
     mult_keys = ["env_mult", "social_mult", "cost_mult", "strategic_mult", "improvement_mult", "low_quality_mult"]
 
-    # single-key neighbors
+    # single-key neighbors: step to next/prev level in MULT_LEVELS
     for k in mult_keys:
         base = int(cur[k])
-        for d in (-1, 1):
-            v = _clamp_int(base + d, 1, 5)
+        idx = MULT_LEVELS.index(base) if base in MULT_LEVELS else 0
+        for di in (-1, 1):
+            j = max(0, min(len(MULT_LEVELS) - 1, idx + di))
             p = dict(cur)
-            p[k] = float(v)
+            p[k] = float(MULT_LEVELS[j])
             options.append(_canonicalize_policy_dict(p))
 
-    # penalty neighbors
+    # penalty neighbors (0 <-> 1)
     for pk in ("child_labor_penalty", "banned_chem_penalty"):
-        base = float(cur[pk])
-        for d in (-PENALTY_STEP, PENALTY_STEP):
-            p = dict(cur)
-            p[pk] = float(_clamp_float(base + d, 0.0, PENALTY_MAX))
-            options.append(_canonicalize_policy_dict(p))
+        p = dict(cur)
+        p[pk] = float(1 - int(cur[pk]))
+        options.append(_canonicalize_policy_dict(p))
 
     # coupled env/social neighbors
-    for d in (-1, 1):
+    idx_env = MULT_LEVELS.index(int(cur["env_mult"])) if int(cur["env_mult"]) in MULT_LEVELS else 0
+    idx_soc = MULT_LEVELS.index(int(cur["social_mult"])) if int(cur["social_mult"]) in MULT_LEVELS else 0
+    for di in (-1, 1):
         p = dict(cur)
-        p["env_mult"] = float(_clamp_int(int(cur["env_mult"]) + d, 1, 5))
-        p["social_mult"] = float(_clamp_int(int(cur["social_mult"]) + d, 1, 5))
+        p["env_mult"] = float(MULT_LEVELS[max(0, min(len(MULT_LEVELS)-1, idx_env + di))])
+        p["social_mult"] = float(MULT_LEVELS[max(0, min(len(MULT_LEVELS)-1, idx_soc + di))])
         options.append(_canonicalize_policy_dict(p))
 
-    # coupled child/banned neighbors
-    for d in (-PENALTY_STEP, PENALTY_STEP):
-        p = dict(cur)
-        p["child_labor_penalty"] = float(_clamp_float(float(cur["child_labor_penalty"]) + d, 0.0, PENALTY_MAX))
-        p["banned_chem_penalty"] = float(_clamp_float(float(cur["banned_chem_penalty"]) + d, 0.0, PENALTY_MAX))
-        options.append(_canonicalize_policy_dict(p))
+    # coupled child/banned toggle
+    p = dict(cur)
+    p["child_labor_penalty"] = float(1 - int(cur["child_labor_penalty"]))
+    p["banned_chem_penalty"] = float(1 - int(cur["banned_chem_penalty"]))
+    options.append(_canonicalize_policy_dict(p))
 
     # de-dup
     seen = set()
@@ -372,7 +449,6 @@ def _make_policy_options(current: Dict[str, float]) -> List[Dict[str, float]]:
             continue
         seen.add(key)
         uniq.append(p)
-
     return uniq
 
 
