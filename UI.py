@@ -191,7 +191,6 @@ with tab_manual:
         st.dataframe(suppliers_df[show_cols], use_container_width=True, hide_index=True)
 
     k = st.number_input("How many suppliers to pick (K)?", min_value=1, value=int(st.session_state.manual_k), step=1)
-    st.session_state.manual_k = int(k)
 
     picked = st.multiselect(
         "Pick suppliers (exactly K)",
@@ -226,6 +225,9 @@ with tab_manual:
             st.error(f"Cannot save: selection must contain exactly K={int(k)} suppliers.")
         else:
             st.session_state.manual_suppliers = picked
+            # Keep comparison tabs in sync with the saved K
+            st.session_state["profit_k"] = int(k)
+            st.session_state["mincost_k"] = int(k)
             st.success("Saved. Now go to the comparison tabs.")
 
 # ----------------------------
@@ -250,13 +252,14 @@ with tab_profit:
     with c2:
         min_utility = st.number_input("Minimum utility threshold", value=0.0, step=1.0)
     with c3:
-        k = st.number_input("Suppliers to select (K)", min_value=1, value=int(st.session_state.manual_k), step=1, key="profit_k")
+        saved_k = int(st.session_state.manual_k)
+        saved_list = list(st.session_state.manual_suppliers or [])
+        st.info(f"Saved manual selection (K={saved_k}): " + (", ".join(saved_list) if saved_list else "None"))
+        k = st.number_input("Suppliers to select (K)", min_value=1, value=saved_k, step=1, key="profit_k", disabled=True)
     with c4:
         last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="profit_lastn")
     with c5:
         capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="profit_cap")
-
-    st.session_state.manual_k = int(k)
 
     run = st.button("Run comparison", type="primary", use_container_width=True, key="profit_compare")
 
@@ -270,7 +273,7 @@ with tab_profit:
             st.markdown("#### Manual selection result")
             manual = list(st.session_state.manual_suppliers or [])
             if len(manual) != int(k):
-                st.error("No saved manual selection (or wrong size). Go to **Manual supplier choice** and save exactly K suppliers.")
+                st.error(f"No valid saved manual selection for K={int(k)}. Saved size={len(manual)}. Go to **Manual supplier choice** and save exactly K suppliers.")
             else:
                 try:
                     cfg_manual = MaxProfitConfig(
@@ -351,7 +354,10 @@ with tab_mincost:
     with c1:
         min_utility = st.number_input("Minimum utility threshold", value=0.0, step=1.0, key="mincost_minutil")
     with c2:
-        k = st.number_input("Suppliers to select (K)", min_value=1, value=int(st.session_state.manual_k), step=1, key="mincost_k")
+        saved_k = int(st.session_state.manual_k)
+        saved_list = list(st.session_state.manual_suppliers or [])
+        st.info(f"Saved manual selection (K={saved_k}): " + (", ".join(saved_list) if saved_list else "None"))
+        k = st.number_input("Suppliers to select (K)", min_value=1, value=saved_k, step=1, key="mincost_k", disabled=True)
     with c3:
         last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="mincost_lastn")
     with c4:
@@ -375,7 +381,7 @@ with tab_mincost:
             st.markdown("#### Manual selection result")
             manual = list(st.session_state.manual_suppliers or [])
             if len(manual) != int(k):
-                st.error("No saved manual selection (or wrong size). Go to **Manual supplier choice** and save exactly K suppliers.")
+                st.error(f"No valid saved manual selection for K={int(k)}. Saved size={len(manual)}. Go to **Manual supplier choice** and save exactly K suppliers.")
             else:
                 try:
                     cfg_manual = MinCostConfig(
