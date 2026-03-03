@@ -1,15 +1,28 @@
-"""MinCostAgent.py (STRICT)
+"""MinCostAgent.py
 
-Contains:
-  - Policy dataclass
-  - Excel loader for Supplier/User sheets
-  - MaxProfitAgent (choose K suppliers + matching to maximize profit)
-  - MinCostAgent (choose K suppliers + exact matches to minimize cost)
+This module now implements the **Profit–Risk supplier selection game**:
 
-NEW (2026-02):
-  - Supports **manual supplier selection** via `fixed_suppliers` in configs.
-    If provided, the model fixes y[i]=1 for chosen suppliers and y[i]=0 for others,
-    then optimizes only the matching (z) under the same constraints/objective.
+- Students choose a **set of suppliers**.
+- The delivered product is the **average** of the chosen suppliers.
+- Hard risk caps:
+  - avg(env_risk) <= ENV_CAP
+  - avg(social_risk) <= SOCIAL_CAP
+- Profit:
+  - profit_per_user = price_per_user - COST_SCALE * avg(cost_score)
+  - profit_total = served_users * profit_per_user
+
+Key change vs the older matching-based version:
+- There is **no fixed K** constraint in the game.
+- For optimization we still solve exact MILPs by enumerating subset sizes k=1..N.
+  (This avoids fractional objectives like minimizing avg(cost) directly.)
+
+Exported API used by UI.py:
+- load_supplier_user_tables
+- ProfitRiskConfig
+- ProfitRiskMinRiskConfig
+- ProfitRiskMaxProfitAgent
+- ProfitRiskMinRiskAgent
+- ProfitRiskCurveAgent
 """
 
 from __future__ import annotations
@@ -36,32 +49,9 @@ DEFAULT_XLSX_PATH = BASE_DIR / "Arya_Phones_Supplier_Selection.xlsx"
 
 
 # ---------------------------------------------------------------------
-# Policy
+# Excel loading / normalization
 # ---------------------------------------------------------------------
-@dataclass
-class Policy:
-    env_mult: float = 1.0
-    social_mult: float = 1.0
-    cost_mult: float = 1.0
-    strategic_mult: float = 1.0
-    improvement_mult: float = 1.0
-    low_quality_mult: float = 1.0
-    child_labor_penalty: float = 0.0  # used as hard-ban toggle (Yes=1, No=0)
-    banned_chem_penalty: float = 0.0  # used as hard-ban toggle (Yes=1, No=0)
 
-    def clamp_nonnegative(self) -> "Policy":
-        for k, v in self.__dict__.items():
-            vv = 0.0 if v is None else float(v)
-            setattr(self, k, max(0.0, vv))
-        return self
-
-    def to_dict(self) -> Dict[str, float]:
-        return {k: float(v) for k, v in self.__dict__.items()}
-
-
-# ---------------------------------------------------------------------
-# Excel loading / normalization (STRICT but with column-name mapping)
-# ---------------------------------------------------------------------
 def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {
         "supplier": "supplier_id",
@@ -92,6 +82,7 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     df2 = df.copy()
     df2.columns = [str(c).strip() for c in df2.columns]
+
     rename = {}
     for c in df2.columns:
         key = str(c).strip().lower()
@@ -116,61 +107,36 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     df2 = df2[required].copy()
     df2["supplier_id"] = df2["supplier_id"].astype(str)
+
     for c in required:
         if c == "supplier_id":
             continue
         df2[c] = pd.to_numeric(df2[c], errors="coerce").fillna(0.0).astype(float)
+
     return df2
 
 
 def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
-    col_map = {
-        "user": "user_id",
-        "users": "user_id",
-        "user_id": "user_id",
-        "user id": "user_id",
-        "environmental risk": "w_env",
-        "env risk": "w_env",
-        "w_env": "w_env",
-        "social risk": "w_social",
-        "w_social": "w_social",
-        "cost score": "w_cost",
-        "cost": "w_cost",
-        "w_cost": "w_cost",
-        "strategic importance": "w_strategic",
-        "strategic": "w_strategic",
-        "w_strategic": "w_strategic",
-        "improvement potential": "w_improvement",
-        "improvement": "w_improvement",
-        "w_improvement": "w_improvement",
-        "low product quality": "w_low_quality",
-        "low quality": "w_low_quality",
-        "w_low_quality": "w_low_quality",
-    }
-
+    """Kept for compatibility (UI doesn't use users in the Profit–Risk game)."""
     df2 = df.copy()
     df2.columns = [str(c).strip() for c in df2.columns]
+
+    # Minimal normalization: ensure a user_id column exists if present.
+    if "user_id" not in [c.lower() for c in df2.columns]:
+        # if there's no user sheet or it's unused, return empty
+        return pd.DataFrame(columns=["user_id"]).copy()
+
+    # Best-effort rename
     rename = {}
     for c in df2.columns:
-        key = str(c).strip().lower()
-        if key in col_map:
-            rename[c] = col_map[key]
+        if str(c).strip().lower() in {"user", "users", "user id", "user_id"}:
+            rename[c] = "user_id"
     df2 = df2.rename(columns=rename)
 
-    required = ["user_id", "w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]
-    missing = [c for c in required if c not in df2.columns]
-    if missing:
-        raise ValueError(f"User sheet is missing columns: {missing}")
+    if "user_id" not in df2.columns:
+        return pd.DataFrame(columns=["user_id"]).copy()
 
-    df2 = df2[required].copy()
     df2["user_id"] = df2["user_id"].astype(str)
-    for c in required:
-        if c == "user_id":
-            continue
-        df2[c] = pd.to_numeric(df2[c], errors="coerce").fillna(0.0).astype(float)
-
-    # Make low-quality weight subtract in utility
-    df2["w_low_quality"] = -df2["w_low_quality"].astype(float)
     return df2
 
 
@@ -180,732 +146,369 @@ def load_supplier_user_tables(xlsx_path: Optional[Union[str, Path]] = None) -> T
         raise FileNotFoundError(f"Excel file not found at: {path}")
 
     suppliers_raw = pd.read_excel(path, sheet_name="Supplier", engine="openpyxl")
-    users_raw = pd.read_excel(path, sheet_name="User", engine="openpyxl")
+
+    # user sheet is optional for this game
+    try:
+        users_raw = pd.read_excel(path, sheet_name="User", engine="openpyxl")
+    except Exception:
+        users_raw = pd.DataFrame()
 
     return _normalize_supplier_columns(suppliers_raw), _normalize_user_columns(users_raw)
 
 
 # ---------------------------------------------------------------------
-# Shared helpers
+# Profit–Risk game configs
 # ---------------------------------------------------------------------
-def _select_last_n_users(users_df: pd.DataFrame, last_n: int) -> List[str]:
-    users = users_df["user_id"].astype(str).tolist()
-    n = max(0, int(last_n))
-    return users[-n:] if n > 0 else users
-
-
-def _auto_big_m(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, selected_users: List[str]) -> float:
-    p = policy
-    s = suppliers_df
-    u = users_df[users_df["user_id"].isin(selected_users)].copy()
-
-    max_s = {
-        "env_risk": float((p.env_mult * s["env_risk"]).abs().max()),
-        "social_risk": float((p.social_mult * s["social_risk"]).abs().max()),
-        "cost_score": float((p.cost_mult * s["cost_score"]).abs().max()),
-        "strategic": float((p.strategic_mult * s["strategic"]).abs().max()),
-        "improvement": float((p.improvement_mult * s["improvement"]).abs().max()),
-        "low_quality": float((p.low_quality_mult * s["low_quality"]).abs().max()),
-    }
-    max_u = {
-        "w_env": float(u["w_env"].abs().max() if len(u) else 0.0),
-        "w_social": float(u["w_social"].abs().max() if len(u) else 0.0),
-        "w_cost": float(u["w_cost"].abs().max() if len(u) else 0.0),
-        "w_strategic": float(u["w_strategic"].abs().max() if len(u) else 0.0),
-        "w_improvement": float(u["w_improvement"].abs().max() if len(u) else 0.0),
-        "w_low_quality": float(u["w_low_quality"].abs().max() if len(u) else 0.0),
-    }
-
-    pref_max = (
-        max_u["w_env"] * max_s["env_risk"]
-        + max_u["w_social"] * max_s["social_risk"]
-        + max_u["w_cost"] * max_s["cost_score"]
-        + max_u["w_strategic"] * max_s["strategic"]
-        + max_u["w_improvement"] * max_s["improvement"]
-        + max_u["w_low_quality"] * max_s["low_quality"]
-    )
-    return float(pref_max + 10.0)
-
-
-def _apply_hard_bans(m: "gp.Model", y, suppliers_df: pd.DataFrame, pol: Policy) -> None:
-    Suppliers = suppliers_df["supplier_id"].astype(str).tolist()
-    s_child = dict(zip(suppliers_df["supplier_id"].astype(str), suppliers_df["child_labor"].astype(float)))
-    s_ban = dict(zip(suppliers_df["supplier_id"].astype(str), suppliers_df["banned_chem"].astype(float)))
-
-    if float(pol.child_labor_penalty) >= 0.5:
-        for i in Suppliers:
-            if float(s_child.get(i, 0.0)) >= 0.5:
-                m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
-    if float(pol.banned_chem_penalty) >= 0.5:
-        for i in Suppliers:
-            if float(s_ban.get(i, 0.0)) >= 0.5:
-                m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
-
-
-def _apply_fixed_suppliers(m: "gp.Model", y, all_suppliers: List[str], fixed_suppliers: Optional[List[str]], expected_k: int) -> None:
-    if not fixed_suppliers:
-        return
-
-    fixed = [str(x) for x in fixed_suppliers]
-    unknown = [x for x in fixed if x not in set(all_suppliers)]
-    if unknown:
-        raise ValueError(f"Unknown supplier_id in manual selection: {unknown}")
-
-    if len(fixed) != int(expected_k):
-        raise ValueError(f"Manual selection must contain exactly K={expected_k} suppliers (got {len(fixed)}).")
-
-    fixed_set = set(fixed)
-    for i in all_suppliers:
-        m.addConstr(y[i] == (1 if i in fixed_set else 0), name=f"fix_y[{i}]")
-
-
-# ---------------------------------------------------------------------
-# Max Profit Agent
-# ---------------------------------------------------------------------
-@dataclass
-class MaxProfitConfig:
-    last_n_users: int = 6
-    capacity: int = 6
-    suppliers_to_select: int = 1
-    price_per_match: float = 100.0
-    min_utility: float = 0.0
-    output_flag: int = 0
-    big_m: Optional[float] = None
-
-    # NEW: if provided, y is fixed to this set and only matching is optimized
-    fixed_suppliers: Optional[List[str]] = None
-
-
-class MaxProfitAgent:
-    def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, cfg: MaxProfitConfig):
-        if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
-
-        self.suppliers = suppliers_df.copy()
-        self.users = users_df.copy()
-        self.policy = policy.clamp_nonnegative()
-        self.cfg = cfg
-
-        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
-        self.users["user_id"] = self.users["user_id"].astype(str)
-
-        self.model: Optional["gp.Model"] = None
-        self.y = None
-        self.z = None
-        self._selected_users: List[str] = _select_last_n_users(self.users, cfg.last_n_users)
-
-    def build(self, name: str = "MaxProfitAgent") -> "gp.Model":
-        cfg = self.cfg
-        pol = self.policy
-
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        Users = self._selected_users
-
-        # Supplier attributes
-        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
-        s_social = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
-        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
-        s_str = dict(zip(self.suppliers["supplier_id"], self.suppliers["strategic"]))
-        s_imp = dict(zip(self.suppliers["supplier_id"], self.suppliers["improvement"]))
-        s_lq = dict(zip(self.suppliers["supplier_id"], self.suppliers["low_quality"]))
-        s_child = dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"]))
-        s_banned = dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"]))
-
-        # User weights
-        udf = self.users[self.users["user_id"].isin(Users)].copy()
-        u_env = dict(zip(udf["user_id"], udf["w_env"]))
-        u_soc = dict(zip(udf["user_id"], udf["w_social"]))
-        u_cost = dict(zip(udf["user_id"], udf["w_cost"]))
-        u_str = dict(zip(udf["user_id"], udf["w_strategic"]))
-        u_imp = dict(zip(udf["user_id"], udf["w_improvement"]))
-        u_lq = dict(zip(udf["user_id"], udf["w_low_quality"]))  # NEG
-
-        M = float(cfg.big_m) if cfg.big_m is not None else _auto_big_m(self.suppliers, self.users, pol, Users)
-
-        m = gp.Model(name)
-        m.Params.OutputFlag = int(cfg.output_flag)
-
-        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
-        z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
-
-        # Hard bans (policy toggles)
-        if float(pol.child_labor_penalty) >= 0.5:
-            for i in Suppliers:
-                if float(s_child[i]) >= 0.5:
-                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
-        if float(pol.banned_chem_penalty) >= 0.5:
-            for i in Suppliers:
-                if float(s_banned[i]) >= 0.5:
-                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
-
-        # NEW: manual selection support (fix y)
-        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, int(cfg.suppliers_to_select))
-
-        # Select exactly K suppliers (redundant if fixed_suppliers is set, but kept for safety)
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
-
-        # Each user at most once
-        for u in Users:
-            m.addConstr(gp.quicksum(z[i, u] for i in Suppliers) <= 1, name=f"user_once[{u}]")
-
-        # Linking
-        for i in Suppliers:
-            for u in Users:
-                m.addConstr(z[i, u] <= y[i], name=f"link[{i},{u}]")
-
-        # Capacity
-        m.addConstr(gp.quicksum(z[i, u] for i in Suppliers for u in Users) <= int(cfg.capacity), name="capacity")
-
-        # Utility threshold
-        for i in Suppliers:
-            for u in Users:
-                utility = (
-                    (u_env[u] * (pol.env_mult * s_env[i]))
-                    + (u_soc[u] * (pol.social_mult * s_social[i]))
-                    + (u_cost[u] * (pol.cost_mult * s_cost[i]))
-                    + (u_str[u] * (pol.strategic_mult * s_str[i]))
-                    + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
-                    + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
-                )
-                m.addConstr(utility >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"utility[{i},{u}]")
-
-        # Profit = (matched_people * price) - (cost_mult*cost_score)
-        cost_prod = {i: float(pol.cost_mult * s_cost[i]) for i in Suppliers}
-        Z_profit = gp.quicksum((float(cfg.price_per_match) - cost_prod[i]) * z[i, u] for i in Suppliers for u in Users)
-        m.setObjective(Z_profit, GRB.MAXIMIZE)
-
-        self.model, self.y, self.z = m, y, z
-        return m
-
-    def solve(self) -> Dict[str, Any]:
-        if self.model is None:
-            self.build()
-
-        assert self.model is not None
-        self.model.optimize()
-
-        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            raise RuntimeError(f"No solution. Status={self.model.Status}")
-
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        Users = self._selected_users
-
-        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
-        pairs: List[Tuple[str, str]] = [(u, i) for i in Suppliers for u in Users if self.z[i, u].X > 0.5]
-        df = pd.DataFrame(pairs, columns=["user_id", "supplier_id"])
-
-        pol = self.policy
-        s = self.suppliers.set_index("supplier_id")
-        u = self.users.set_index("user_id")
-
-        if len(df):
-            df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
-            df["margin"] = float(self.cfg.price_per_match) - df["cost_prod"]
-
-            def _utility(row: pd.Series) -> float:
-                sid = row["supplier_id"]
-                uid = row["user_id"]
-                return float(
-                    u.loc[uid, "w_env"] * (pol.env_mult * s.loc[sid, "env_risk"])
-                    + u.loc[uid, "w_social"] * (pol.social_mult * s.loc[sid, "social_risk"])
-                    + u.loc[uid, "w_cost"] * (pol.cost_mult * s.loc[sid, "cost_score"])
-                    + u.loc[uid, "w_strategic"] * (pol.strategic_mult * s.loc[sid, "strategic"])
-                    + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
-                    + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
-                )
-
-            df["utility"] = df.apply(_utility, axis=1)
-            df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
-        else:
-            df["cost_prod"] = []
-            df["margin"] = []
-            df["utility"] = []
-
-        return {
-            "status": int(self.model.Status),
-            "objective_value": float(self.model.ObjVal),
-            "chosen_suppliers": chosen,
-            "selected_users": Users,
-            "num_matched": int(len(pairs)),
-            "matches": df,
-            "policy": self.policy.to_dict(),
-            "cfg": self.cfg,
-        }
-
-
-# ---------------------------------------------------------------------
-# Profit–Risk Supplier Selection (NO matching; product is average of chosen suppliers)
-# ---------------------------------------------------------------------
-
 
 @dataclass
 class ProfitRiskConfig:
-    """Simplified game variant.
-
-    - Choose a set of K suppliers.
-    - The delivered product is the *average* of those suppliers.
-    - Total served end-users is fixed.
-
-    Profit:
-      profit_per_user = price_per_user - cost_scale * avg(cost_score)
-      profit_total    = served_users * profit_per_user
-
-    Risk constraints:
-      avg(env_risk)    <= env_cap
-      avg(social_risk) <= social_cap
-    """
-
-    suppliers_to_select: int = 1
     served_users: int = 10
     price_per_user: float = 100.0
-    cost_scale: float = 10.0
+
     env_cap: float = 2.75
     social_cap: float = 3.0
+    cost_scale: float = 10.0
+
+    # optional bans (kept for future scenarios)
+    ban_child_labor: bool = False
+    ban_banned_chem: bool = False
+
+    # subset-size search range ("no K" means we search over k)
+    min_k: int = 1
+    max_k: Optional[int] = None
+
     output_flag: int = 0
-    fixed_suppliers: Optional[List[str]] = None
 
 
 @dataclass
 class ProfitRiskMinRiskConfig(ProfitRiskConfig):
-    min_profit_per_user: Optional[float] = None
+    profit_floor_per_user: float = 0.0
 
 
-@dataclass
-class ProfitRiskTradeoffConfig(ProfitRiskConfig):
-    weight_on_profit: float = 0.5
-    risk_scale: Optional[float] = None
+# ---------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------
+
+def _compute_metrics_from_picks(suppliers_df: pd.DataFrame, picks: List[str], cfg: ProfitRiskConfig) -> Dict[str, Any]:
+    picks = [str(x) for x in (picks or [])]
+    sub = suppliers_df[suppliers_df["supplier_id"].astype(str).isin(picks)].copy()
+
+    k = int(len(sub))
+    if k == 0:
+        return {
+            "chosen_suppliers": [],
+            "k": 0,
+            "avg_env": 0.0,
+            "avg_social": 0.0,
+            "avg_cost": 0.0,
+            "profit_per_user": 0.0,
+            "profit_total": 0.0,
+            "risk_score": 0.0,
+            "feasible": False,
+        }
+
+    avg_env = float(sub["env_risk"].mean())
+    avg_social = float(sub["social_risk"].mean())
+    avg_cost = float(sub["cost_score"].mean())
+
+    profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * avg_cost
+    profit_total = float(cfg.served_users) * profit_per_user
+
+    risk_score = 0.5 * ((avg_env / float(cfg.env_cap)) + (avg_social / float(cfg.social_cap)))
+
+    feasible = (avg_env <= float(cfg.env_cap) + 1e-9) and (avg_social <= float(cfg.social_cap) + 1e-9)
+
+    if float(cfg.profit_floor_per_user) > 0.0 if isinstance(cfg, ProfitRiskMinRiskConfig) else False:
+        feasible = feasible and (profit_per_user >= float(cfg.profit_floor_per_user) - 1e-9)
+
+    return {
+        "chosen_suppliers": sorted([str(x) for x in sub["supplier_id"].tolist()]),
+        "k": k,
+        "avg_env": avg_env,
+        "avg_social": avg_social,
+        "avg_cost": avg_cost,
+        "profit_per_user": profit_per_user,
+        "profit_total": profit_total,
+        "risk_score": float(risk_score),
+        "feasible": bool(feasible),
+    }
 
 
-def _avg_linear_expr(y: "gp.tupledict", items: List[str], values: Dict[str, float], k: int):
-    """Linear expression: average over chosen items (sum(values[i]*y[i]) / k)."""
-    return (1.0 / float(k)) * gp.quicksum(float(values[i]) * y[i] for i in items)
+def _apply_bans(m: "gp.Model", y, suppliers_df: pd.DataFrame, cfg: ProfitRiskConfig) -> None:
+    if not (cfg.ban_child_labor or cfg.ban_banned_chem):
+        return
+
+    s_child = dict(zip(suppliers_df["supplier_id"].astype(str), suppliers_df["child_labor"].astype(float)))
+    s_ban = dict(zip(suppliers_df["supplier_id"].astype(str), suppliers_df["banned_chem"].astype(float)))
+
+    for sid in suppliers_df["supplier_id"].astype(str).tolist():
+        if cfg.ban_child_labor and float(s_child.get(sid, 0.0)) >= 0.5:
+            m.addConstr(y[sid] == 0, name=f"ban_child_labor[{sid}]")
+        if cfg.ban_banned_chem and float(s_ban.get(sid, 0.0)) >= 0.5:
+            m.addConstr(y[sid] == 0, name=f"ban_banned_chem[{sid}]")
 
 
-def _risk_score_expr(avg_env, avg_soc, env_cap: float, social_cap: float):
-    """Normalized average risk in ~[0,1] when caps are satisfied."""
-    return 0.5 * ((avg_env / float(env_cap)) + (avg_soc / float(social_cap)))
+# ---------------------------------------------------------------------
+# Optimization core (exact, by enumerating k)
+# ---------------------------------------------------------------------
 
+def _solve_fixed_k(
+    suppliers_df: pd.DataFrame,
+    cfg: ProfitRiskConfig,
+    k: int,
+    *,
+    objective: str,
+    profit_floor_per_user: Optional[float] = None,
+    risk_score_cap: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """Solve one MILP for a fixed subset size k.
+
+    objective:
+      - "min_total_cost" for max-profit (since profit increases as avg cost decreases)
+      - "min_norm_risk_sum" for min-risk
+
+    Returns solution dict or None if infeasible.
+    """
+
+    if not GUROBI_AVAILABLE:
+        raise RuntimeError("gurobipy is not available.")
+
+    Suppliers = suppliers_df["supplier_id"].astype(str).tolist()
+
+    env = dict(zip(Suppliers, suppliers_df["env_risk"].astype(float)))
+    soc = dict(zip(Suppliers, suppliers_df["social_risk"].astype(float)))
+    cost = dict(zip(Suppliers, suppliers_df["cost_score"].astype(float)))
+
+    m = gp.Model("ProfitRiskFixedK")
+    m.Params.OutputFlag = int(cfg.output_flag)
+
+    y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y")
+
+    # fixed subset size
+    m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(k), name="fixed_k")
+
+    _apply_bans(m, y, suppliers_df, cfg)
+
+    # risk caps (average <= cap  <=>  sum <= cap * k)
+    m.addConstr(gp.quicksum(env[i] * y[i] for i in Suppliers) <= float(cfg.env_cap) * float(k), name="env_cap")
+    m.addConstr(gp.quicksum(soc[i] * y[i] for i in Suppliers) <= float(cfg.social_cap) * float(k), name="social_cap")
+
+    # optional combined risk-score cap:
+    # risk_score = 0.5 * (avg_env/env_cap + avg_soc/social_cap)
+    # => (sum(env)/env_cap + sum(soc)/social_cap) <= 2 * risk_score_cap * k
+    if risk_score_cap is not None:
+        lhs = gp.quicksum((env[i] / float(cfg.env_cap) + soc[i] / float(cfg.social_cap)) * y[i] for i in Suppliers)
+        m.addConstr(lhs <= (2.0 * float(risk_score_cap) * float(k)), name="risk_score_cap")
+
+    # optional profit floor
+    if profit_floor_per_user is not None:
+        # price - cost_scale * avg_cost >= floor
+        # avg_cost <= (price - floor)/cost_scale
+        avg_cost_cap = (float(cfg.price_per_user) - float(profit_floor_per_user)) / max(1e-9, float(cfg.cost_scale))
+        m.addConstr(gp.quicksum(cost[i] * y[i] for i in Suppliers) <= float(avg_cost_cap) * float(k), name="profit_floor")
+
+    # objective
+    if objective == "min_total_cost":
+        m.setObjective(gp.quicksum(cost[i] * y[i] for i in Suppliers), GRB.MINIMIZE)
+    elif objective == "min_norm_risk_sum":
+        # minimize sum(env)/env_cap + sum(soc)/social_cap
+        m.setObjective(
+            gp.quicksum((env[i] / float(cfg.env_cap) + soc[i] / float(cfg.social_cap)) * y[i] for i in Suppliers),
+            GRB.MINIMIZE,
+        )
+    else:
+        raise ValueError(f"Unknown objective: {objective}")
+
+    m.optimize()
+
+    if m.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+        return None
+
+    picks = [i for i in Suppliers if y[i].X > 0.5]
+    metrics = _compute_metrics_from_picks(suppliers_df, picks, cfg)
+    metrics["_k_fixed"] = int(k)
+    metrics["_solver_obj"] = float(m.ObjVal)
+    return metrics
+
+
+# ---------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------
 
 class ProfitRiskMaxProfitAgent:
-    """Choose K suppliers to maximize profit under average risk caps."""
+    """Maximize profit with no fixed K by searching over k."""
 
     def __init__(self, suppliers_df: pd.DataFrame, cfg: ProfitRiskConfig):
-        if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
         self.suppliers = suppliers_df.copy()
-        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
         self.cfg = cfg
-        self.model: Optional["gp.Model"] = None
-        self.y = None
-
-    def build(self, name: str = "ProfitRiskMaxProfit") -> "gp.Model":
-        cfg = self.cfg
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        K = int(cfg.suppliers_to_select)
-        if K <= 0:
-            raise ValueError("suppliers_to_select must be >= 1")
-
-        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
-        s_soc = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
-        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
-
-        m = gp.Model(name)
-        m.Params.OutputFlag = int(cfg.output_flag)
-        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
-
-        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, K)
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == K, name="select_k")
-
-        avg_env = _avg_linear_expr(y, Suppliers, s_env, K)
-        avg_soc = _avg_linear_expr(y, Suppliers, s_soc, K)
-        avg_cost = _avg_linear_expr(y, Suppliers, s_cost, K)
-
-        m.addConstr(avg_env <= float(cfg.env_cap), name="env_cap")
-        m.addConstr(avg_soc <= float(cfg.social_cap), name="social_cap")
-
-        profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * avg_cost
-        profit_total = float(cfg.served_users) * profit_per_user
-        m.setObjective(profit_total, GRB.MAXIMIZE)
-
-        self.model, self.y = m, y
-        return m
 
     def solve(self) -> Dict[str, Any]:
-        if self.model is None:
-            self.build()
-        assert self.model is not None
-        self.model.optimize()
-        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            raise RuntimeError(f"No solution. Status={self.model.Status}")
+        cfg = self.cfg
+        n = int(len(self.suppliers))
+        min_k = max(1, int(cfg.min_k))
+        max_k = int(cfg.max_k) if cfg.max_k is not None else n
+        max_k = max(min_k, min(max_k, n))
 
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
+        best: Optional[Dict[str, Any]] = None
 
-        sub = self.suppliers[self.suppliers["supplier_id"].isin(chosen)].copy()
-        avg_env = float(sub["env_risk"].mean()) if len(sub) else 0.0
-        avg_soc = float(sub["social_risk"].mean()) if len(sub) else 0.0
-        avg_cost = float(sub["cost_score"].mean()) if len(sub) else 0.0
+        for k in range(min_k, max_k + 1):
+            sol = _solve_fixed_k(self.suppliers, cfg, k, objective="min_total_cost")
+            if sol is None or not sol.get("feasible", False):
+                continue
 
-        profit_per_user = float(self.cfg.price_per_user) - float(self.cfg.cost_scale) * avg_cost
-        profit_total = float(self.cfg.served_users) * profit_per_user
-        risk_score = float(0.5 * ((avg_env / float(self.cfg.env_cap)) + (avg_soc / float(self.cfg.social_cap))))
+            if best is None:
+                best = sol
+                continue
 
-        return {
-            "status": int(self.model.Status),
-            "objective_value": float(self.model.ObjVal),
-            "chosen_suppliers": chosen,
-            "avg_env": avg_env,
-            "avg_social": avg_soc,
-            "avg_cost": avg_cost,
-            "profit_per_user": profit_per_user,
-            "profit_total": profit_total,
-            "risk_score": risk_score,
-            "cfg": self.cfg,
-        }
+            # primary: profit_total (higher better)
+            if float(sol["profit_total"]) > float(best["profit_total"]) + 1e-9:
+                best = sol
+                continue
+
+            # tie-break: lower risk_score
+            if abs(float(sol["profit_total"]) - float(best["profit_total"])) <= 1e-9:
+                if float(sol["risk_score"]) < float(best["risk_score"]) - 1e-9:
+                    best = sol
+                    continue
+
+                # tie-break: fewer suppliers
+                if abs(float(sol["risk_score"]) - float(best["risk_score"])) <= 1e-9:
+                    if int(sol["k"]) < int(best["k"]):
+                        best = sol
+
+        if best is None:
+            raise RuntimeError("No feasible solution found under the risk caps.")
+
+        return best
 
 
 class ProfitRiskMinRiskAgent:
-    """Choose K suppliers to minimize risk_score under caps (and optional profit floor)."""
+    """Minimize risk_score with no fixed K by searching over k (optionally with a profit floor)."""
 
     def __init__(self, suppliers_df: pd.DataFrame, cfg: ProfitRiskMinRiskConfig):
-        if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
         self.suppliers = suppliers_df.copy()
-        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
         self.cfg = cfg
-        self.model: Optional["gp.Model"] = None
-        self.y = None
-
-    def build(self, name: str = "ProfitRiskMinRisk") -> "gp.Model":
-        cfg = self.cfg
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        K = int(cfg.suppliers_to_select)
-        if K <= 0:
-            raise ValueError("suppliers_to_select must be >= 1")
-
-        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
-        s_soc = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
-        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
-
-        m = gp.Model(name)
-        m.Params.OutputFlag = int(cfg.output_flag)
-        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
-
-        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, K)
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == K, name="select_k")
-
-        avg_env = _avg_linear_expr(y, Suppliers, s_env, K)
-        avg_soc = _avg_linear_expr(y, Suppliers, s_soc, K)
-        avg_cost = _avg_linear_expr(y, Suppliers, s_cost, K)
-
-        m.addConstr(avg_env <= float(cfg.env_cap), name="env_cap")
-        m.addConstr(avg_soc <= float(cfg.social_cap), name="social_cap")
-
-        profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * avg_cost
-        if cfg.min_profit_per_user is not None:
-            m.addConstr(profit_per_user >= float(cfg.min_profit_per_user), name="profit_floor")
-
-        risk_score = _risk_score_expr(avg_env, avg_soc, cfg.env_cap, cfg.social_cap)
-        m.setObjective(risk_score, GRB.MINIMIZE)
-
-        self.model, self.y = m, y
-        return m
 
     def solve(self) -> Dict[str, Any]:
-        if self.model is None:
-            self.build()
-        assert self.model is not None
-        self.model.optimize()
-        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            raise RuntimeError(f"No solution. Status={self.model.Status}")
-
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
-
-        sub = self.suppliers[self.suppliers["supplier_id"].isin(chosen)].copy()
-        avg_env = float(sub["env_risk"].mean()) if len(sub) else 0.0
-        avg_soc = float(sub["social_risk"].mean()) if len(sub) else 0.0
-        avg_cost = float(sub["cost_score"].mean()) if len(sub) else 0.0
-
-        profit_per_user = float(self.cfg.price_per_user) - float(self.cfg.cost_scale) * avg_cost
-        profit_total = float(self.cfg.served_users) * profit_per_user
-        risk_score = float(0.5 * ((avg_env / float(self.cfg.env_cap)) + (avg_soc / float(self.cfg.social_cap))))
-
-        return {
-            "status": int(self.model.Status),
-            "objective_value": float(self.model.ObjVal),
-            "chosen_suppliers": chosen,
-            "avg_env": avg_env,
-            "avg_social": avg_soc,
-            "avg_cost": avg_cost,
-            "profit_per_user": profit_per_user,
-            "profit_total": profit_total,
-            "risk_score": risk_score,
-            "cfg": self.cfg,
-        }
-
-
-class ProfitRiskTradeoffAgent:
-    """Choose K suppliers to maximize weighted profit vs (negative) risk."""
-
-    def __init__(self, suppliers_df: pd.DataFrame, cfg: ProfitRiskTradeoffConfig):
-        if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
-        self.suppliers = suppliers_df.copy()
-        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
-        self.cfg = cfg
-        self.model: Optional["gp.Model"] = None
-        self.y = None
-
-    def build(self, name: str = "ProfitRiskTradeoff") -> "gp.Model":
         cfg = self.cfg
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        K = int(cfg.suppliers_to_select)
-        if K <= 0:
-            raise ValueError("suppliers_to_select must be >= 1")
+        n = int(len(self.suppliers))
+        min_k = max(1, int(cfg.min_k))
+        max_k = int(cfg.max_k) if cfg.max_k is not None else n
+        max_k = max(min_k, min(max_k, n))
 
-        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
-        s_soc = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
-        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
+        best: Optional[Dict[str, Any]] = None
 
-        m = gp.Model(name)
-        m.Params.OutputFlag = int(cfg.output_flag)
-        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
+        for k in range(min_k, max_k + 1):
+            sol = _solve_fixed_k(
+                self.suppliers,
+                cfg,
+                k,
+                objective="min_norm_risk_sum",
+                profit_floor_per_user=float(cfg.profit_floor_per_user),
+            )
+            if sol is None or not sol.get("feasible", False):
+                continue
 
-        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, K)
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == K, name="select_k")
+            if best is None:
+                best = sol
+                continue
 
-        avg_env = _avg_linear_expr(y, Suppliers, s_env, K)
-        avg_soc = _avg_linear_expr(y, Suppliers, s_soc, K)
-        avg_cost = _avg_linear_expr(y, Suppliers, s_cost, K)
+            # primary: risk_score (lower better)
+            if float(sol["risk_score"]) < float(best["risk_score"]) - 1e-9:
+                best = sol
+                continue
 
-        m.addConstr(avg_env <= float(cfg.env_cap), name="env_cap")
-        m.addConstr(avg_soc <= float(cfg.social_cap), name="social_cap")
+            # tie-break: higher profit_total
+            if abs(float(sol["risk_score"]) - float(best["risk_score"])) <= 1e-9:
+                if float(sol["profit_total"]) > float(best["profit_total"]) + 1e-9:
+                    best = sol
+                    continue
 
-        profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * avg_cost
-        risk_score = _risk_score_expr(avg_env, avg_soc, cfg.env_cap, cfg.social_cap)
+                # tie-break: fewer suppliers
+                if abs(float(sol["profit_total"]) - float(best["profit_total"])) <= 1e-9:
+                    if int(sol["k"]) < int(best["k"]):
+                        best = sol
 
-        w = min(1.0, max(0.0, float(cfg.weight_on_profit)))
-        risk_scale = float(cfg.risk_scale) if cfg.risk_scale is not None else float(cfg.price_per_user)
-        obj = (w * profit_per_user) - ((1.0 - w) * risk_scale * risk_score)
-        m.setObjective(obj, GRB.MAXIMIZE)
+        if best is None:
+            raise RuntimeError("No feasible solution found for min-risk under the current constraints.")
 
-        self.model, self.y = m, y
-        return m
-
-    def solve(self) -> Dict[str, Any]:
-        if self.model is None:
-            self.build()
-        assert self.model is not None
-        self.model.optimize()
-        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            raise RuntimeError(f"No solution. Status={self.model.Status}")
-
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
-
-        sub = self.suppliers[self.suppliers["supplier_id"].isin(chosen)].copy()
-        avg_env = float(sub["env_risk"].mean()) if len(sub) else 0.0
-        avg_soc = float(sub["social_risk"].mean()) if len(sub) else 0.0
-        avg_cost = float(sub["cost_score"].mean()) if len(sub) else 0.0
-
-        profit_per_user = float(self.cfg.price_per_user) - float(self.cfg.cost_scale) * avg_cost
-        profit_total = float(self.cfg.served_users) * profit_per_user
-        risk_score = float(0.5 * ((avg_env / float(self.cfg.env_cap)) + (avg_soc / float(self.cfg.social_cap))))
-
-        return {
-            "status": int(self.model.Status),
-            "objective_value": float(self.model.ObjVal),
-            "chosen_suppliers": chosen,
-            "avg_env": avg_env,
-            "avg_social": avg_soc,
-            "avg_cost": avg_cost,
-            "profit_per_user": profit_per_user,
-            "profit_total": profit_total,
-            "risk_score": risk_score,
-            "cfg": self.cfg,
-        }
+        return best
 
 
-# ---------------------------------------------------------------------
-# Min Cost Agent
-# ---------------------------------------------------------------------
-@dataclass
-class MinCostConfig:
-    last_n_users: int = 6
-    capacity: int = 6
-    matches_to_make: int = 6
-    suppliers_to_select: int = 1
-    min_utility: float = 0.0
-    output_flag: int = 0
-    big_m: Optional[float] = None
+class ProfitRiskCurveAgent:
+    """Generate a profit–risk curve by tightening a combined risk_score cap and maximizing profit."""
 
-    # NEW: if provided, y is fixed to this set and only matching is optimized
-    fixed_suppliers: Optional[List[str]] = None
-
-
-class MinCostAgent:
-    def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, cfg: MinCostConfig):
-        if not GUROBI_AVAILABLE:
-            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
-
+    def __init__(self, suppliers_df: pd.DataFrame, cfg: ProfitRiskConfig):
         self.suppliers = suppliers_df.copy()
-        self.users = users_df.copy()
-        self.policy = policy.clamp_nonnegative()
         self.cfg = cfg
 
-        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
-        self.users["user_id"] = self.users["user_id"].astype(str)
+    def compute_curve(self, n_points: int = 9) -> List[Dict[str, Any]]:
+        n_points = int(n_points)
+        if n_points < 3:
+            n_points = 3
 
-        self._selected_users: List[str] = _select_last_n_users(self.users, cfg.last_n_users)
+        # Find a practical minimum risk_score (best possible under caps)
+        min_risk_sol = ProfitRiskMinRiskAgent(self.suppliers, ProfitRiskMinRiskConfig(**self.cfg.__dict__, profit_floor_per_user=0.0)).solve()
+        r_min = float(min_risk_sol["risk_score"])
+        r_max = 1.0
 
-        cap = int(cfg.capacity)
-        m = int(cfg.matches_to_make)
-        if m < 0:
-            raise ValueError("matches_to_make must be >= 0.")
-        if cap < 0:
-            raise ValueError("capacity must be >= 0.")
-        if m > cap:
-            raise ValueError(f"matches_to_make ({m}) cannot exceed capacity ({cap}).")
+        # spaced caps
+        caps = [r_min + (r_max - r_min) * (i / (n_points - 1)) for i in range(n_points)]
 
-        self.model: Optional["gp.Model"] = None
-        self.y = None
-        self.z = None
+        rows: List[Dict[str, Any]] = []
 
-    def build(self, name: str = "MinCostAgent") -> "gp.Model":
-        cfg = self.cfg
-        pol = self.policy
+        n = int(len(self.suppliers))
+        min_k = max(1, int(self.cfg.min_k))
+        max_k = int(self.cfg.max_k) if self.cfg.max_k is not None else n
+        max_k = max(min_k, min(max_k, n))
 
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        Users = self._selected_users
-
-        # Supplier attributes
-        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
-        s_social = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
-        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
-        s_str = dict(zip(self.suppliers["supplier_id"], self.suppliers["strategic"]))
-        s_imp = dict(zip(self.suppliers["supplier_id"], self.suppliers["improvement"]))
-        s_lq = dict(zip(self.suppliers["supplier_id"], self.suppliers["low_quality"]))
-        s_child = dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"]))
-        s_banned = dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"]))
-
-        # User weights
-        udf = self.users[self.users["user_id"].isin(Users)].copy()
-        u_env = dict(zip(udf["user_id"], udf["w_env"]))
-        u_soc = dict(zip(udf["user_id"], udf["w_social"]))
-        u_cost = dict(zip(udf["user_id"], udf["w_cost"]))
-        u_str = dict(zip(udf["user_id"], udf["w_strategic"]))
-        u_imp = dict(zip(udf["user_id"], udf["w_improvement"]))
-        u_lq = dict(zip(udf["user_id"], udf["w_low_quality"]))  # NEG
-
-        M = float(cfg.big_m) if cfg.big_m is not None else _auto_big_m(self.suppliers, self.users, pol, Users)
-
-        m = gp.Model(name)
-        m.Params.OutputFlag = int(cfg.output_flag)
-
-        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
-        z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
-
-        # Hard bans (policy toggles)
-        if float(pol.child_labor_penalty) >= 0.5:
-            for i in Suppliers:
-                if float(s_child[i]) >= 0.5:
-                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
-        if float(pol.banned_chem_penalty) >= 0.5:
-            for i in Suppliers:
-                if float(s_banned[i]) >= 0.5:
-                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
-
-        # NEW: manual selection support (fix y)
-        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, int(cfg.suppliers_to_select))
-
-        # Select exactly K suppliers
-        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
-
-        # Each user at most once
-        for u in Users:
-            m.addConstr(gp.quicksum(z[i, u] for i in Suppliers) <= 1, name=f"user_once[{u}]")
-
-        # Linking
-        for i in Suppliers:
-            for u in Users:
-                m.addConstr(z[i, u] <= y[i], name=f"link[{i},{u}]")
-
-        # Exact matches + capacity
-        total_matches = gp.quicksum(z[i, u] for i in Suppliers for u in Users)
-        m.addConstr(total_matches == int(cfg.matches_to_make), name="matches_exact")
-        m.addConstr(total_matches <= int(cfg.capacity), name="capacity")
-
-        # Utility threshold
-        for i in Suppliers:
-            for u in Users:
-                utility = (
-                    (u_env[u] * (pol.env_mult * s_env[i]))
-                    + (u_soc[u] * (pol.social_mult * s_social[i]))
-                    + (u_cost[u] * (pol.cost_mult * s_cost[i]))
-                    + (u_str[u] * (pol.strategic_mult * s_str[i]))
-                    + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
-                    + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
+        for cap in caps:
+            best: Optional[Dict[str, Any]] = None
+            for k in range(min_k, max_k + 1):
+                sol = _solve_fixed_k(
+                    self.suppliers,
+                    self.cfg,
+                    k,
+                    objective="min_total_cost",
+                    risk_score_cap=float(cap),
                 )
-                m.addConstr(utility >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"utility[{i},{u}]")
+                if sol is None or not sol.get("feasible", False):
+                    continue
 
-        # Objective: minimize total effective cost
-        cost_prod = {i: float(pol.cost_mult * s_cost[i]) for i in Suppliers}
-        Z_cost = gp.quicksum(cost_prod[i] * z[i, u] for i in Suppliers for u in Users)
-        m.setObjective(Z_cost, GRB.MINIMIZE)
+                if best is None:
+                    best = sol
+                    continue
 
-        self.model, self.y, self.z = m, y, z
-        return m
+                if float(sol["profit_total"]) > float(best["profit_total"]) + 1e-9:
+                    best = sol
 
-    def solve(self) -> Dict[str, Any]:
-        if self.model is None:
-            self.build()
-
-        assert self.model is not None
-        self.model.optimize()
-
-        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            raise RuntimeError(f"No solution. Status={self.model.Status}")
-
-        Suppliers = self.suppliers["supplier_id"].tolist()
-        Users = self._selected_users
-
-        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
-        pairs: List[Tuple[str, str]] = [(u, i) for i in Suppliers for u in Users if self.z[i, u].X > 0.5]
-        df = pd.DataFrame(pairs, columns=["user_id", "supplier_id"])
-
-        pol = self.policy
-        s = self.suppliers.set_index("supplier_id")
-        u = self.users.set_index("user_id")
-
-        if len(df):
-            df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
-
-            def _utility(row: pd.Series) -> float:
-                sid = row["supplier_id"]
-                uid = row["user_id"]
-                return float(
-                    u.loc[uid, "w_env"] * (pol.env_mult * s.loc[sid, "env_risk"])
-                    + u.loc[uid, "w_social"] * (pol.social_mult * s.loc[sid, "social_risk"])
-                    + u.loc[uid, "w_cost"] * (pol.cost_mult * s.loc[sid, "cost_score"])
-                    + u.loc[uid, "w_strategic"] * (pol.strategic_mult * s.loc[sid, "strategic"])
-                    + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
-                    + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
+            if best is None:
+                rows.append(
+                    {
+                        "risk_cap": float(cap),
+                        "risk_score": None,
+                        "profit_total": None,
+                        "profit_per_user": None,
+                        "avg_env": None,
+                        "avg_social": None,
+                        "avg_cost": None,
+                        "k": None,
+                        "suppliers": None,
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "risk_cap": float(cap),
+                        "risk_score": float(best["risk_score"]),
+                        "profit_total": float(best["profit_total"]),
+                        "profit_per_user": float(best["profit_per_user"]),
+                        "avg_env": float(best["avg_env"]),
+                        "avg_social": float(best["avg_social"]),
+                        "avg_cost": float(best["avg_cost"]),
+                        "k": int(best["k"]),
+                        "suppliers": ", ".join(best["chosen_suppliers"]),
+                    }
                 )
 
-            df["utility"] = df.apply(_utility, axis=1)
-            df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
-        else:
-            df["cost_prod"] = []
-            df["utility"] = []
-
-        return {
-            "status": int(self.model.Status),
-            "objective_value": float(self.model.ObjVal),
-            "chosen_suppliers": chosen,
-            "selected_users": Users,
-            "num_matched": int(len(pairs)),
-            "matches": df,
-            "policy": self.policy.to_dict(),
-            "cfg": self.cfg,
-        }
+        return rows
