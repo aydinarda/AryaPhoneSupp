@@ -615,3 +615,402 @@ class MinCostAgent:
             "policy": self.policy.to_dict(),
             "cfg": self.cfg,
         }
+
+
+# ---------------------------------------------------------------------
+# Max Utility Agent
+# ---------------------------------------------------------------------
+@dataclass
+class MaxUtilConfig:
+    last_n_users: int = 6
+    capacity: int = 6
+    suppliers_to_select: int = 1
+
+    # If provided, force exactly this many matches (recommended for the "game")
+    matches_to_make: Optional[int] = None
+
+    # Optional per-match minimum utility threshold (Big-M gated)
+    min_utility: float = 0.0
+
+    # Used only for reporting (profit/cost columns), objective ignores this.
+    price_per_match: float = 100.0
+
+    output_flag: int = 0
+    big_m: Optional[float] = None
+
+    # If provided, y is fixed to this set and only matching is optimized
+    fixed_suppliers: Optional[List[str]] = None
+
+
+class MaxUtilAgent:
+    """Select K suppliers and match users to maximize *total utility*."""
+
+    def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, cfg: MaxUtilConfig):
+        if not GUROBI_AVAILABLE:
+            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
+
+        self.suppliers = suppliers_df.copy()
+        self.users = users_df.copy()
+        self.policy = policy.clamp_nonnegative()
+        self.cfg = cfg
+
+        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
+        self.users["user_id"] = self.users["user_id"].astype(str)
+
+        self.model: Optional["gp.Model"] = None
+        self.y = None
+        self.z = None
+        self._selected_users: List[str] = _select_last_n_users(self.users, cfg.last_n_users)
+
+        if cfg.matches_to_make is not None:
+            m = int(cfg.matches_to_make)
+            cap = int(cfg.capacity)
+            if m < 0:
+                raise ValueError("matches_to_make must be >= 0.")
+            if cap < 0:
+                raise ValueError("capacity must be >= 0.")
+            if m > cap:
+                raise ValueError(f"matches_to_make ({m}) cannot exceed capacity ({cap}).")
+
+    def build(self, name: str = "MaxUtilAgent") -> "gp.Model":
+        cfg = self.cfg
+        pol = self.policy
+
+        Suppliers = self.suppliers["supplier_id"].tolist()
+        Users = self._selected_users
+
+        # Supplier attributes
+        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
+        s_social = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
+        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
+        s_str = dict(zip(self.suppliers["supplier_id"], self.suppliers["strategic"]))
+        s_imp = dict(zip(self.suppliers["supplier_id"], self.suppliers["improvement"]))
+        s_lq = dict(zip(self.suppliers["supplier_id"], self.suppliers["low_quality"]))
+        s_child = dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"]))
+        s_banned = dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"]))
+
+        # User weights
+        udf = self.users[self.users["user_id"].isin(Users)].copy()
+        u_env = dict(zip(udf["user_id"], udf["w_env"]))
+        u_soc = dict(zip(udf["user_id"], udf["w_social"]))
+        u_cost = dict(zip(udf["user_id"], udf["w_cost"]))
+        u_str = dict(zip(udf["user_id"], udf["w_strategic"]))
+        u_imp = dict(zip(udf["user_id"], udf["w_improvement"]))
+        u_lq = dict(zip(udf["user_id"], udf["w_low_quality"]))  # NEG
+
+        M = float(cfg.big_m) if cfg.big_m is not None else _auto_big_m(self.suppliers, self.users, pol, Users)
+
+        m = gp.Model(name)
+        m.Params.OutputFlag = int(cfg.output_flag)
+
+        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
+        z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
+
+        # Hard bans (policy toggles)
+        if float(pol.child_labor_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_child[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
+        if float(pol.banned_chem_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_banned[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
+
+        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, int(cfg.suppliers_to_select))
+
+        # Select exactly K suppliers
+        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
+
+        # Each user at most once
+        for u in Users:
+            m.addConstr(gp.quicksum(z[i, u] for i in Suppliers) <= 1, name=f"user_once[{u}]")
+
+        # Linking
+        for i in Suppliers:
+            for u in Users:
+                m.addConstr(z[i, u] <= y[i], name=f"link[{i},{u}]")
+
+        # Capacity (+ optional exact matches)
+        total_matches = gp.quicksum(z[i, u] for i in Suppliers for u in Users)
+        m.addConstr(total_matches <= int(cfg.capacity), name="capacity")
+        if cfg.matches_to_make is not None:
+            m.addConstr(total_matches == int(cfg.matches_to_make), name="matches_exact")
+
+        # Objective: maximize total utility
+        util_terms = {}
+        for i in Suppliers:
+            for u in Users:
+                util_iu = (
+                    (u_env[u] * (pol.env_mult * s_env[i]))
+                    + (u_soc[u] * (pol.social_mult * s_social[i]))
+                    + (u_cost[u] * (pol.cost_mult * s_cost[i]))
+                    + (u_str[u] * (pol.strategic_mult * s_str[i]))
+                    + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
+                    + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
+                )
+                util_terms[(i, u)] = util_iu
+                m.addConstr(util_iu >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"minutil[{i},{u}]")
+
+        m.setObjective(gp.quicksum(util_terms[(i, u)] * z[i, u] for i in Suppliers for u in Users), GRB.MAXIMIZE)
+
+        self.model, self.y, self.z = m, y, z
+        return m
+
+    def solve(self) -> Dict[str, Any]:
+        if self.model is None:
+            self.build()
+
+        assert self.model is not None
+        self.model.optimize()
+
+        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            raise RuntimeError(f"No solution. Status={self.model.Status}")
+
+        Suppliers = self.suppliers["supplier_id"].tolist()
+        Users = self._selected_users
+
+        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
+        pairs: List[Tuple[str, str]] = [(u, i) for i in Suppliers for u in Users if self.z[i, u].X > 0.5]
+        df = pd.DataFrame(pairs, columns=["user_id", "supplier_id"])
+
+        pol = self.policy
+        s = self.suppliers.set_index("supplier_id")
+        u = self.users.set_index("user_id")
+
+        if len(df):
+            df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
+            df["margin"] = float(self.cfg.price_per_match) - df["cost_prod"]
+
+            def _utility(row: pd.Series) -> float:
+                sid = row["supplier_id"]
+                uid = row["user_id"]
+                return float(
+                    u.loc[uid, "w_env"] * (pol.env_mult * s.loc[sid, "env_risk"])
+                    + u.loc[uid, "w_social"] * (pol.social_mult * s.loc[sid, "social_risk"])
+                    + u.loc[uid, "w_cost"] * (pol.cost_mult * s.loc[sid, "cost_score"])
+                    + u.loc[uid, "w_strategic"] * (pol.strategic_mult * s.loc[sid, "strategic"])
+                    + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
+                    + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
+                )
+
+            df["utility"] = df.apply(_utility, axis=1)
+            df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
+        else:
+            df["cost_prod"] = []
+            df["margin"] = []
+            df["utility"] = []
+
+        return {
+            "status": int(self.model.Status),
+            "objective_value": float(self.model.ObjVal),
+            "chosen_suppliers": chosen,
+            "selected_users": Users,
+            "num_matched": int(len(pairs)),
+            "matches": df,
+            "policy": self.policy.to_dict(),
+            "cfg": self.cfg,
+        }
+
+
+# ---------------------------------------------------------------------
+# Trade-off Agent (Profit ↔ Utility)
+# ---------------------------------------------------------------------
+@dataclass
+class TradeoffConfig:
+    last_n_users: int = 6
+    capacity: int = 6
+    suppliers_to_select: int = 1
+    price_per_match: float = 100.0
+
+    # weight_on_profit=1 => pure profit, 0 => pure utility
+    weight_on_profit: float = 0.5
+
+    # Utility is usually on a different scale than profit. Multiply utility by this
+    # before mixing into the objective.
+    utility_weight: float = 1.0
+
+    min_utility: float = 0.0
+    matches_to_make: Optional[int] = None
+
+    output_flag: int = 0
+    big_m: Optional[float] = None
+    fixed_suppliers: Optional[List[str]] = None
+
+
+class TradeoffAgent:
+    """Maximize w*Profit + (1-w)*utility_weight*TotalUtility."""
+
+    def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, cfg: TradeoffConfig):
+        if not GUROBI_AVAILABLE:
+            raise RuntimeError("gurobipy is not available. Add it to requirements.txt and ensure a valid license.")
+
+        self.suppliers = suppliers_df.copy()
+        self.users = users_df.copy()
+        self.policy = policy.clamp_nonnegative()
+        self.cfg = cfg
+
+        self.suppliers["supplier_id"] = self.suppliers["supplier_id"].astype(str)
+        self.users["user_id"] = self.users["user_id"].astype(str)
+
+        self.model: Optional["gp.Model"] = None
+        self.y = None
+        self.z = None
+        self._selected_users: List[str] = _select_last_n_users(self.users, cfg.last_n_users)
+
+        if cfg.matches_to_make is not None:
+            m = int(cfg.matches_to_make)
+            cap = int(cfg.capacity)
+            if m < 0:
+                raise ValueError("matches_to_make must be >= 0.")
+            if m > cap:
+                raise ValueError(f"matches_to_make ({m}) cannot exceed capacity ({cap}).")
+
+    def build(self, name: str = "TradeoffAgent") -> "gp.Model":
+        cfg = self.cfg
+        pol = self.policy
+
+        Suppliers = self.suppliers["supplier_id"].tolist()
+        Users = self._selected_users
+
+        # Supplier attributes
+        s_env = dict(zip(self.suppliers["supplier_id"], self.suppliers["env_risk"]))
+        s_social = dict(zip(self.suppliers["supplier_id"], self.suppliers["social_risk"]))
+        s_cost = dict(zip(self.suppliers["supplier_id"], self.suppliers["cost_score"]))
+        s_str = dict(zip(self.suppliers["supplier_id"], self.suppliers["strategic"]))
+        s_imp = dict(zip(self.suppliers["supplier_id"], self.suppliers["improvement"]))
+        s_lq = dict(zip(self.suppliers["supplier_id"], self.suppliers["low_quality"]))
+        s_child = dict(zip(self.suppliers["supplier_id"], self.suppliers["child_labor"]))
+        s_banned = dict(zip(self.suppliers["supplier_id"], self.suppliers["banned_chem"]))
+
+        # User weights
+        udf = self.users[self.users["user_id"].isin(Users)].copy()
+        u_env = dict(zip(udf["user_id"], udf["w_env"]))
+        u_soc = dict(zip(udf["user_id"], udf["w_social"]))
+        u_cost = dict(zip(udf["user_id"], udf["w_cost"]))
+        u_str = dict(zip(udf["user_id"], udf["w_strategic"]))
+        u_imp = dict(zip(udf["user_id"], udf["w_improvement"]))
+        u_lq = dict(zip(udf["user_id"], udf["w_low_quality"]))  # NEG
+
+        M = float(cfg.big_m) if cfg.big_m is not None else _auto_big_m(self.suppliers, self.users, pol, Users)
+
+        m = gp.Model(name)
+        m.Params.OutputFlag = int(cfg.output_flag)
+
+        y = m.addVars(Suppliers, vtype=GRB.BINARY, name="y_select")
+        z = m.addVars(Suppliers, Users, vtype=GRB.BINARY, name="z_match")
+
+        # Hard bans
+        if float(pol.child_labor_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_child[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_child_labor[{i}]")
+        if float(pol.banned_chem_penalty) >= 0.5:
+            for i in Suppliers:
+                if float(s_banned[i]) >= 0.5:
+                    m.addConstr(y[i] == 0, name=f"ban_banned_chem[{i}]")
+
+        _apply_fixed_suppliers(m, y, Suppliers, cfg.fixed_suppliers, int(cfg.suppliers_to_select))
+
+        m.addConstr(gp.quicksum(y[i] for i in Suppliers) == int(cfg.suppliers_to_select), name="select_k")
+
+        for u in Users:
+            m.addConstr(gp.quicksum(z[i, u] for i in Suppliers) <= 1, name=f"user_once[{u}]")
+
+        for i in Suppliers:
+            for u in Users:
+                m.addConstr(z[i, u] <= y[i], name=f"link[{i},{u}]")
+
+        total_matches = gp.quicksum(z[i, u] for i in Suppliers for u in Users)
+        m.addConstr(total_matches <= int(cfg.capacity), name="capacity")
+        if cfg.matches_to_make is not None:
+            m.addConstr(total_matches == int(cfg.matches_to_make), name="matches_exact")
+
+        # Utility + minutil
+        util_terms = {}
+        for i in Suppliers:
+            for u in Users:
+                util_iu = (
+                    (u_env[u] * (pol.env_mult * s_env[i]))
+                    + (u_soc[u] * (pol.social_mult * s_social[i]))
+                    + (u_cost[u] * (pol.cost_mult * s_cost[i]))
+                    + (u_str[u] * (pol.strategic_mult * s_str[i]))
+                    + (u_imp[u] * (pol.improvement_mult * s_imp[i]))
+                    + (u_lq[u] * (pol.low_quality_mult * s_lq[i]))
+                )
+                util_terms[(i, u)] = util_iu
+                m.addConstr(util_iu >= float(cfg.min_utility) - M * (1 - z[i, u]), name=f"minutil[{i},{u}]")
+
+        cost_prod = {i: float(pol.cost_mult * s_cost[i]) for i in Suppliers}
+        profit_terms = {(i, u): (float(cfg.price_per_match) - cost_prod[i]) for i in Suppliers for u in Users}
+
+        w = min(1.0, max(0.0, float(cfg.weight_on_profit)))
+        uw = float(cfg.utility_weight)
+
+        obj = gp.quicksum(
+            (
+                (w * profit_terms[(i, u)])
+                + ((1.0 - w) * uw * util_terms[(i, u)])
+            )
+            * z[i, u]
+            for i in Suppliers
+            for u in Users
+        )
+        m.setObjective(obj, GRB.MAXIMIZE)
+
+        self.model, self.y, self.z = m, y, z
+        return m
+
+    def solve(self) -> Dict[str, Any]:
+        if self.model is None:
+            self.build()
+
+        assert self.model is not None
+        self.model.optimize()
+
+        if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            raise RuntimeError(f"No solution. Status={self.model.Status}")
+
+        Suppliers = self.suppliers["supplier_id"].tolist()
+        Users = self._selected_users
+
+        chosen = [i for i in Suppliers if self.y[i].X > 0.5]
+        pairs: List[Tuple[str, str]] = [(u, i) for i in Suppliers for u in Users if self.z[i, u].X > 0.5]
+        df = pd.DataFrame(pairs, columns=["user_id", "supplier_id"])
+
+        pol = self.policy
+        s = self.suppliers.set_index("supplier_id")
+        u = self.users.set_index("user_id")
+
+        if len(df):
+            df["cost_prod"] = df["supplier_id"].map(lambda sid: float(pol.cost_mult * s.loc[sid, "cost_score"]))
+            df["margin"] = float(self.cfg.price_per_match) - df["cost_prod"]
+
+            def _utility(row: pd.Series) -> float:
+                sid = row["supplier_id"]
+                uid = row["user_id"]
+                return float(
+                    u.loc[uid, "w_env"] * (pol.env_mult * s.loc[sid, "env_risk"])
+                    + u.loc[uid, "w_social"] * (pol.social_mult * s.loc[sid, "social_risk"])
+                    + u.loc[uid, "w_cost"] * (pol.cost_mult * s.loc[sid, "cost_score"])
+                    + u.loc[uid, "w_strategic"] * (pol.strategic_mult * s.loc[sid, "strategic"])
+                    + u.loc[uid, "w_improvement"] * (pol.improvement_mult * s.loc[sid, "improvement"])
+                    + u.loc[uid, "w_low_quality"] * (pol.low_quality_mult * s.loc[sid, "low_quality"])
+                )
+
+            df["utility"] = df.apply(_utility, axis=1)
+            df = df.sort_values(["supplier_id", "user_id"]).reset_index(drop=True)
+        else:
+            df["cost_prod"] = []
+            df["margin"] = []
+            df["utility"] = []
+
+        return {
+            "status": int(self.model.Status),
+            "objective_value": float(self.model.ObjVal),
+            "chosen_suppliers": chosen,
+            "selected_users": Users,
+            "num_matched": int(len(pairs)),
+            "matches": df,
+            "policy": self.policy.to_dict(),
+            "cfg": self.cfg,
+        }
