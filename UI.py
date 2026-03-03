@@ -5,41 +5,22 @@ from typing import Dict, Any, List, Optional
 
 import pandas as pd
 
-# In your repo you can either:
-#   A) replace MinCostAgent.py with this updated version, OR
-#   B) keep the filename MinCostAgent_updated.py and let this import pick it up.
-try:
-    from MinCostAgent_updated import (  # type: ignore
-        DEFAULT_XLSX_PATH,
-        GUROBI_AVAILABLE,
-        Policy,
-        load_supplier_user_tables,
-        MaxProfitConfig,
-        MaxProfitAgent,
-        MaxUtilConfig,
-        MaxUtilAgent,
-        TradeoffConfig,
-        TradeoffAgent,
-    )
-except Exception:  # pragma: no cover
-    from MinCostAgent import (  # type: ignore
-        DEFAULT_XLSX_PATH,
-        GUROBI_AVAILABLE,
-        Policy,
-        load_supplier_user_tables,
-        MaxProfitConfig,
-        MaxProfitAgent,
-        MaxUtilConfig,
-        MaxUtilAgent,
-        TradeoffConfig,
-        TradeoffAgent,
-    )
-
+from MinCostAgent import (
+    DEFAULT_XLSX_PATH,
+    GUROBI_AVAILABLE,
+    load_supplier_user_tables,
+    ProfitRiskConfig,
+    ProfitRiskMinRiskConfig,
+    ProfitRiskTradeoffConfig,
+    ProfitRiskMaxProfitAgent,
+    ProfitRiskMinRiskAgent,
+    ProfitRiskTradeoffAgent,
+)
 
 # ============================
 # App config
 # ============================
-st.set_page_config(page_title="Arya Case — Supplier Selection Game", layout="wide")
+st.set_page_config(page_title="Supplier Selection Game — Profit & Risk", layout="wide")
 
 st.markdown(
     """
@@ -54,21 +35,12 @@ div[data-testid="stSidebar"] {display: none;}
 )
 
 # ============================
-# Fixed policy (EDIT HERE)
+# Fixed game rules (EDIT HERE)
 # ============================
-# Policy is *hidden and fixed* (no UI controls). If you want a different scenario,
-# edit these constants.
-FIXED_POLICY = Policy(
-    env_mult=1.0,
-    social_mult=1.0,
-    cost_mult=1.0,
-    strategic_mult=1.0,
-    improvement_mult=1.0,
-    low_quality_mult=1.0,
-    child_labor_penalty=0.0,
-    banned_chem_penalty=0.0,
-)
-
+SERVED_USERS = 10
+ENV_CAP = 2.75
+SOCIAL_CAP = 3.0
+COST_SCALE = 10.0
 
 # ============================
 # Session state
@@ -76,19 +48,17 @@ FIXED_POLICY = Policy(
 if "leaderboard" not in st.session_state:
     st.session_state.leaderboard = []
 
-for k in [
-    "profit_picks",
-    "util_picks",
-    "trade_picks",
-    "profit_k",
-    "util_k",
-    "trade_k",
-]:
-    if k not in st.session_state:
-        st.session_state[k] = [] if k.endswith("_picks") else 1
-
-if "team_name" not in st.session_state:
-    st.session_state.team_name = ""
+for key, default in {
+    "team_name": "",
+    "profit_k": 1,
+    "risk_k": 1,
+    "trade_k": 1,
+    "profit_picks": [],
+    "risk_picks": [],
+    "trade_picks": [],
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
 # ============================
@@ -107,67 +77,81 @@ def _norm01(s: pd.Series) -> pd.Series:
     return (s - mn) / (mx - mn)
 
 
-def _supplier_overview_table(suppliers_df: pd.DataFrame, users_df: pd.DataFrame, pol: Policy) -> pd.DataFrame:
+def _supplier_overview_table(suppliers_df: pd.DataFrame, price_per_user: float) -> pd.DataFrame:
     df = suppliers_df.copy()
 
-    # Normalized "bad" and "good" bars
-    df["env_bad_%"] = (_norm01(df["env_risk"]) * 100).round(1)
-    df["social_bad_%"] = (_norm01(df["social_risk"]) * 100).round(1)
-    df["cost_bad_%"] = (_norm01(df["cost_score"]) * 100).round(1)
-    df["lowq_bad_%"] = (_norm01(df["low_quality"]) * 100).round(1)
-    df["strategic_good_%"] = (_norm01(df["strategic"]) * 100).round(1)
-    df["improve_good_%"] = (_norm01(df["improvement"]) * 100).round(1)
+    # Normalized "bad" risk bars (higher = worse)
+    df["env_risk_%"] = (_norm01(df["env_risk"]) * 100).round(1)
+    df["social_risk_%"] = (_norm01(df["social_risk"]) * 100).round(1)
+    df["cost_%"] = (_norm01(df["cost_score"]) * 100).round(1)
 
-    # Expected utility using *average* user weights (informative, not objective)
-    uavg = users_df[["w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]].mean()
-    df["expected_utility"] = (
-        float(uavg["w_env"]) * (pol.env_mult * df["env_risk"])
-        + float(uavg["w_social"]) * (pol.social_mult * df["social_risk"])
-        + float(uavg["w_cost"]) * (pol.cost_mult * df["cost_score"])
-        + float(uavg["w_strategic"]) * (pol.strategic_mult * df["strategic"])
-        + float(uavg["w_improvement"]) * (pol.improvement_mult * df["improvement"])
-        + float(uavg["w_low_quality"]) * (pol.low_quality_mult * df["low_quality"])
-    ).astype(float)
+    # If you picked ONLY this supplier (K=1), what would profit/risk look like?
+    df["profit_per_user_if_single"] = (float(price_per_user) - COST_SCALE * df["cost_score"]).astype(float)
+    df["profit_total_if_single"] = float(SERVED_USERS) * df["profit_per_user_if_single"]
 
-    df["policy_cost"] = (pol.cost_mult * df["cost_score"]).astype(float)
+    df["risk_score_if_single"] = 0.5 * ((df["env_risk"] / float(ENV_CAP)) + (df["social_risk"] / float(SOCIAL_CAP)))
 
     show_cols = [
         "supplier_id",
-        "policy_cost",
-        "expected_utility",
-        "env_bad_%",
-        "social_bad_%",
-        "cost_bad_%",
-        "lowq_bad_%",
-        "strategic_good_%",
-        "improve_good_%",
-        "child_labor",
-        "banned_chem",
         "env_risk",
         "social_risk",
         "cost_score",
+        "profit_per_user_if_single",
+        "profit_total_if_single",
+        "risk_score_if_single",
+        "env_risk_%",
+        "social_risk_%",
+        "cost_%",
+        "child_labor",
+        "banned_chem",
         "strategic",
         "improvement",
         "low_quality",
     ]
+
     return df[show_cols].copy()
 
 
-def _totals_from_matches(df: pd.DataFrame) -> Dict[str, float]:
-    if df is None or not len(df):
-        return {"profit": 0.0, "cost": 0.0, "utility": 0.0, "matches": 0.0}
+def _manual_metrics(suppliers_df: pd.DataFrame, picks: List[str], price_per_user: float) -> Dict[str, float]:
+    if not picks:
+        return {
+            "avg_env": 0.0,
+            "avg_social": 0.0,
+            "avg_cost": 0.0,
+            "profit_per_user": 0.0,
+            "profit_total": 0.0,
+            "risk_score": 0.0,
+        }
 
-    cost = float(pd.to_numeric(df.get("cost_prod"), errors="coerce").fillna(0.0).sum())
-    profit = float(pd.to_numeric(df.get("margin"), errors="coerce").fillna(0.0).sum())
-    utility = float(pd.to_numeric(df.get("utility"), errors="coerce").fillna(0.0).sum())
-    return {"profit": profit, "cost": cost, "utility": utility, "matches": float(len(df))}
+    sub = suppliers_df[suppliers_df["supplier_id"].astype(str).isin([str(x) for x in picks])].copy()
+    avg_env = float(sub["env_risk"].mean()) if len(sub) else 0.0
+    avg_social = float(sub["social_risk"].mean()) if len(sub) else 0.0
+    avg_cost = float(sub["cost_score"].mean()) if len(sub) else 0.0
+
+    profit_per_user = float(price_per_user) - float(COST_SCALE) * avg_cost
+    profit_total = float(SERVED_USERS) * profit_per_user
+    risk_score = 0.5 * ((avg_env / float(ENV_CAP)) + (avg_social / float(SOCIAL_CAP)))
+
+    return {
+        "avg_env": avg_env,
+        "avg_social": avg_social,
+        "avg_cost": avg_cost,
+        "profit_per_user": profit_per_user,
+        "profit_total": profit_total,
+        "risk_score": float(risk_score),
+    }
+
+
+def _feasible(avg_env: float, avg_social: float) -> bool:
+    return (avg_env <= float(ENV_CAP) + 1e-9) and (avg_social <= float(SOCIAL_CAP) + 1e-9)
 
 
 def _add_to_leaderboard(
     mode: str,
     team: str,
-    chosen_suppliers: List[str],
-    totals: Dict[str, float],
+    k: int,
+    picks: List[str],
+    metrics: Dict[str, float],
     score: float,
     meta: Dict[str, Any],
 ):
@@ -176,13 +160,16 @@ def _add_to_leaderboard(
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "team": team.strip() or "(anonymous)",
             "mode": mode,
-            "K": int(meta.get("K", 0)),
-            "suppliers": ", ".join(chosen_suppliers),
-            "profit": float(totals.get("profit", 0.0)),
-            "cost": float(totals.get("cost", 0.0)),
-            "utility": float(totals.get("utility", 0.0)),
+            "K": int(k),
+            "suppliers": ", ".join([str(x) for x in picks]),
+            "profit_total": float(metrics.get("profit_total", 0.0)),
+            "profit_per_user": float(metrics.get("profit_per_user", 0.0)),
+            "avg_env": float(metrics.get("avg_env", 0.0)),
+            "avg_social": float(metrics.get("avg_social", 0.0)),
+            "avg_cost": float(metrics.get("avg_cost", 0.0)),
+            "risk_score": float(metrics.get("risk_score", 0.0)),
             "score": float(score),
-            **{k: v for k, v in meta.items() if k not in {"K"}},
+            **meta,
         }
     )
 
@@ -191,513 +178,422 @@ def _render_leaderboard(title: str, mode_filter: Optional[str] = None):
     st.markdown(f"### {title}")
     df = pd.DataFrame(st.session_state.leaderboard)
     if df.empty:
-        st.info("Henüz leaderboard boş. Bir deneme ekleyin.")
+        st.info("Leaderboard is empty. Add a run to get started.")
         return
 
-    if mode_filter:
+    if mode_filter is not None:
         df = df[df["mode"] == mode_filter].copy()
 
     if df.empty:
-        st.info("Bu mod için henüz kayıt yok.")
+        st.info("No entries for this mode yet.")
         return
 
     df = df.sort_values(["score", "time"], ascending=[False, True]).reset_index(drop=True)
     df.insert(0, "rank", range(1, len(df) + 1))
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ============================
 # Header
 # ============================
-st.title("Arya Phones — Supplier Selection Game")
+st.title("Supplier Selection Game — Profit & Risk")
 
-team_col, pol_col = st.columns([2, 3])
-with team_col:
-    st.session_state.team_name = st.text_input("Takım adı (leaderboard için)", value=st.session_state.team_name)
-
-with pol_col:
-    with st.expander("Policy (fixed, read-only)", expanded=False):
-        st.json(FIXED_POLICY.to_dict())
+c1, c2 = st.columns([2, 3])
+with c1:
+    st.session_state.team_name = st.text_input("Team name (for leaderboard)", value=st.session_state.team_name)
+with c2:
+    with st.expander("Rules (fixed)", expanded=False):
+        st.write(f"Served end-users: **{SERVED_USERS}**")
+        st.write(f"Average environmental risk must be **≤ {ENV_CAP}**")
+        st.write(f"Average social risk must be **≤ {SOCIAL_CAP}**")
+        st.write(f"Profit subtracts **cost_score × {COST_SCALE}** per user")
 
 excel_path = Path(DEFAULT_XLSX_PATH)
 if not excel_path.exists():
     st.error(f"Excel file not found: {excel_path}. Place it next to UI.py in your repo.")
     st.stop()
 
-suppliers_df, users_df = _load_data(excel_path)
+suppliers_df, _users_df = _load_data(excel_path)
 
-st.caption(
-    "Bu arayüzde policy değiştirilemez (fixed). Her modda siz supplier setini seçersiniz; sistem de bu set altında en iyi matching'i bulur ve optimumla kıyaslar."
-)
-
+if not GUROBI_AVAILABLE:
+    st.error("gurobipy is not installed / licensed in this environment.")
+    st.stop()
 
 # ============================
-# Supplier overview
+# Supplier overview (game card)
 # ============================
-with st.expander("Supplier’ları gör (game kartı / tablo)", expanded=True):
-    ov = _supplier_overview_table(suppliers_df, users_df, FIXED_POLICY)
+with st.expander("Supplier roster (how good / bad they are)", expanded=True):
+    price_preview = st.number_input("Price per user (preview only)", min_value=0.0, value=100.0, step=5.0, key="price_preview")
+    ov = _supplier_overview_table(suppliers_df, float(price_preview))
 
     col_cfg = {
-        "env_bad_%": st.column_config.ProgressColumn("Env (bad)", min_value=0, max_value=100, format="%.1f"),
-        "social_bad_%": st.column_config.ProgressColumn("Social (bad)", min_value=0, max_value=100, format="%.1f"),
-        "cost_bad_%": st.column_config.ProgressColumn("Cost (bad)", min_value=0, max_value=100, format="%.1f"),
-        "lowq_bad_%": st.column_config.ProgressColumn("Low quality (bad)", min_value=0, max_value=100, format="%.1f"),
-        "strategic_good_%": st.column_config.ProgressColumn("Strategic (good)", min_value=0, max_value=100, format="%.1f"),
-        "improve_good_%": st.column_config.ProgressColumn("Improvement (good)", min_value=0, max_value=100, format="%.1f"),
-        "policy_cost": st.column_config.NumberColumn("Policy cost", format="%.3f"),
-        "expected_utility": st.column_config.NumberColumn("Expected utility", format="%.3f"),
+        "env_risk_%": st.column_config.ProgressColumn("Env risk (bad)", min_value=0, max_value=100, format="%.1f"),
+        "social_risk_%": st.column_config.ProgressColumn("Social risk (bad)", min_value=0, max_value=100, format="%.1f"),
+        "cost_%": st.column_config.ProgressColumn("Cost (bad)", min_value=0, max_value=100, format="%.1f"),
+        "profit_per_user_if_single": st.column_config.NumberColumn("Profit/user if single", format="%.3f"),
+        "profit_total_if_single": st.column_config.NumberColumn("Total profit if single", format="%.3f"),
+        "risk_score_if_single": st.column_config.NumberColumn("Risk score if single", format="%.4f"),
     }
 
     st.dataframe(ov, use_container_width=True, hide_index=True, column_config=col_cfg)
 
 
 # ============================
-# Pages (tabs)
+# Tabs
 # ============================
-tab_profit, tab_util, tab_trade = st.tabs(["Max Profit", "Max Utility", "Trade-off + Leaderboard"])
+tab_profit, tab_risk, tab_trade = st.tabs(["Max Profit", "Min Risk", "Profit–Risk Curve + Leaderboard"])
 
 
 # ============================
-# Max Profit page
+# Max Profit
 # ============================
 with tab_profit:
-    st.markdown("## Max Profit")
+    st.header("Max Profit")
+    st.caption("Choose K suppliers. The product you deliver is the average of those suppliers. Profit is computed with cost_score × 10.")
 
-    if not GUROBI_AVAILABLE:
-        st.error("gurobipy is not installed / licensed in this environment.")
-        st.stop()
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        price_per_match = st.number_input("Selling price (P)", min_value=0.0, value=100.0, step=5.0, key="profit_price")
-    with c2:
-        min_utility = st.number_input("Min utility (per match)", value=0.0, step=1.0, key="profit_minutil")
-    with c3:
-        K = st.number_input("K (suppliers)", min_value=1, value=int(st.session_state.profit_k), step=1, key="profit_K")
-    with c4:
-        last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="profit_lastn")
-    with c5:
-        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="profit_capacity")
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        price_per_user = st.number_input("Price per user", min_value=0.0, value=100.0, step=5.0, key="profit_price")
+    with a2:
+        K = st.number_input("K (number of suppliers)", min_value=1, value=int(st.session_state.profit_k), step=1, key="profit_K")
+    with a3:
+        st.write("Served users")
+        st.metric("Fixed", str(SERVED_USERS))
 
     st.session_state.profit_k = int(K)
 
     suppliers = suppliers_df["supplier_id"].astype(str).tolist()
-    default_picks = st.session_state.profit_picks
+    default_picks = st.session_state.profit_picks[: int(K)]
 
-    if len(default_picks) != int(K):
-        default_picks = default_picks[: int(K)]
-
-    picks = st.multiselect(
-        "Supplier seç (exactly K)",
-        options=suppliers,
-        default=default_picks,
-        key="profit_picks_widget",
-    )
-
+    picks = st.multiselect("Your supplier set (must be exactly K)", options=suppliers, default=default_picks, key="profit_picks_widget")
     st.session_state.profit_picks = picks
 
-    run = st.button("Run (manual vs optimal)", type="primary", use_container_width=True, key="profit_run")
-
-    if run:
+    if st.button("Run (manual vs optimal)", type="primary", use_container_width=True, key="profit_run"):
         left, right = st.columns(2)
 
         # Manual
         with left:
-            st.markdown("### Manual sonuç")
+            st.subheader("Manual")
             if len(picks) != int(K):
-                st.error(f"Lütfen tam olarak K={int(K)} supplier seçin. Şu an: {len(picks)}")
+                st.error(f"Please select exactly K={int(K)} suppliers. Current: {len(picks)}")
             else:
-                cfg_m = MaxProfitConfig(
-                    last_n_users=int(last_n_users),
-                    capacity=int(capacity),
-                    suppliers_to_select=int(K),
-                    price_per_match=float(price_per_match),
-                    min_utility=float(min_utility),
-                    output_flag=0,
-                    fixed_suppliers=list(picks),
-                )
-                try:
-                    res_m = MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg_m).solve()
-                    totals_m = _totals_from_matches(res_m["matches"])
+                manual = _manual_metrics(suppliers_df, picks, float(price_per_user))
+                ok = _feasible(manual["avg_env"], manual["avg_social"])
+                if not ok:
+                    st.error("Risk constraints violated (average env/social risk is above the cap).")
 
-                    st.metric("Manual profit", f"{totals_m['profit']:.3f}")
-                    st.metric("Manual utility (sum)", f"{totals_m['utility']:.3f}")
-                    st.metric("Manual matches", f"{int(totals_m['matches'])}")
-                    st.write("Chosen suppliers:", ", ".join(res_m["chosen_suppliers"]))
-                    st.dataframe(res_m["matches"], use_container_width=True, hide_index=True)
+                st.metric("Total profit", f"{manual['profit_total']:.3f}")
+                st.metric("Profit per user", f"{manual['profit_per_user']:.3f}")
+                st.metric("Risk score", f"{manual['risk_score']:.4f}")
+                st.write(f"Average env risk: **{manual['avg_env']:.3f}** (cap {ENV_CAP})")
+                st.write(f"Average social risk: **{manual['avg_social']:.3f}** (cap {SOCIAL_CAP})")
+                st.write(f"Average cost_score: **{manual['avg_cost']:.3f}**")
 
-                    if st.button("Add manual to leaderboard", use_container_width=True, key="profit_add_lb"):
-                        _add_to_leaderboard(
-                            mode="max_profit",
-                            team=st.session_state.team_name,
-                            chosen_suppliers=list(picks),
-                            totals=totals_m,
-                            score=float(totals_m["profit"]),
-                            meta={"K": int(K), "P": float(price_per_match), "min_util": float(min_utility)},
-                        )
-                        st.success("Leaderboard'a eklendi.")
-                except Exception as e:
-                    st.error(str(e))
+                if st.button("Add manual to leaderboard", use_container_width=True, key="profit_add_lb"):
+                    _add_to_leaderboard(
+                        mode="max_profit",
+                        team=st.session_state.team_name,
+                        k=int(K),
+                        picks=list(picks),
+                        metrics=manual,
+                        score=float(manual["profit_total"]),
+                        meta={"price_per_user": float(price_per_user)},
+                    )
+                    st.success("Added to leaderboard.")
 
         # Optimal
         with right:
-            st.markdown("### Optimal benchmark")
-            cfg_o = MaxProfitConfig(
-                last_n_users=int(last_n_users),
-                capacity=int(capacity),
+            st.subheader("Optimal benchmark")
+            cfg = ProfitRiskConfig(
                 suppliers_to_select=int(K),
-                price_per_match=float(price_per_match),
-                min_utility=float(min_utility),
+                served_users=int(SERVED_USERS),
+                price_per_user=float(price_per_user),
+                cost_scale=float(COST_SCALE),
+                env_cap=float(ENV_CAP),
+                social_cap=float(SOCIAL_CAP),
                 output_flag=0,
                 fixed_suppliers=None,
             )
             try:
-                res_o = MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg_o).solve()
-                totals_o = _totals_from_matches(res_o["matches"])
-
-                st.metric("Optimal profit", f"{totals_o['profit']:.3f}")
-                st.metric("Optimal utility (sum)", f"{totals_o['utility']:.3f}")
-                st.metric("Optimal matches", f"{int(totals_o['matches'])}")
-                st.write("Chosen suppliers:", ", ".join(res_o["chosen_suppliers"]))
-                st.dataframe(res_o["matches"], use_container_width=True, hide_index=True)
+                res = ProfitRiskMaxProfitAgent(suppliers_df, cfg).solve()
+                st.metric("Total profit", f"{res['profit_total']:.3f}")
+                st.metric("Profit per user", f"{res['profit_per_user']:.3f}")
+                st.metric("Risk score", f"{res['risk_score']:.4f}")
+                st.write("Chosen suppliers:", ", ".join(res["chosen_suppliers"]))
+                st.write(f"Average env risk: **{res['avg_env']:.3f}** (cap {ENV_CAP})")
+                st.write(f"Average social risk: **{res['avg_social']:.3f}** (cap {SOCIAL_CAP})")
+                st.write(f"Average cost_score: **{res['avg_cost']:.3f}**")
             except Exception as e:
                 st.error(str(e))
 
 
 # ============================
-# Max Utility page
+# Min Risk
 # ============================
-with tab_util:
-    st.markdown("## Max Utility")
+with tab_risk:
+    st.header("Min Risk")
+    st.caption("Minimize a normalized risk score while staying within the risk caps. Optionally require a minimum profit per user.")
 
-    if not GUROBI_AVAILABLE:
-        st.error("gurobipy is not installed / licensed in this environment.")
-        st.stop()
-
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    with c1:
-        price_per_match = st.number_input("(Reporting) Selling price (P)", min_value=0.0, value=100.0, step=5.0, key="util_price")
-    with c2:
-        min_utility = st.number_input("Min utility (per match)", value=0.0, step=1.0, key="util_minutil")
-    with c3:
-        K = st.number_input("K (suppliers)", min_value=1, value=int(st.session_state.util_k), step=1, key="util_K")
-    with c4:
-        last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="util_lastn")
-    with c5:
-        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="util_capacity")
-    with c6:
-        matches_to_make = st.number_input(
-            "Matches to make (exact)",
-            min_value=0,
-            value=min(int(capacity), int(last_n_users)),
-            step=1,
-            key="util_matches_exact",
+    a1, a2, a3, a4 = st.columns(4)
+    with a1:
+        price_per_user = st.number_input("Price per user", min_value=0.0, value=100.0, step=5.0, key="risk_price")
+    with a2:
+        K = st.number_input("K (number of suppliers)", min_value=1, value=int(st.session_state.risk_k), step=1, key="risk_K")
+    with a3:
+        min_profit_per_user = st.number_input(
+            "Minimum profit per user (optional)",
+            min_value=-1_000_000.0,
+            value=0.0,
+            step=5.0,
+            key="risk_profit_floor",
         )
+    with a4:
+        use_floor = st.checkbox("Enable profit floor", value=False, key="risk_use_floor")
 
-    st.session_state.util_k = int(K)
+    st.session_state.risk_k = int(K)
 
     suppliers = suppliers_df["supplier_id"].astype(str).tolist()
-    default_picks = st.session_state.util_picks
-    if len(default_picks) != int(K):
-        default_picks = default_picks[: int(K)]
+    default_picks = st.session_state.risk_picks[: int(K)]
+    picks = st.multiselect("Your supplier set (must be exactly K)", options=suppliers, default=default_picks, key="risk_picks_widget")
+    st.session_state.risk_picks = picks
 
-    picks = st.multiselect(
-        "Supplier seç (exactly K)",
-        options=suppliers,
-        default=default_picks,
-        key="util_picks_widget",
-    )
-    st.session_state.util_picks = picks
-
-    run = st.button("Run (manual vs optimal)", type="primary", use_container_width=True, key="util_run")
-
-    if run:
+    if st.button("Run (manual vs optimal)", type="primary", use_container_width=True, key="risk_run"):
         left, right = st.columns(2)
 
         with left:
-            st.markdown("### Manual sonuç")
+            st.subheader("Manual")
             if len(picks) != int(K):
-                st.error(f"Lütfen tam olarak K={int(K)} supplier seçin. Şu an: {len(picks)}")
+                st.error(f"Please select exactly K={int(K)} suppliers. Current: {len(picks)}")
             else:
-                cfg_m = MaxUtilConfig(
-                    last_n_users=int(last_n_users),
-                    capacity=int(capacity),
-                    suppliers_to_select=int(K),
-                    matches_to_make=int(matches_to_make),
-                    min_utility=float(min_utility),
-                    price_per_match=float(price_per_match),
-                    output_flag=0,
-                    fixed_suppliers=list(picks),
-                )
-                try:
-                    res_m = MaxUtilAgent(suppliers_df, users_df, FIXED_POLICY, cfg_m).solve()
-                    totals_m = _totals_from_matches(res_m["matches"])
+                manual = _manual_metrics(suppliers_df, picks, float(price_per_user))
+                ok = _feasible(manual["avg_env"], manual["avg_social"])
+                if not ok:
+                    st.error("Risk constraints violated (average env/social risk is above the cap).")
 
-                    st.metric("Manual utility (sum)", f"{totals_m['utility']:.3f}")
-                    st.metric("Manual profit (sum)", f"{totals_m['profit']:.3f}")
-                    st.metric("Manual matches", f"{int(totals_m['matches'])}")
-                    st.write("Chosen suppliers:", ", ".join(res_m["chosen_suppliers"]))
-                    st.dataframe(res_m["matches"], use_container_width=True, hide_index=True)
+                st.metric("Risk score", f"{manual['risk_score']:.4f}")
+                st.metric("Total profit", f"{manual['profit_total']:.3f}")
+                st.metric("Profit per user", f"{manual['profit_per_user']:.3f}")
+                st.write(f"Average env risk: **{manual['avg_env']:.3f}** (cap {ENV_CAP})")
+                st.write(f"Average social risk: **{manual['avg_social']:.3f}** (cap {SOCIAL_CAP})")
+                st.write(f"Average cost_score: **{manual['avg_cost']:.3f}**")
 
-                    if st.button("Add manual to leaderboard", use_container_width=True, key="util_add_lb"):
-                        _add_to_leaderboard(
-                            mode="max_utility",
-                            team=st.session_state.team_name,
-                            chosen_suppliers=list(picks),
-                            totals=totals_m,
-                            score=float(totals_m["utility"]),
-                            meta={
-                                "K": int(K),
-                                "P": float(price_per_match),
-                                "min_util": float(min_utility),
-                                "matches_exact": int(matches_to_make),
-                            },
-                        )
-                        st.success("Leaderboard'a eklendi.")
-                except Exception as e:
-                    st.error(str(e))
+                if st.button("Add manual to leaderboard", use_container_width=True, key="risk_add_lb"):
+                    # smaller risk is better -> higher score
+                    _add_to_leaderboard(
+                        mode="min_risk",
+                        team=st.session_state.team_name,
+                        k=int(K),
+                        picks=list(picks),
+                        metrics=manual,
+                        score=float(-manual["risk_score"]),
+                        meta={"price_per_user": float(price_per_user), "profit_floor_enabled": bool(use_floor)},
+                    )
+                    st.success("Added to leaderboard.")
 
         with right:
-            st.markdown("### Optimal benchmark")
-            cfg_o = MaxUtilConfig(
-                last_n_users=int(last_n_users),
-                capacity=int(capacity),
+            st.subheader("Optimal benchmark")
+            cfg = ProfitRiskMinRiskConfig(
                 suppliers_to_select=int(K),
-                matches_to_make=int(matches_to_make),
-                min_utility=float(min_utility),
-                price_per_match=float(price_per_match),
+                served_users=int(SERVED_USERS),
+                price_per_user=float(price_per_user),
+                cost_scale=float(COST_SCALE),
+                env_cap=float(ENV_CAP),
+                social_cap=float(SOCIAL_CAP),
                 output_flag=0,
                 fixed_suppliers=None,
+                min_profit_per_user=(float(min_profit_per_user) if use_floor else None),
             )
             try:
-                res_o = MaxUtilAgent(suppliers_df, users_df, FIXED_POLICY, cfg_o).solve()
-                totals_o = _totals_from_matches(res_o["matches"])
-
-                st.metric("Optimal utility (sum)", f"{totals_o['utility']:.3f}")
-                st.metric("Optimal profit (sum)", f"{totals_o['profit']:.3f}")
-                st.metric("Optimal matches", f"{int(totals_o['matches'])}")
-                st.write("Chosen suppliers:", ", ".join(res_o["chosen_suppliers"]))
-                st.dataframe(res_o["matches"], use_container_width=True, hide_index=True)
+                res = ProfitRiskMinRiskAgent(suppliers_df, cfg).solve()
+                st.metric("Risk score", f"{res['risk_score']:.4f}")
+                st.metric("Total profit", f"{res['profit_total']:.3f}")
+                st.metric("Profit per user", f"{res['profit_per_user']:.3f}")
+                st.write("Chosen suppliers:", ", ".join(res["chosen_suppliers"]))
+                st.write(f"Average env risk: **{res['avg_env']:.3f}** (cap {ENV_CAP})")
+                st.write(f"Average social risk: **{res['avg_social']:.3f}** (cap {SOCIAL_CAP})")
+                st.write(f"Average cost_score: **{res['avg_cost']:.3f}**")
             except Exception as e:
                 st.error(str(e))
 
 
 # ============================
-# Trade-off + Leaderboard
+# Profit–Risk curve + Leaderboard
 # ============================
 with tab_trade:
-    st.markdown("## Trade-off")
-
-    if not GUROBI_AVAILABLE:
-        st.error("gurobipy is not installed / licensed in this environment.")
-        st.stop()
-
+    st.header("Profit–Risk curve")
     st.caption(
-        "Bu sayfada Profit ↔ Utility arasında trade-off yapıyoruz. "
-        "Aşağıdaki slider 'profit ağırlığını' belirler. Ayrıca optimum curve (pareto benzeri) ve leaderboard burada." 
+        "We generate a curve by solving a weighted trade-off objective: profit vs risk. "
+        "All solutions still satisfy the hard risk caps."
     )
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        price_per_match = st.number_input("Selling price (P)", min_value=0.0, value=100.0, step=5.0, key="trade_price")
-    with c2:
-        min_utility = st.number_input("Min utility (per match)", value=0.0, step=1.0, key="trade_minutil")
-    with c3:
-        K = st.number_input("K (suppliers)", min_value=1, value=int(st.session_state.trade_k), step=1, key="trade_K")
-    with c4:
-        last_n_users = st.number_input("Last N users", min_value=1, value=6, step=1, key="trade_lastn")
-    with c5:
-        capacity = st.number_input("Capacity (max matches)", min_value=1, value=6, step=1, key="trade_capacity")
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        price_per_user = st.number_input("Price per user", min_value=0.0, value=100.0, step=5.0, key="trade_price")
+    with b2:
+        K = st.number_input("K (number of suppliers)", min_value=1, value=int(st.session_state.trade_k), step=1, key="trade_K")
+    with b3:
+        n_points = st.slider("Number of curve points", min_value=3, max_value=25, value=11, step=2, key="trade_n")
+    with b4:
+        risk_scale = st.number_input(
+            "Risk scale (how expensive risk is)",
+            min_value=0.0,
+            value=float(price_per_user),
+            step=10.0,
+            key="trade_risk_scale",
+        )
 
     st.session_state.trade_k = int(K)
 
-    w_profit = st.slider("Profit ağırlığı (w)", min_value=0.0, max_value=1.0, value=0.5, step=0.05, key="trade_w")
-    n_points = st.slider("Curve noktası sayısı", min_value=3, max_value=21, value=11, step=2, key="trade_npts")
-
     suppliers = suppliers_df["supplier_id"].astype(str).tolist()
-    default_picks = st.session_state.trade_picks
-    if len(default_picks) != int(K):
-        default_picks = default_picks[: int(K)]
-
+    default_picks = st.session_state.trade_picks[: int(K)]
     picks = st.multiselect(
-        "(Opsiyonel) K supplier seç ve skorunu optimumla kıyasla",
+        "(Optional) Pick exactly K suppliers to score your solution at a chosen weight",
         options=suppliers,
         default=default_picks,
         key="trade_picks_widget",
     )
     st.session_state.trade_picks = picks
 
-    run_curve = st.button("Compute trade-off curve (optimal)", type="primary", use_container_width=True, key="trade_curve")
+    w_profit = st.slider("Profit weight (w)", min_value=0.0, max_value=1.0, value=0.5, step=0.05, key="trade_w")
 
-    # Utility scaling: bring utility close to profit magnitude
-    def _compute_scale() -> float:
-        # profit optimum
-        cfg_p = MaxProfitConfig(
-            last_n_users=int(last_n_users),
-            capacity=int(capacity),
-            suppliers_to_select=int(K),
-            price_per_match=float(price_per_match),
-            min_utility=float(min_utility),
-            output_flag=0,
-            fixed_suppliers=None,
-        )
-        res_p = MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg_p).solve()
-        tot_p = _totals_from_matches(res_p["matches"])  # profit
-
-        # utility optimum
-        cfg_u = MaxUtilConfig(
-            last_n_users=int(last_n_users),
-            capacity=int(capacity),
-            suppliers_to_select=int(K),
-            matches_to_make=min(int(capacity), int(last_n_users)),
-            min_utility=float(min_utility),
-            price_per_match=float(price_per_match),
-            output_flag=0,
-            fixed_suppliers=None,
-        )
-        res_u = MaxUtilAgent(suppliers_df, users_df, FIXED_POLICY, cfg_u).solve()
-        tot_u = _totals_from_matches(res_u["matches"])  # utility
-
-        denom = max(1e-9, abs(float(tot_u["utility"])))
-        return float(abs(float(tot_p["profit"])) / denom)
-
-    if run_curve:
+    if st.button("Compute curve (optimal)", type="primary", use_container_width=True, key="trade_curve"):
+        rows = []
         try:
-            util_scale = _compute_scale()
-            weights = [i / (n_points - 1) for i in range(n_points)]
-
-            rows = []
-            for w in weights:
-                cfg = TradeoffConfig(
-                    last_n_users=int(last_n_users),
-                    capacity=int(capacity),
+            for idx in range(int(n_points)):
+                w = idx / float(n_points - 1)
+                cfg = ProfitRiskTradeoffConfig(
                     suppliers_to_select=int(K),
-                    price_per_match=float(price_per_match),
-                    weight_on_profit=float(w),
-                    utility_weight=float(util_scale),
-                    min_utility=float(min_utility),
-                    matches_to_make=None,
+                    served_users=int(SERVED_USERS),
+                    price_per_user=float(price_per_user),
+                    cost_scale=float(COST_SCALE),
+                    env_cap=float(ENV_CAP),
+                    social_cap=float(SOCIAL_CAP),
                     output_flag=0,
                     fixed_suppliers=None,
+                    weight_on_profit=float(w),
+                    risk_scale=float(risk_scale),
                 )
-                res = TradeoffAgent(suppliers_df, users_df, FIXED_POLICY, cfg).solve()
-                tot = _totals_from_matches(res["matches"])
+                res = ProfitRiskTradeoffAgent(suppliers_df, cfg).solve()
                 rows.append(
                     {
                         "w_profit": w,
-                        "profit": tot["profit"],
-                        "utility": tot["utility"],
-                        "matches": int(tot["matches"]),
+                        "profit_total": res["profit_total"],
+                        "profit_per_user": res["profit_per_user"],
+                        "risk_score": res["risk_score"],
+                        "avg_env": res["avg_env"],
+                        "avg_social": res["avg_social"],
+                        "avg_cost": res["avg_cost"],
                         "suppliers": ", ".join(res["chosen_suppliers"]),
-                        "objective": float(res["objective_value"]),
+                        "objective": res["objective_value"],
                     }
                 )
 
             curve_df = pd.DataFrame(rows)
-            st.success(f"Curve hazır. Utility scaling = {util_scale:.4f}")
-
-            st.dataframe(curve_df, use_container_width=True, hide_index=True)
-            st.scatter_chart(curve_df, x="profit", y="utility")
-
             st.session_state._last_curve_df = curve_df
-            st.session_state._last_util_scale = util_scale
+
+            st.success("Curve computed.")
+            st.dataframe(curve_df, use_container_width=True, hide_index=True)
+            st.scatter_chart(curve_df, x="profit_total", y="risk_score")
         except Exception as e:
             st.error(str(e))
 
-    # Manual vs optimal for selected w
     st.divider()
-    st.markdown("### Seçtiğiniz w için skor (manual vs optimal)")
+    st.subheader("Manual vs optimal at your chosen w")
 
-    if st.button("Run trade-off score", use_container_width=True, key="trade_run"):
+    if st.button("Run score", use_container_width=True, key="trade_run"):
         try:
-            util_scale = float(st.session_state.get("_last_util_scale") or _compute_scale())
-
-            # Manual
+            # Manual (if provided)
             if len(picks) == int(K):
-                cfg_m = TradeoffConfig(
-                    last_n_users=int(last_n_users),
-                    capacity=int(capacity),
+                cfg_m = ProfitRiskTradeoffConfig(
                     suppliers_to_select=int(K),
-                    price_per_match=float(price_per_match),
-                    weight_on_profit=float(w_profit),
-                    utility_weight=float(util_scale),
-                    min_utility=float(min_utility),
-                    matches_to_make=None,
+                    served_users=int(SERVED_USERS),
+                    price_per_user=float(price_per_user),
+                    cost_scale=float(COST_SCALE),
+                    env_cap=float(ENV_CAP),
+                    social_cap=float(SOCIAL_CAP),
                     output_flag=0,
                     fixed_suppliers=list(picks),
+                    weight_on_profit=float(w_profit),
+                    risk_scale=float(risk_scale),
                 )
-                res_m = TradeoffAgent(suppliers_df, users_df, FIXED_POLICY, cfg_m).solve()
-                tot_m = _totals_from_matches(res_m["matches"])
-                score_m = float(res_m["objective_value"])
+                man_res = ProfitRiskTradeoffAgent(suppliers_df, cfg_m).solve()
+                man_metrics = {
+                    "avg_env": man_res["avg_env"],
+                    "avg_social": man_res["avg_social"],
+                    "avg_cost": man_res["avg_cost"],
+                    "profit_per_user": man_res["profit_per_user"],
+                    "profit_total": man_res["profit_total"],
+                    "risk_score": man_res["risk_score"],
+                }
+                man_score = float(man_res["objective_value"])
             else:
-                res_m, tot_m, score_m = None, None, None
+                man_res, man_metrics, man_score = None, None, None
 
             # Optimal
-            cfg_o = TradeoffConfig(
-                last_n_users=int(last_n_users),
-                capacity=int(capacity),
+            cfg_o = ProfitRiskTradeoffConfig(
                 suppliers_to_select=int(K),
-                price_per_match=float(price_per_match),
-                weight_on_profit=float(w_profit),
-                utility_weight=float(util_scale),
-                min_utility=float(min_utility),
-                matches_to_make=None,
+                served_users=int(SERVED_USERS),
+                price_per_user=float(price_per_user),
+                cost_scale=float(COST_SCALE),
+                env_cap=float(ENV_CAP),
+                social_cap=float(SOCIAL_CAP),
                 output_flag=0,
                 fixed_suppliers=None,
+                weight_on_profit=float(w_profit),
+                risk_scale=float(risk_scale),
             )
-            res_o = TradeoffAgent(suppliers_df, users_df, FIXED_POLICY, cfg_o).solve()
-            tot_o = _totals_from_matches(res_o["matches"])
-            score_o = float(res_o["objective_value"])
+            opt_res = ProfitRiskTradeoffAgent(suppliers_df, cfg_o).solve()
+            opt_metrics = {
+                "avg_env": opt_res["avg_env"],
+                "avg_social": opt_res["avg_social"],
+                "avg_cost": opt_res["avg_cost"],
+                "profit_per_user": opt_res["profit_per_user"],
+                "profit_total": opt_res["profit_total"],
+                "risk_score": opt_res["risk_score"],
+            }
+            opt_score = float(opt_res["objective_value"])
 
-            A, B = st.columns(2)
+            L, R = st.columns(2)
 
-            with A:
+            with L:
                 st.markdown("#### Manual")
-                if res_m is None:
-                    st.warning(f"Manual skor için tam olarak K={int(K)} supplier seçmelisiniz.")
+                if man_res is None:
+                    st.warning(f"To score manually, select exactly K={int(K)} suppliers.")
                 else:
-                    st.metric("Score (objective)", f"{score_m:.3f}")
-                    st.metric("Profit", f"{tot_m['profit']:.3f}")
-                    st.metric("Utility", f"{tot_m['utility']:.3f}")
-                    st.write("Suppliers:", ", ".join(res_m["chosen_suppliers"]))
-                    st.dataframe(res_m["matches"], use_container_width=True, hide_index=True)
+                    st.metric("Objective", f"{man_score:.3f}")
+                    st.metric("Total profit", f"{man_metrics['profit_total']:.3f}")
+                    st.metric("Risk score", f"{man_metrics['risk_score']:.4f}")
+                    st.write("Suppliers:", ", ".join(man_res["chosen_suppliers"]))
+                    st.write(f"Avg env: **{man_metrics['avg_env']:.3f}** (cap {ENV_CAP})")
+                    st.write(f"Avg social: **{man_metrics['avg_social']:.3f}** (cap {SOCIAL_CAP})")
 
                     if st.button("Add manual to leaderboard", use_container_width=True, key="trade_add_lb"):
                         _add_to_leaderboard(
                             mode="tradeoff",
                             team=st.session_state.team_name,
-                            chosen_suppliers=list(picks),
-                            totals=tot_m,
-                            score=float(score_m),
-                            meta={
-                                "K": int(K),
-                                "P": float(price_per_match),
-                                "w_profit": float(w_profit),
-                                "util_scale": float(util_scale),
-                            },
+                            k=int(K),
+                            picks=list(picks),
+                            metrics=man_metrics,
+                            score=float(man_score),
+                            meta={"price_per_user": float(price_per_user), "w_profit": float(w_profit), "risk_scale": float(risk_scale)},
                         )
-                        st.success("Leaderboard'a eklendi.")
+                        st.success("Added to leaderboard.")
 
-            with B:
+            with R:
                 st.markdown("#### Optimal")
-                st.metric("Score (objective)", f"{score_o:.3f}")
-                st.metric("Profit", f"{tot_o['profit']:.3f}")
-                st.metric("Utility", f"{tot_o['utility']:.3f}")
-                st.write("Suppliers:", ", ".join(res_o["chosen_suppliers"]))
-                st.dataframe(res_o["matches"], use_container_width=True, hide_index=True)
+                st.metric("Objective", f"{opt_score:.3f}")
+                st.metric("Total profit", f"{opt_metrics['profit_total']:.3f}")
+                st.metric("Risk score", f"{opt_metrics['risk_score']:.4f}")
+                st.write("Suppliers:", ", ".join(opt_res["chosen_suppliers"]))
+                st.write(f"Avg env: **{opt_metrics['avg_env']:.3f}** (cap {ENV_CAP})")
+                st.write(f"Avg social: **{opt_metrics['avg_social']:.3f}** (cap {SOCIAL_CAP})")
 
-            if score_m is not None:
+            if man_score is not None:
                 st.divider()
-                st.markdown("#### Gap")
-                st.write(f"Optimal − Manual objective: **{(score_o - score_m):.3f}**")
+                st.write(f"Optimal − Manual objective gap: **{(opt_score - man_score):.3f}**")
 
         except Exception as e:
             st.error(str(e))
 
     st.divider()
-    _render_leaderboard("Leaderboard", mode_filter=None)
+    _render_leaderboard("Leaderboard (all modes)")
