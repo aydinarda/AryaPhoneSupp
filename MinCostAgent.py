@@ -113,10 +113,15 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
         "improvement potential": "improvement",
         "improvement": "improvement",
         "low quality": "low_quality",
+            "low product quality": "low_quality",
+            "product quality": "low_quality",
         "low_quality": "low_quality",
         "child labor": "child_labor",
         "child_labor": "child_labor",
         "banned chem": "banned_chem",
+            "banned chemicals": "banned_chem",
+            "banned chemical": "banned_chem",
+            "restricted chemicals": "banned_chem",
         "banned_chem": "banned_chem",
     }
 
@@ -150,56 +155,109 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+
     col_map = {
+        "users": "user_id",
         "user": "user_id",
         "user_id": "user_id",
         "user id": "user_id",
         "id": "user_id",
+
+        "environmental risk": "w_env",
+        "env risk": "w_env",
+        "env_risk": "w_env",
         "w_env": "w_env",
         "w_environment": "w_env",
+
+        "social risk": "w_social",
+        "social_risk": "w_social",
         "w_social": "w_social",
+
+        "cost score": "w_cost",
+        "cost": "w_cost",
+        "cost_score": "w_cost",
         "w_cost": "w_cost",
+
+        "strategic importance": "w_strategic",
+        "strategic": "w_strategic",
         "w_strategic": "w_strategic",
+
+        "improvement potential": "w_improvement",
+        "improvement": "w_improvement",
         "w_improvement": "w_improvement",
+
+        "low product quality": "w_low_quality",
+        "product quality": "w_low_quality",
+        "low quality": "w_low_quality",
+        "low_quality": "w_low_quality",
         "w_low_quality": "w_low_quality",
     }
 
-    df = df.copy()
-    df.columns = [c.strip().lower() for c in df.columns]
+    df.columns = [str(c).strip().lower() for c in df.columns]
     df = df.rename(columns={c: col_map.get(c, c) for c in df.columns})
+
+    patterns_to_target = {
+        r"^users?$": "user_id",
+        r"^user( id)?$": "user_id",
+        r"^(env|environment|environmental)( risk| score)?$": "w_env",
+        r"^social( risk| score)?$": "w_social",
+        r"^(cost|price)( risk| score)?$": "w_cost",
+        r"^strategic( importance)?( score)?$": "w_strategic",
+        r"^improvement( potential)?( score)?$": "w_improvement",
+        r"^(low product quality|product quality|low quality|lowquality|quality)( risk| score)?$": "w_low_quality",
+    
+            r"^(banned|restricted) (chem|chemical|chemicals)$": "banned_chem",
+        
+            r"^child( labour| labor)?$": "child_labor",
+        }
+    df = _fuzzy_rename(df, patterns_to_target)
 
     required = ["user_id", "w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(f"Users sheet missing columns: {missing}")
+        detected = list(df.columns)
+        raise ValueError(
+            "Users sheet missing required columns: "
+            f"{missing}. Detected columns: {detected}. "
+            "Expected: Users/User ID, plus weights for Environmental Risk, Social Risk, Cost Score, "
+            "Strategic Importance, Improvement Potential, Low Product Quality."
+        )
 
     df["user_id"] = df["user_id"].astype(str)
     for c in required[1:]:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0).astype(float)
+
     return df
 
 
 def load_supplier_user_tables(xlsx_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load supplier and user tables from the canonical workbook.
+
+    The workbook contains many sheets. We prefer exact sheet names:
+    - Supplier
+    - User
+    If not found, fall back to the first sheet containing 'supplier' / 'user' (case-insensitive).
+    """
     xlsx_path = Path(xlsx_path)
     if not xlsx_path.exists():
         raise FileNotFoundError(str(xlsx_path))
 
     xl = pd.ExcelFile(xlsx_path)
-    sheets = {s.lower(): s for s in xl.sheet_names}
+    sheet_names = xl.sheet_names
 
-    supplier_sheet = None
-    user_sheet = None
+    def pick_exact_or_contains(preferred_exact: str, token: str) -> str:
+        for s in sheet_names:
+            if s.strip().lower() == preferred_exact.lower():
+                return s
+        for s in sheet_names:
+            if token in s.strip().lower():
+                return s
+        return sheet_names[0]
 
-    for k in sheets:
-        if "supplier" in k:
-            supplier_sheet = sheets[k]
-        if "user" in k:
-            user_sheet = sheets[k]
-
-    if supplier_sheet is None:
-        supplier_sheet = xl.sheet_names[0]
-    if user_sheet is None:
-        user_sheet = xl.sheet_names[1] if len(xl.sheet_names) > 1 else xl.sheet_names[0]
+    supplier_sheet = pick_exact_or_contains("Supplier", "supplier")
+    user_sheet = pick_exact_or_contains("User", "user")
 
     suppliers = _normalize_supplier_columns(pd.read_excel(xlsx_path, sheet_name=supplier_sheet))
     users = _normalize_user_columns(pd.read_excel(xlsx_path, sheet_name=user_sheet))
