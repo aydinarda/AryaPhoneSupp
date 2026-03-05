@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import re
 import pandas as pd
 
 try:
@@ -70,6 +71,27 @@ class Policy:
 
     def to_dict(self) -> Dict[str, float]:
         return {k: float(v) for k, v in self.__dict__.items()}
+
+
+def _canon_col(c: str) -> str:
+    """Canonicalize a column name for fuzzy matching."""
+    c = str(c).strip().lower()
+    c = re.sub(r"[^0-9a-z]+", " ", c)
+    c = re.sub(r"\s+", " ", c).strip()
+    return c
+
+
+def _fuzzy_rename(df: pd.DataFrame, patterns_to_target: Dict[str, str]) -> pd.DataFrame:
+    """Rename columns using regex patterns on canonicalized names."""
+    df = df.copy()
+    new_cols = {}
+    canon = {col: _canon_col(col) for col in df.columns}
+    for col, ccol in canon.items():
+        for pat, target in patterns_to_target.items():
+            if re.search(pat, ccol):
+                new_cols[col] = target
+                break
+    return df.rename(columns=new_cols)
 
 
 def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:

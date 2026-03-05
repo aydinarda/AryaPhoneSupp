@@ -189,7 +189,30 @@ if not excel_path.exists():
     st.error(f"Excel file not found: {excel_path}. Place it next to UI.py.")
     st.stop()
 
-suppliers_df, users_df = load_supplier_user_tables(excel_path)
+    try:
+        suppliers_df, users_df = load_supplier_user_tables(excel_path)
+    except ValueError as e:
+        st.error("Excel columns mismatch. The app couldn't find the required columns in your Suppliers or Users sheet.")
+        st.code(str(e))
+        st.markdown(
+            """
+**Fix:** Open your Excel and ensure the sheet that contains suppliers has (at minimum) these columns (names can vary, but must mean the same thing):
+- supplier_id (or Supplier / Supplier ID / Name)
+- env_risk (Environmental risk)
+- social_risk (Social risk)
+- cost_score (Cost / Cost score)
+- strategic
+- improvement
+- low_quality
+
+Optional:
+- child_labor
+- banned_chem
+
+Then re-run the app.
+            """
+        )
+        st.stop()
 
 c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
