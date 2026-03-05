@@ -37,7 +37,8 @@ div[data-testid="stSidebar"] {display: none;}
     unsafe_allow_html=True,
 )
 
-SERVED_USERS = 10
+CAPACITY = 8
+UTILITY_MIN = 2.35
 ENV_CAP = 2.75
 SOCIAL_CAP = 3.0
 COST_SCALE = 10.0
@@ -193,7 +194,7 @@ with c2:
     st.text_input("Selling price per user", value=f"{price_per_user:.0f}", disabled=True)
 with c3:
     st.info(
-        f"Selling price per user: {price_per_user:.0f} (fixed) | Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
+        f"Selling price per user: {price_per_user:.0f} (fixed) | Capacity: {CAPACITY} | Eligibility: utility ≥ {UTILITY_MIN} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
         icon="ℹ️",
     )
 
@@ -225,7 +226,7 @@ with profit_tab:
     _render_overview_with_selection(overview, picks)
 
     cfg = MaxProfitConfig(
-        served_users=SERVED_USERS,
+        served_users=CAPACITY,
         price_per_user=float(price_per_user),
         cost_scale=COST_SCALE,
         env_cap=ENV_CAP,
@@ -292,7 +293,7 @@ with util_tab:
     _render_overview_with_selection(overview, picks)
 
     cfg = MaxUtilConfig(
-        served_users=SERVED_USERS,
+        served_users=CAPACITY,
         price_per_user=float(price_per_user),
         cost_scale=COST_SCALE,
         env_cap=ENV_CAP,
