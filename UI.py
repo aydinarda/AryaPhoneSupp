@@ -9,6 +9,8 @@ import streamlit as st
 from supabase_db import insert_submission, fetch_all_submissions
 import pandas as pd
 from streamlit_autorefresh import st_autorefresh
+from visuals import render_scatter
+
 
 
 from MinCostAgent import (
@@ -119,20 +121,12 @@ def supplier_overview(suppliers_df: pd.DataFrame, users_df: pd.DataFrame) -> pd.
 def _metrics_panel(title: str, m: Dict[str, float], feasible: bool):
     st.markdown(f"### {title}")
     c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total profit", f"{m['profit_total']:.3f}")
+    c2.metric("Total utility", f"{m['utility_total']:.3f}")
+    c3.metric("Avg env / avg social", f"{m['avg_env']:.3f} / {m['avg_social']:.3f}")
+    c4.metric("# suppliers", f"{int(m['k'])}")
 
-    profit_net = float(m.get("profit_net", m.get("profit_total", 0.0)))
-    penalties = float(m.get("penalties", 0.0))
-    cl = int(m.get("child_labor", 0))
-    bc = int(m.get("banned_chemicals", 0))
-
-    c1.metric("Profit (net)", f"{profit_net:.3f}")
-    c2.metric("Total utility", f"{float(m.get('utility_total', 0.0)):.3f}")
-    c3.metric("Penalties", f"-{penalties:.1f}  (CL {cl} / BC {bc})")
-    c4.metric("# suppliers", f"{int(m.get('k', 0))}")
-
-    st.caption(f"Avg env / avg social: {float(m.get('avg_env', 0.0)):.3f} / {float(m.get('avg_social', 0.0)):.3f}")
-
-    if int(m.get("k", 0)) <= 0:
+    if int(m["k"]) <= 0:
         st.warning("Pick at least 1 supplier.")
     elif feasible:
         st.success("Feasible (risk caps satisfied).")
@@ -196,9 +190,7 @@ c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
     st.session_state.team_name = st.text_input("Name / team", value=st.session_state.team_name)
 with c2:
-    # Fixed selling price (not user-editable)
-    price_per_user = 100.0
-    st.caption("Selling price per user: **100** (fixed)")
+    price_per_user = st.number_input("Selling price per user", min_value=0.0, value=100.0, step=5.0)
 with c3:
     st.info(
         f"Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
@@ -254,9 +246,8 @@ with profit_tab:
             if man["feasible"] and res["feasible"]:
                 gap = float(res["metrics"]["profit_total"] - man["metrics"]["profit_total"])
                 st.write(f"Benchmark − Manual profit gap: **{gap:.3f}**")
-        except Exception as e:
-            st.error("Benchmark could not be computed.")
-            st.exception(e)
+        except Exception:
+            st.info("Benchmark could not be computed.")
 
     if st.button("Submit", use_container_width=True, key="profit_submit"):
         if int(man["metrics"]["k"]) <= 0:
@@ -322,9 +313,8 @@ with util_tab:
             if man["feasible"] and res["feasible"]:
                 gap = float(res["metrics"]["utility_total"] - man["metrics"]["utility_total"])
                 st.write(f"Benchmark − Manual utility gap: **{gap:.3f}**")
-        except Exception as e:
-            st.error("Benchmark could not be computed.")
-            st.exception(e)
+        except Exception:
+            st.info("Benchmark could not be computed.")
 
     if st.button("Submit", use_container_width=True, key="util_submit"):
         if int(man["metrics"]["k"]) <= 0:
@@ -409,9 +399,11 @@ with lb_tab:
 
     cA, cB, cC = st.columns([2, 2, 3])
     with cA:
-        x = st.selectbox("X axis", metrics, index=0 if metrics else 0)
+        x_default = metrics.index("profit") if "profit" in metrics else 0
+        x = st.selectbox("X axis", metrics, index=x_default if metrics else 0)
     with cB:
-        y = st.selectbox("Y axis", metrics, index=1 if len(metrics) > 1 else 0)
+        y_default = metrics.index("utility") if "utility" in metrics else (1 if len(metrics) > 1 else 0)
+        y = st.selectbox("Y axis", metrics, index=y_default if metrics else 0)
     with cC:
         st.text_input("Your team name (for visibility)", value=(st.session_state.team_name or ""), disabled=True)
 
@@ -423,7 +415,7 @@ with lb_tab:
     plot_df = plot_df.rename(columns={"team": "Team", "selected_suppliers": "Suppliers", "objective": "Mode"})
 
     st.markdown("#### Scatter")
-    st.scatter_chart(plot_df.set_index("Team")[[x, y]])
+    render_scatter(plot_df, x=x, y=y)
 
     st.markdown("#### Latest submissions table")
     show_cols = ["Team", "Mode", "created_at", x, y, "Suppliers"]
