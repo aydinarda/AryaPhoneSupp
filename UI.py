@@ -118,24 +118,19 @@ def supplier_overview(suppliers_df: pd.DataFrame, users_df: pd.DataFrame) -> pd.
 
 def _metrics_panel(title: str, m: Dict[str, float], feasible: bool):
     st.markdown(f"### {title}")
-
-    profit_net = float(m.get("profit_total", 0.0))
-    profit_gross = float(m.get("profit_total_gross", profit_net))
-    penalty_total = float(m.get("penalty_total", 0.0))
-
     c1, c2, c3, c4 = st.columns(4)
+
+    profit_net = float(m.get("profit_net", m.get("profit_total", 0.0)))
+    penalties = float(m.get("penalties", 0.0))
+    cl = int(m.get("child_labor", 0))
+    bc = int(m.get("banned_chemicals", 0))
+
     c1.metric("Profit (net)", f"{profit_net:.3f}")
     c2.metric("Total utility", f"{float(m.get('utility_total', 0.0)):.3f}")
-    c3.metric("Penalties", f"-{penalty_total:.1f}")
+    c3.metric("Penalties", f"-{penalties:.1f}  (CL {cl} / BC {bc})")
     c4.metric("# suppliers", f"{int(m.get('k', 0))}")
 
-    # Extra context (only if penalties are active)
-    if penalty_total > 0 or "profit_total_gross" in m:
-        st.caption(f"Gross profit (before penalties): {profit_gross:.3f}")
-
-    c5, c6 = st.columns(2)
-    c5.metric("Avg env / avg social", f"{float(m.get('avg_env', 0.0)):.3f} / {float(m.get('avg_social', 0.0)):.3f}")
-    c6.metric("Child labor / banned chemicals", f"{int(float(m.get('any_child_labor', 0.0)))} / {int(float(m.get('any_banned_chem', 0.0)))}")
+    st.caption(f"Avg env / avg social: {float(m.get('avg_env', 0.0)):.3f} / {float(m.get('avg_social', 0.0)):.3f}")
 
     if int(m.get("k", 0)) <= 0:
         st.warning("Pick at least 1 supplier.")
@@ -143,6 +138,8 @@ def _metrics_panel(title: str, m: Dict[str, float], feasible: bool):
         st.success("Feasible (risk caps satisfied).")
     else:
         st.error("Risk caps violated. You can still submit, but it will be marked as infeasible.")
+
+
 def _render_overview_with_selection(overview_df: pd.DataFrame, picks: List[str]):
     df = overview_df.copy()
     pick_set = set(str(x) for x in picks)
@@ -199,7 +196,9 @@ c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
     st.session_state.team_name = st.text_input("Name / team", value=st.session_state.team_name)
 with c2:
-    price_per_user = st.number_input("Selling price per user", min_value=0.0, value=100.0, step=5.0)
+    # Fixed selling price (not user-editable)
+    price_per_user = 100.0
+    st.caption("Selling price per user: **100** (fixed)")
 with c3:
     st.info(
         f"Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
@@ -255,8 +254,9 @@ with profit_tab:
             if man["feasible"] and res["feasible"]:
                 gap = float(res["metrics"]["profit_total"] - man["metrics"]["profit_total"])
                 st.write(f"Benchmark − Manual profit gap: **{gap:.3f}**")
-        except Exception:
-            st.info("Benchmark could not be computed.")
+        except Exception as e:
+            st.error("Benchmark could not be computed.")
+            st.exception(e)
 
     if st.button("Submit", use_container_width=True, key="profit_submit"):
         if int(man["metrics"]["k"]) <= 0:
@@ -322,8 +322,9 @@ with util_tab:
             if man["feasible"] and res["feasible"]:
                 gap = float(res["metrics"]["utility_total"] - man["metrics"]["utility_total"])
                 st.write(f"Benchmark − Manual utility gap: **{gap:.3f}**")
-        except Exception:
-            st.info("Benchmark could not be computed.")
+        except Exception as e:
+            st.error("Benchmark could not be computed.")
+            st.exception(e)
 
     if st.button("Submit", use_container_width=True, key="util_submit"):
         if int(man["metrics"]["k"]) <= 0:

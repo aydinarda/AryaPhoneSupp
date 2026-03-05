@@ -52,9 +52,6 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_XLSX_PATH = BASE_DIR / "Arya_Phones_Supplier_Selection.xlsx"
 
 
-CHILD_LABOR_PENALTY = 20.0
-BANNED_CHEM_PENALTY = 20.0
-
 @dataclass
 class Policy:
     env_mult: float = 1.0
@@ -289,10 +286,6 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
             "avg_strategic": 0.0,
             "avg_improvement": 0.0,
             "avg_low_quality": 0.0,
-            "avg_child_labor": 0.0,
-            "avg_banned_chem": 0.0,
-            "any_child_labor": 0.0,
-            "any_banned_chem": 0.0,
         }
 
     sel = suppliers_df[suppliers_df["supplier_id"].astype(str).isin([str(x) for x in picks])].copy()
@@ -305,15 +298,7 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
             "avg_strategic": 0.0,
             "avg_improvement": 0.0,
             "avg_low_quality": 0.0,
-            "avg_child_labor": 0.0,
-            "avg_banned_chem": 0.0,
-            "any_child_labor": 0.0,
-            "any_banned_chem": 0.0,
         }
-
-    # Optional binary risk columns (0/1). If missing, treat as all-zero.
-    cl = sel["child_labor"].astype(float) if "child_labor" in sel.columns else pd.Series([0.0] * len(sel))
-    bc = sel["banned_chem"].astype(float) if "banned_chem" in sel.columns else pd.Series([0.0] * len(sel))
 
     return {
         "k": float(len(sel)),
@@ -323,10 +308,6 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
         "avg_strategic": float(sel["strategic"].mean()),
         "avg_improvement": float(sel["improvement"].mean()),
         "avg_low_quality": float(sel["low_quality"].mean()),
-        "avg_child_labor": float(cl.mean()) if len(cl) else 0.0,
-        "avg_banned_chem": float(bc.mean()) if len(bc) else 0.0,
-        "any_child_labor": float((cl >= 0.5).any()),
-        "any_banned_chem": float((bc >= 0.5).any()),
     }
 
 
@@ -350,6 +331,36 @@ class MaxUtilConfig:
     output_flag: int = 0
 
 
+
+def _get_binary_flag_any(suppliers_df: pd.DataFrame, picks: List[str], colnames: List[str]) -> int:
+    df = suppliers_df.copy()
+    if "supplier_id" not in df.columns:
+        return 0
+    df["supplier_id"] = df["supplier_id"].astype(str)
+    sub = df[df["supplier_id"].isin([str(p) for p in picks])]
+    if sub.empty:
+        return 0
+    for c in colnames:
+        if c in sub.columns:
+            try:
+                return int((sub[c].astype(float) >= 0.5).any())
+            except Exception:
+                return int((sub[c].astype(str).str.lower().isin(["1","true","yes","y"])).any())
+    return 0
+
+
+def _penalties_for_selection(
+    suppliers_df: pd.DataFrame,
+    picks: List[str],
+    child_labor_penalty: float = 20.0,
+    banned_chem_penalty: float = 20.0,
+) -> Dict[str, float]:
+    cl = _get_binary_flag_any(suppliers_df, picks, ["child_labor", "child labour", "childLabor"])
+    bc = _get_binary_flag_any(suppliers_df, picks, ["banned_chemicals", "banned_chem", "banned chemicals"])
+    pen = float(child_labor_penalty) * cl + float(banned_chem_penalty) * bc
+    return {"child_labor": float(cl), "banned_chemicals": float(bc), "penalties": float(pen)}
+
+
 def manual_metrics(
     suppliers_df: pd.DataFrame,
     users_df: pd.DataFrame,
@@ -371,17 +382,9 @@ def manual_metrics(
     served = int(cfg.served_users)
 
     profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * a["avg_cost"]
-    profit_total_gross = served * profit_per_user
-
-    # Binary risk penalties (do NOT affect utility; only profit scoring).
-    penalty_total = 0.0
-    if float(a.get("any_child_labor", 0.0)) >= 0.5:
-        penalty_total += float(CHILD_LABOR_PENALTY)
-    if float(a.get("any_banned_chem", 0.0)) >= 0.5:
-        penalty_total += float(BANNED_CHEM_PENALTY)
-
-    profit_total = float(profit_total_gross) - float(penalty_total)
-
+    profit_total = served * profit_per_user
+    pen = _penalties_for_selection(suppliers_df, picks)
+    profit_net = float(profit_total) - float(pen['penalties'])
     u = _select_last_n_users(users_df, served)
     if len(u):
         utility_per_user = (
@@ -404,22 +407,22 @@ def manual_metrics(
             "avg_social": float(a["avg_social"]),
             "avg_cost": float(a["avg_cost"]),
             "profit_total": float(profit_total),
+                "penalties": float(pen['penalties']),
+                "profit_net": float(profit_net),
+                "child_labor": float(pen['child_labor']),
+                "banned_chemicals": float(pen['banned_chemicals']),
+            "penalties": float(pen['penalties']),
+            "profit_net": float(profit_net),
+            "child_labor": float(pen['child_labor']),
+            "banned_chemicals": float(pen['banned_chemicals']),
             "utility_total": float(utility_total),
         },
     }
 
 
 def _apply_policy_bans(model: "gp.Model", y, suppliers_df: pd.DataFrame, policy: Policy) -> None:
-    pol = policy.clamp_nonnegative()
-    if float(pol.child_labor_penalty) >= 0.5 and "child_labor" in suppliers_df.columns:
-        for _, r in suppliers_df.iterrows():
-            if float(r.get("child_labor", 0.0)) >= 0.5:
-                model.addConstr(y[str(r["supplier_id"])] == 0)
-
-    if float(pol.banned_chem_penalty) >= 0.5 and "banned_chem" in suppliers_df.columns:
-        for _, r in suppliers_df.iterrows():
-            if float(r.get("banned_chem", 0.0)) >= 0.5:
-                model.addConstr(y[str(r["supplier_id"])] == 0)
+    # No hard bans: child labor and banned chemicals are handled via penalties.
+    return
 
 
 def _solve_best_over_k(
@@ -427,12 +430,12 @@ def _solve_best_over_k(
     users_df: pd.DataFrame,
     policy: Policy,
     served_users: int,
+    price_per_user: float,
+    cost_scale: float,
     env_cap: float,
     social_cap: float,
     output_flag: int,
     objective_mode: str,
-    price_per_user: float,
-    cost_scale: float,
 ) -> Optional[Dict[str, Any]]:
     if not GUROBI_AVAILABLE:
         raise RuntimeError("gurobipy is not available")
@@ -465,9 +468,6 @@ def _solve_best_over_k(
     imp = dict(zip(df["supplier_id"], df["improvement"].astype(float)))
     lq = dict(zip(df["supplier_id"], df["low_quality"].astype(float)))
 
-    child = dict(zip(df["supplier_id"], df["child_labor"].astype(float))) if "child_labor" in df.columns else {i: 0.0 for i in S}
-    banned = dict(zip(df["supplier_id"], df["banned_chem"].astype(float))) if "banned_chem" in df.columns else {i: 0.0 for i in S}
-
     util_num_coeff = {
         i: (
             W_env * (pol.env_mult * env[i])
@@ -495,25 +495,9 @@ def _solve_best_over_k(
         m.addConstr(gp.quicksum(env[i] * y[i] for i in S) <= float(env_cap) * k, name="env_cap")
         m.addConstr(gp.quicksum(soc[i] * y[i] for i in S) <= float(social_cap) * k, name="soc_cap")
 
-        # Binary risk penalties (applied to PROFIT objective only).
-        z_child = m.addVar(vtype=GRB.BINARY, name="z_child")
-        z_banned = m.addVar(vtype=GRB.BINARY, name="z_banned")
-        # If any selected supplier has the flag, the corresponding z must turn on.
-        for i in S:
-            if float(child.get(i, 0.0)) >= 0.5:
-                m.addConstr(z_child >= y[i], name=f"child_link_{i}")
-            if float(banned.get(i, 0.0)) >= 0.5:
-                m.addConstr(z_banned >= y[i], name=f"banned_link_{i}")
-
         if objective_mode == "profit":
             # Max profit <=> minimize avg cost <=> minimize sum(cost*y) for fixed k
-            m.setObjective(
-                served_users * float(price_per_user)
-                - served_users * float(cost_scale) * (gp.quicksum(cost[i] * y[i] for i in S) / float(k))
-                - float(CHILD_LABOR_PENALTY) * z_child
-                - float(BANNED_CHEM_PENALTY) * z_banned,
-                GRB.MAXIMIZE,
-            )
+            m.setObjective(-gp.quicksum(cost[i] * y[i] for i in S), GRB.MAXIMIZE)
         elif objective_mode == "utility":
             # True utility_total = (1/k) * sum(util_num_coeff[i] * y[i])
             # For fixed k, maximizing numerator is enough.
@@ -521,7 +505,11 @@ def _solve_best_over_k(
         else:
             raise ValueError("objective_mode must be 'profit' or 'utility'")
 
-        m.optimize()
+        try:
+            m.optimize()
+        except Exception:
+            # e.g., license errors or numerical issues
+            continue
 
         if m.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             continue
@@ -541,6 +529,11 @@ def _solve_best_over_k(
         # Utility total
         utility_total = (sum(util_num_coeff[i] for i in chosen) / len(chosen)) if len(chosen) else 0.0
 
+        pen = _penalties_for_selection(df, chosen)
+        profit_per_user = float(price_per_user) - float(cost_scale) * float(avg_cost)
+        profit_total = float(served_users) * float(profit_per_user)
+        profit_net = float(profit_total) - float(pen['penalties'])
+
         cand = {
             "k": float(len(chosen)),
             "avg_env": float(avg_env),
@@ -549,13 +542,12 @@ def _solve_best_over_k(
             "avg_strategic": float(avg_str),
             "avg_improvement": float(avg_imp),
             "avg_low_quality": float(avg_lq),
-            "avg_child_labor": float(avg_child),
-            "avg_banned_chem": float(avg_banned),
-            "any_child_labor": float(any_child),
-            "any_banned_chem": float(any_banned),
-            "penalty_total": float(penalty_total),
-            "profit_total": float(profit_total),
             "utility_num_over_k": float(utility_total),
+            "profit_total": float(profit_total),
+            "profit_net": float(profit_net),
+            "penalties": float(pen['penalties']),
+            "child_labor": float(pen['child_labor']),
+            "banned_chemicals": float(pen['banned_chemicals']),
             "chosen": chosen,
         }
 
@@ -564,7 +556,7 @@ def _solve_best_over_k(
         else:
             # compare on the correct scale
             if objective_mode == "profit":
-                if cand["profit_total"] > best["profit_total"] + 1e-12:
+                if cand.get("profit_net", -1e18) > best.get("profit_net", -1e18) + 1e-12:
                     best = cand
             else:
                 if cand["utility_num_over_k"] > best["utility_num_over_k"] + 1e-12:
@@ -590,12 +582,12 @@ class MaxProfitAgent:
             self.users,
             self.policy,
             served_users=int(cfg.served_users),
+            price_per_user=float(cfg.price_per_user),
+            cost_scale=float(cfg.cost_scale),
             env_cap=float(cfg.env_cap),
             social_cap=float(cfg.social_cap),
             output_flag=int(cfg.output_flag),
             objective_mode="profit",
-            price_per_user=float(cfg.price_per_user),
-            cost_scale=float(cfg.cost_scale),
         )
 
         if best is None:
@@ -666,12 +658,12 @@ class MaxUtilAgent:
             self.users,
             self.policy,
             served_users=int(cfg.served_users),
+            price_per_user=float(cfg.price_per_user),
+            cost_scale=float(cfg.cost_scale),
             env_cap=float(cfg.env_cap),
             social_cap=float(cfg.social_cap),
             output_flag=int(cfg.output_flag),
             objective_mode="utility",
-            price_per_user=float(cfg.price_per_user),
-            cost_scale=float(cfg.cost_scale),
         )
 
         if best is None:
