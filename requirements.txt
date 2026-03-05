@@ -8,3 +8,4 @@ matplotlib
 gurobipy
 scipy
 geopy
+supabase
