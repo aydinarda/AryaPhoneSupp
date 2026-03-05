@@ -184,7 +184,7 @@ def _render_overview_with_selection(overview_df: pd.DataFrame, picks: List[str])
 
 st.title("Arya Phones — Supplier Selection Game")
 
-excel_path = Path(DEFAULT_XLSX_PATH)
+excel_path = Path(__file__).with_name('Arya_Phones_Supplier_Selection.xlsx')
 if not excel_path.exists():
     st.error(f"Excel file not found: {excel_path}. Place it next to UI.py.")
     st.stop()
