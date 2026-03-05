@@ -6,6 +6,11 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from supabase_db import insert_submission, fetch_all_submissions
+import pandas as pd
+from streamlit_autorefresh import st_autorefresh
+
+
 from MinCostAgent import (
     DEFAULT_XLSX_PATH,
     GUROBI_AVAILABLE,
@@ -36,7 +41,6 @@ SERVED_USERS = 10
 ENV_CAP = 2.75
 SOCIAL_CAP = 3.0
 COST_SCALE = 10.0
-SUBMISSIONS_PATH = Path(__file__).resolve().parent / "submissions.xlsx"
 
 FIXED_POLICY = Policy(
     env_mult=1.0,
@@ -110,40 +114,6 @@ def supplier_overview(suppliers_df: pd.DataFrame, users_df: pd.DataFrame) -> pd.
         "banned_chem",
     ]
     return df[cols].copy()
-
-
-def _read_submissions() -> pd.DataFrame:
-    cols = [
-        "timestamp",
-        "name",
-        "mode",
-        "k",
-        "profit",
-        "utility",
-        "avg_env",
-        "avg_social",
-        "avg_cost",
-        "price",
-        "suppliers",
-    ]
-    if not SUBMISSIONS_PATH.exists():
-        return pd.DataFrame(columns=cols)
-    try:
-        df = pd.read_excel(SUBMISSIONS_PATH, engine="openpyxl")
-        for c in cols:
-            if c not in df.columns:
-                df[c] = "" if c in {"timestamp", "name", "mode", "suppliers"} else 0.0
-        return df[cols].copy()
-    except Exception:
-        return pd.DataFrame(columns=cols)
-
-
-def _append_submission(row: Dict[str, Any]) -> None:
-    df = _read_submissions()
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    tmp = SUBMISSIONS_PATH.with_suffix(".tmp.xlsx")
-    df.to_excel(tmp, index=False, engine="openpyxl")
-    os.replace(tmp, SUBMISSIONS_PATH)
 
 
 def _metrics_panel(title: str, m: Dict[str, float], feasible: bool):
@@ -235,7 +205,7 @@ if not GUROBI_AVAILABLE:
 
 suppliers_list = suppliers_df["supplier_id"].astype(str).tolist()
 
-profit_tab, util_tab, sub_tab = st.tabs(["Max Profit", "Max Utility", "Submissions"])
+profit_tab, util_tab, lb_tab = st.tabs(["Max Profit", "Max Utility", "Leaderboard"])
 
 with profit_tab:
     st.subheader("Max Profit")
@@ -278,21 +248,31 @@ with profit_tab:
             st.info("Benchmark could not be computed.")
 
     if st.button("Submit", use_container_width=True, key="profit_submit"):
-        row = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "name": (st.session_state.team_name or "(anonymous)").strip(),
-            "mode": "max_profit",
-            "k": int(man["metrics"]["k"]),
-            "profit": float(man["metrics"]["profit_total"]),
-            "utility": float(man["metrics"]["utility_total"]),
-            "avg_env": float(man["metrics"]["avg_env"]),
-            "avg_social": float(man["metrics"]["avg_social"]),
-            "avg_cost": float(man["metrics"]["avg_cost"]),
-            "price": float(price_per_user),
-            "suppliers": ",".join([str(x) for x in picks]),
-        }
-        _append_submission(row)
-        st.success("Submitted.")
+        if int(man["metrics"]["k"]) <= 0:
+            st.warning("Pick at least 1 supplier before submitting.")
+        else:
+            m = man["metrics"]
+            payload = {
+                "team": (st.session_state.team_name or "(anonymous)").strip(),
+                "player_name": None,
+                "selected_suppliers": ",".join([str(x) for x in picks]),
+                "objective": "max_profit",
+                "comment": None,
+                "profit": float(m.get("profit_total", 0.0)),
+                "utility": float(m.get("utility_total", 0.0)),
+                "env_avg": float(m.get("avg_env", 0.0)),
+                "social_avg": float(m.get("avg_social", 0.0)),
+                "cost_avg": float(m.get("avg_cost", 0.0)),
+                "strategic_avg": float(m.get("avg_strategic", 0.0)),
+                "improvement_avg": float(m.get("avg_improvement", 0.0)),
+                "low_quality_avg": float(m.get("avg_low_quality", 0.0)),
+            }
+            try:
+                insert_submission(payload)
+                st.success("Submitted to live leaderboard.")
+            except Exception as e:
+                st.error("Submission failed (Supabase).")
+                st.code(str(e))
 
 with util_tab:
     st.subheader("Max Utility")
@@ -335,33 +315,108 @@ with util_tab:
             st.info("Benchmark could not be computed.")
 
     if st.button("Submit", use_container_width=True, key="util_submit"):
-        row = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "name": (st.session_state.team_name or "(anonymous)").strip(),
-            "mode": "max_utility",
-            "k": int(man["metrics"]["k"]),
-            "profit": float(man["metrics"]["profit_total"]),
-            "utility": float(man["metrics"]["utility_total"]),
-            "avg_env": float(man["metrics"]["avg_env"]),
-            "avg_social": float(man["metrics"]["avg_social"]),
-            "avg_cost": float(man["metrics"]["avg_cost"]),
-            "price": float(price_per_user),
-            "suppliers": ",".join([str(x) for x in picks]),
-        }
-        _append_submission(row)
-        st.success("Submitted.")
+        if int(man["metrics"]["k"]) <= 0:
+            st.warning("Pick at least 1 supplier before submitting.")
+        else:
+            m = man["metrics"]
+            payload = {
+                "team": (st.session_state.team_name or "(anonymous)").strip(),
+                "player_name": None,
+                "selected_suppliers": ",".join([str(x) for x in picks]),
+                "objective": "max_utility",
+                "comment": None,
+                "profit": float(m.get("profit_total", 0.0)),
+                "utility": float(m.get("utility_total", 0.0)),
+                "env_avg": float(m.get("avg_env", 0.0)),
+                "social_avg": float(m.get("avg_social", 0.0)),
+                "cost_avg": float(m.get("avg_cost", 0.0)),
+                "strategic_avg": float(m.get("avg_strategic", 0.0)),
+                "improvement_avg": float(m.get("avg_improvement", 0.0)),
+                "low_quality_avg": float(m.get("avg_low_quality", 0.0)),
+            }
+            try:
+                insert_submission(payload)
+                st.success("Submitted to live leaderboard.")
+            except Exception as e:
+                st.error("Submission failed (Supabase).")
+                st.code(str(e))
 
-with sub_tab:
-    st.subheader("Submissions")
+with lb_tab:
+    st.subheader("Live Leaderboard (latest submission per team)")
 
-    df = _read_submissions()
-    if df.empty:
+    # Auto-refresh every 3 seconds
+    st_autorefresh(interval=3000, key="lb_refresh")
+
+    # Pull all submissions (latest first)
+    try:
+        res = fetch_all_submissions(limit=5000)
+        rows = getattr(res, "data", None)
+        if rows is None and isinstance(res, dict):
+            rows = res.get("data", [])
+        rows = rows or []
+        df_all = pd.DataFrame(rows)
+    except Exception as e:
+        st.error("Could not load leaderboard from Supabase.")
+        st.code(str(e))
+        st.stop()
+
+    if df_all.empty:
         st.info("No submissions yet.")
-    else:
-        show = df.drop(columns=["suppliers"], errors="ignore").copy()
-        show = show.sort_values(["timestamp"], ascending=False).reset_index(drop=True)
-        st.dataframe(show, use_container_width=True, hide_index=True)
+        st.stop()
 
-    if SUBMISSIONS_PATH.exists():
-        with open(SUBMISSIONS_PATH, "rb") as f:
-            st.download_button("Download submissions.xlsx", data=f, file_name="submissions.xlsx", use_container_width=True)
+    # Parse timestamps and keep latest per team
+    if "created_at" in df_all.columns:
+        df_all["created_at"] = pd.to_datetime(df_all["created_at"], errors="coerce")
+    else:
+        df_all["created_at"] = pd.NaT
+
+    if "team" not in df_all.columns:
+        st.error("Supabase table is missing the 'team' column.")
+        st.stop()
+
+    latest = (
+        df_all.sort_values("created_at", ascending=True)
+        .groupby("team", as_index=False)
+        .tail(1)
+        .reset_index(drop=True)
+    )
+
+    st.caption(f"Teams: {latest['team'].nunique()} | Total submissions stored: {len(df_all)}")
+
+    metrics = [
+        "profit",
+        "utility",
+        "env_avg",
+        "social_avg",
+        "cost_avg",
+        "strategic_avg",
+        "improvement_avg",
+        "low_quality_avg",
+    ]
+    metrics = [m for m in metrics if m in latest.columns]
+
+    cA, cB, cC = st.columns([2, 2, 3])
+    with cA:
+        x = st.selectbox("X axis", metrics, index=0 if metrics else 0)
+    with cB:
+        y = st.selectbox("Y axis", metrics, index=1 if len(metrics) > 1 else 0)
+    with cC:
+        st.text_input("Your team name (for visibility)", value=(st.session_state.team_name or ""), disabled=True)
+
+    # Make sure numeric
+    for m in metrics:
+        latest[m] = pd.to_numeric(latest[m], errors="coerce")
+
+    plot_df = latest[["team", x, y, "created_at", "selected_suppliers", "objective"]].copy()
+    plot_df = plot_df.rename(columns={"team": "Team", "selected_suppliers": "Suppliers", "objective": "Mode"})
+
+    st.markdown("#### Scatter")
+    st.scatter_chart(plot_df.set_index("Team")[[x, y]])
+
+    st.markdown("#### Latest submissions table")
+    show_cols = ["Team", "Mode", "created_at", x, y, "Suppliers"]
+    st.dataframe(plot_df[show_cols].sort_values("created_at", ascending=False), use_container_width=True, hide_index=True)
+
+    # Download CSV snapshot
+    csv_bytes = plot_df[show_cols].sort_values("created_at", ascending=False).to_csv(index=False).encode("utf-8")
+    st.download_button("Download leaderboard CSV", data=csv_bytes, file_name="leaderboard_latest.csv", use_container_width=True)
