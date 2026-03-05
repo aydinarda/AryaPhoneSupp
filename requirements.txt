@@ -9,3 +9,4 @@ gurobipy
 scipy
 geopy
 supabase
+streamlit-autorefresh
