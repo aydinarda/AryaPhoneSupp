@@ -52,6 +52,9 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_XLSX_PATH = BASE_DIR / "Arya_Phones_Supplier_Selection.xlsx"
 
 
+CHILD_LABOR_PENALTY = 20.0
+BANNED_CHEM_PENALTY = 20.0
+
 @dataclass
 class Policy:
     env_mult: float = 1.0
@@ -286,6 +289,10 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
             "avg_strategic": 0.0,
             "avg_improvement": 0.0,
             "avg_low_quality": 0.0,
+            "avg_child_labor": 0.0,
+            "avg_banned_chem": 0.0,
+            "any_child_labor": 0.0,
+            "any_banned_chem": 0.0,
         }
 
     sel = suppliers_df[suppliers_df["supplier_id"].astype(str).isin([str(x) for x in picks])].copy()
@@ -298,7 +305,15 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
             "avg_strategic": 0.0,
             "avg_improvement": 0.0,
             "avg_low_quality": 0.0,
+            "avg_child_labor": 0.0,
+            "avg_banned_chem": 0.0,
+            "any_child_labor": 0.0,
+            "any_banned_chem": 0.0,
         }
+
+    # Optional binary risk columns (0/1). If missing, treat as all-zero.
+    cl = sel["child_labor"].astype(float) if "child_labor" in sel.columns else pd.Series([0.0] * len(sel))
+    bc = sel["banned_chem"].astype(float) if "banned_chem" in sel.columns else pd.Series([0.0] * len(sel))
 
     return {
         "k": float(len(sel)),
@@ -308,6 +323,10 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
         "avg_strategic": float(sel["strategic"].mean()),
         "avg_improvement": float(sel["improvement"].mean()),
         "avg_low_quality": float(sel["low_quality"].mean()),
+        "avg_child_labor": float(cl.mean()) if len(cl) else 0.0,
+        "avg_banned_chem": float(bc.mean()) if len(bc) else 0.0,
+        "any_child_labor": float((cl >= 0.5).any()),
+        "any_banned_chem": float((bc >= 0.5).any()),
     }
 
 
@@ -331,30 +350,6 @@ class MaxUtilConfig:
     output_flag: int = 0
 
 
-
-def _user_utilities_from_avg(
-    users_df: pd.DataFrame,
-    policy: Policy,
-    avg_env: float,
-    avg_social: float,
-    avg_cost: float,
-    avg_strategic: float,
-    avg_improvement: float,
-    avg_low_quality: float,
-) -> pd.Series:
-    """Compute per-user utility given averaged supplier attributes."""
-    pol = policy.clamp_nonnegative()
-    u = users_df.copy()
-    return (
-        u["w_env"] * (pol.env_mult * float(avg_env))
-        + u["w_social"] * (pol.social_mult * float(avg_social))
-        + u["w_cost"] * (pol.cost_mult * float(avg_cost))
-        + u["w_strategic"] * (pol.strategic_mult * float(avg_strategic))
-        + u["w_improvement"] * (pol.improvement_mult * float(avg_improvement))
-        + u["w_low_quality"] * (pol.low_quality_mult * float(avg_low_quality))
-    ).astype(float)
-
-
 def manual_metrics(
     suppliers_df: pd.DataFrame,
     users_df: pd.DataFrame,
@@ -362,12 +357,6 @@ def manual_metrics(
     cfg: MaxProfitConfig | MaxUtilConfig,
     picks: List[str],
 ) -> Dict[str, Any]:
-    """Evaluate a manual supplier pick with *customer eligibility + capacity*.
-
-    Rules (fixed):
-      - We can sell **only** to users with utility >= 2.35
-      - Maximum customers served (capacity) = 8
-    """
     pol = policy.clamp_nonnegative()
     a = _avg_of_selected(suppliers_df, picks)
 
@@ -379,41 +368,36 @@ def manual_metrics(
     if a["avg_social"] > float(cfg.social_cap) + 1e-12:
         feasible = False
 
-    # Fixed selling rules
-    UTILITY_MIN = 2.35
-    CAPACITY = 8
+    served = int(cfg.served_users)
 
     profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * a["avg_cost"]
+    profit_total_gross = served * profit_per_user
 
-    # Compute utilities for *all* users and serve the best eligible ones up to capacity
-    if len(users_df):
-        util = _user_utilities_from_avg(
-            users_df,
-            pol,
-            a["avg_env"],
-            a["avg_social"],
-            a["avg_cost"],
-            a["avg_strategic"],
-            a["avg_improvement"],
-            a["avg_low_quality"],
+    # Binary risk penalties (do NOT affect utility; only profit scoring).
+    penalty_total = 0.0
+    if float(a.get("any_child_labor", 0.0)) >= 0.5:
+        penalty_total += float(CHILD_LABOR_PENALTY)
+    if float(a.get("any_banned_chem", 0.0)) >= 0.5:
+        penalty_total += float(BANNED_CHEM_PENALTY)
+
+    profit_total = float(profit_total_gross) - float(penalty_total)
+
+    u = _select_last_n_users(users_df, served)
+    if len(u):
+        utility_per_user = (
+            u["w_env"] * (pol.env_mult * a["avg_env"])
+            + u["w_social"] * (pol.social_mult * a["avg_social"])
+            + u["w_cost"] * (pol.cost_mult * a["avg_cost"])
+            + u["w_strategic"] * (pol.strategic_mult * a["avg_strategic"])
+            + u["w_improvement"] * (pol.improvement_mult * a["avg_improvement"])
+            + u["w_low_quality"] * (pol.low_quality_mult * a["avg_low_quality"])
         )
-        eligible = users_df.loc[util >= UTILITY_MIN].copy()
-        eligible["utility"] = util[util >= UTILITY_MIN].values
-
-        served_df = eligible.sort_values("utility", ascending=False).head(CAPACITY)
-        served = int(len(served_df))
-        utility_total = float(served_df["utility"].sum())
-        served_user_ids = served_df["user_id"].astype(str).tolist()
+        utility_total = float(utility_per_user.sum())
     else:
-        served = 0
         utility_total = 0.0
-        served_user_ids = []
-
-    profit_total = float(served) * float(profit_per_user)
 
     return {
         "feasible": bool(feasible),
-        "served_user_ids": served_user_ids,
         "metrics": {
             "k": float(a["k"]),
             "avg_env": float(a["avg_env"]),
@@ -421,7 +405,6 @@ def manual_metrics(
             "avg_cost": float(a["avg_cost"]),
             "profit_total": float(profit_total),
             "utility_total": float(utility_total),
-            "served_users": float(served),
         },
     }
 
@@ -448,16 +431,9 @@ def _solve_best_over_k(
     social_cap: float,
     output_flag: int,
     objective_mode: str,
+    price_per_user: float,
+    cost_scale: float,
 ) -> Optional[Dict[str, Any]]:
-    """Benchmark optimizer with *customer eligibility + capacity*.
-
-    Notes:
-      - `served_users` is ignored for backward compatibility.
-      - Fixed rules:
-          UTILITY_MIN = 2.35
-          CAPACITY    = 8
-      - We enumerate k=1..N suppliers to avoid division by k (average) inside the MILP.
-    """
     if not GUROBI_AVAILABLE:
         raise RuntimeError("gurobipy is not available")
 
@@ -470,167 +446,133 @@ def _solve_best_over_k(
     if N == 0:
         return None
 
-    UDF = users_df.copy()
-    UDF["user_id"] = UDF["user_id"].astype(str)
-    user_ids = UDF["user_id"].tolist()
+    # Precompute per-supplier utility numerator coefficient (without /k)
+    u = _select_last_n_users(users_df, served_users)
+    if len(u):
+        W_env = float(u["w_env"].sum())
+        W_soc = float(u["w_social"].sum())
+        W_cost = float(u["w_cost"].sum())
+        W_str = float(u["w_strategic"].sum())
+        W_imp = float(u["w_improvement"].sum())
+        W_lq = float(u["w_low_quality"].sum())
+    else:
+        W_env = W_soc = W_cost = W_str = W_imp = W_lq = 0.0
 
-    # Fixed selling rules
-    UTILITY_MIN = 2.35
-    CAPACITY = 8
+    env = dict(zip(df["supplier_id"], df["env_risk"].astype(float)))
+    soc = dict(zip(df["supplier_id"], df["social_risk"].astype(float)))
+    cost = dict(zip(df["supplier_id"], df["cost_score"].astype(float)))
+    strat = dict(zip(df["supplier_id"], df["strategic"].astype(float)))
+    imp = dict(zip(df["supplier_id"], df["improvement"].astype(float)))
+    lq = dict(zip(df["supplier_id"], df["low_quality"].astype(float)))
 
-    best_obj = None
-    best_sol: Optional[Dict[str, Any]] = None
+    child = dict(zip(df["supplier_id"], df["child_labor"].astype(float))) if "child_labor" in df.columns else {i: 0.0 for i in S}
+    banned = dict(zip(df["supplier_id"], df["banned_chem"].astype(float))) if "banned_chem" in df.columns else {i: 0.0 for i in S}
+
+    util_num_coeff = {
+        i: (
+            W_env * (pol.env_mult * env[i])
+            + W_soc * (pol.social_mult * soc[i])
+            + W_cost * (pol.cost_mult * cost[i])
+            + W_str * (pol.strategic_mult * strat[i])
+            + W_imp * (pol.improvement_mult * imp[i])
+            + W_lq * (pol.low_quality_mult * lq[i])
+        )
+        for i in S
+    }
+
+    best: Optional[Dict[str, Any]] = None
 
     for k in range(1, N + 1):
-        model = gp.Model(f"bench_{objective_mode}_k{k}")
-        model.Params.OutputFlag = int(output_flag)
+        m = gp.Model(f"avg_game_{objective_mode}_k{k}")
+        m.Params.OutputFlag = int(output_flag)
 
-        # Supplier decision
-        y = {s: model.addVar(vtype=GRB.BINARY, name=f"y[{s}]") for s in S}
-        model.addConstr(gp.quicksum(y[s] for s in S) == k, name="k_suppliers")
+        y = m.addVars(S, vtype=GRB.BINARY, name="y")
 
-        # Policy bans (hard zeroing)
-        _apply_policy_bans(model, y, df, pol)
+        m.addConstr(gp.quicksum(y[i] for i in S) == k, name="choose_k")
+        _apply_policy_bans(m, y, df, pol)
 
-        # Risk caps on averages: sum(y*attr) <= k*cap
-        model.addConstr(
-            gp.quicksum(y[s] * float(df.loc[df["supplier_id"] == s, "env_risk"].iloc[0]) for s in S)
-            <= float(env_cap) * k,
-            name="env_cap",
-        )
-        model.addConstr(
-            gp.quicksum(y[s] * float(df.loc[df["supplier_id"] == s, "social_risk"].iloc[0]) for s in S)
-            <= float(social_cap) * k,
-            name="social_cap",
-        )
+        # Risk caps on averages: sum(attr*y) <= cap * k
+        m.addConstr(gp.quicksum(env[i] * y[i] for i in S) <= float(env_cap) * k, name="env_cap")
+        m.addConstr(gp.quicksum(soc[i] * y[i] for i in S) <= float(social_cap) * k, name="soc_cap")
 
-        # Customer decision
-        x = {u: model.addVar(vtype=GRB.BINARY, name=f"x[{u}]") for u in user_ids}
-        model.addConstr(gp.quicksum(x[u] for u in user_ids) <= CAPACITY, name="capacity")
-
-        # Precompute coefficient per (user, supplier) for the utility numerator (without /k)
-        # num_u = sum_s coeff[u,s] * y_s
-        coeff = {}
-        for _, ur in UDF.iterrows():
-            uid = str(ur["user_id"])
-            w_env = float(ur["w_env"])
-            w_soc = float(ur["w_social"])
-            w_cost = float(ur["w_cost"])
-            w_str = float(ur["w_strategic"])
-            w_imp = float(ur["w_improvement"])
-            w_lq = float(ur["w_low_quality"])
-            for _, sr in df.iterrows():
-                sid = str(sr["supplier_id"])
-                coeff[(uid, sid)] = (
-                    w_env * (pol.env_mult * float(sr["env_risk"]))
-                    + w_soc * (pol.social_mult * float(sr["social_risk"]))
-                    + w_cost * (pol.cost_mult * float(sr["cost_score"]))
-                    + w_str * (pol.strategic_mult * float(sr["strategic"]))
-                    + w_imp * (pol.improvement_mult * float(sr["improvement"]))
-                    + w_lq * (pol.low_quality_mult * float(sr["low_quality"]))
-                )
-
-        # Eligibility: (1/k)*num_u >= UTILITY_MIN when served
-        # => num_u >= UTILITY_MIN * k * x_u
-        for uid in user_ids:
-            num_u = gp.quicksum(coeff[(uid, sid)] * y[sid] for sid in S)
-            model.addConstr(num_u >= float(UTILITY_MIN) * k * x[uid], name=f"utility_min[{uid}]")
-
-        # Average cost pieces
-        cost_sum = gp.quicksum(
-            y[s] * float(df.loc[df["supplier_id"] == s, "cost_score"].iloc[0]) for s in S
-        )
-
-        t = model.addVar(lb=0.0, ub=float(CAPACITY), vtype=GRB.CONTINUOUS, name="served_count")
-        model.addConstr(t == gp.quicksum(x[u] for u in user_ids), name="served_count_def")
+        # Binary risk penalties (applied to PROFIT objective only).
+        z_child = m.addVar(vtype=GRB.BINARY, name="z_child")
+        z_banned = m.addVar(vtype=GRB.BINARY, name="z_banned")
+        # If any selected supplier has the flag, the corresponding z must turn on.
+        for i in S:
+            if float(child.get(i, 0.0)) >= 0.5:
+                m.addConstr(z_child >= y[i], name=f"child_link_{i}")
+            if float(banned.get(i, 0.0)) >= 0.5:
+                m.addConstr(z_banned >= y[i], name=f"banned_link_{i}")
 
         if objective_mode == "profit":
-            # profit_total = price*t - cost_scale*(1/k)*cost_sum*t  (bilinear)
-            # Linearize w = cost_sum * t using McCormick envelopes.
-            w = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="w_costsum_times_t")
-
-            # bounds for cost_sum
-            costs = df["cost_score"].astype(float).tolist()
-            La = float(min(costs) * k)
-            Ua = float(max(costs) * k)
-            Lb = 0.0
-            Ub = float(CAPACITY)
-
-            # McCormick constraints for w = a*b, a=cost_sum, b=t
-            # w >= La*b + Lb*a - La*Lb  (Lb=0)
-            model.addConstr(w >= La * t, name="mcc1")
-            # w >= Ua*b + Ub*a - Ua*Ub
-            model.addConstr(w >= Ua * t + Ub * cost_sum - Ua * Ub, name="mcc2")
-            # w <= Ua*b + Lb*a - Ua*Lb (Lb=0)
-            model.addConstr(w <= Ua * t, name="mcc3")
-            # w <= La*b + Ub*a - La*Ub
-            model.addConstr(w <= La * t + Ub * cost_sum - La * Ub, name="mcc4")
-
-            obj = float(100.0) * t - float(10.0) * (1.0 / k) * w
-            # Note: price_per_user and cost_scale are fixed by UI (100 and 10) in this project version.
-            model.setObjective(obj, GRB.MAXIMIZE)
-
+            # Max profit <=> minimize avg cost <=> minimize sum(cost*y) for fixed k
+            m.setObjective(
+                served_users * float(price_per_user)
+                - served_users * float(cost_scale) * (gp.quicksum(cost[i] * y[i] for i in S) / float(k))
+                - float(CHILD_LABOR_PENALTY) * z_child
+                - float(BANNED_CHEM_PENALTY) * z_banned,
+                GRB.MAXIMIZE,
+            )
         elif objective_mode == "utility":
-            # Maximize sum_u x_u * (1/k)*num_u  (bilinear)
-            # Linearize m_u = x_u * num_u with bounds on num_u.
-            m_vars = {}
-            obj_terms = []
-            for uid in user_ids:
-                num_u = gp.quicksum(coeff[(uid, sid)] * y[sid] for sid in S)
-
-                # bounds on num_u: k * min(coeff_u_s) .. k * max(coeff_u_s)
-                vals = [coeff[(uid, sid)] for sid in S]
-                L = float(min(vals) * k)
-                U = float(max(vals) * k)
-
-                m = model.addVar(lb=min(0.0, L), ub=max(0.0, U), vtype=GRB.CONTINUOUS, name=f"m[{uid}]")
-                # Standard linearization for product of binary x and bounded continuous num_u:
-                model.addConstr(m <= U * x[uid], name=f"lin1[{uid}]")
-                model.addConstr(m >= L * x[uid], name=f"lin2[{uid}]")
-                model.addConstr(m <= num_u - L * (1 - x[uid]), name=f"lin3[{uid}]")
-                model.addConstr(m >= num_u - U * (1 - x[uid]), name=f"lin4[{uid}]")
-                m_vars[uid] = m
-                obj_terms.append(m)
-
-            model.setObjective((1.0 / k) * gp.quicksum(obj_terms), GRB.MAXIMIZE)
+            # True utility_total = (1/k) * sum(util_num_coeff[i] * y[i])
+            # For fixed k, maximizing numerator is enough.
+            m.setObjective(gp.quicksum(util_num_coeff[i] * y[i] for i in S), GRB.MAXIMIZE)
         else:
-            raise ValueError(f"Unknown objective_mode: {objective_mode}")
+            raise ValueError("objective_mode must be 'profit' or 'utility'")
 
-        model.optimize()
+        m.optimize()
 
-        if model.Status != GRB.OPTIMAL:
+        if m.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             continue
 
-        obj_val = float(model.ObjVal)
-        if best_obj is None or obj_val > best_obj + 1e-9:
-            chosen = [s for s in S if y[s].X > 0.5]
+        chosen = [i for i in S if y[i].X > 0.5]
+        if not chosen:
+            continue
 
-            sel = df[df["supplier_id"].isin(chosen)]
-            avg_env = float(sel["env_risk"].mean())
-            avg_soc = float(sel["social_risk"].mean())
-            avg_cost = float(sel["cost_score"].mean())
-            avg_str = float(sel["strategic"].mean())
-            avg_imp = float(sel["improvement"].mean())
-            avg_lq = float(sel["low_quality"].mean())
+        # Averages
+        avg_env = sum(env[i] for i in chosen) / len(chosen)
+        avg_soc = sum(soc[i] for i in chosen) / len(chosen)
+        avg_cost = sum(cost[i] for i in chosen) / len(chosen)
+        avg_str = sum(strat[i] for i in chosen) / len(chosen)
+        avg_imp = sum(imp[i] for i in chosen) / len(chosen)
+        avg_lq = sum(lq[i] for i in chosen) / len(chosen)
 
-            # Served users
-            served_users_list = [u for u in user_ids if x[u].X > 0.5]
+        # Utility total
+        utility_total = (sum(util_num_coeff[i] for i in chosen) / len(chosen)) if len(chosen) else 0.0
 
-            best_obj = obj_val
-            best_sol = {
-                "k": float(k),
-                "chosen_suppliers": chosen,
-                "served_user_ids": served_users_list,
-                "avg_env": avg_env,
-                "avg_social": avg_soc,
-                "avg_cost": avg_cost,
-                "avg_strategic": avg_str,
-                "avg_improvement": avg_imp,
-                "avg_low_quality": avg_lq,
-                "objective_value": obj_val,
-            }
+        cand = {
+            "k": float(len(chosen)),
+            "avg_env": float(avg_env),
+            "avg_social": float(avg_soc),
+            "avg_cost": float(avg_cost),
+            "avg_strategic": float(avg_str),
+            "avg_improvement": float(avg_imp),
+            "avg_low_quality": float(avg_lq),
+            "avg_child_labor": float(avg_child),
+            "avg_banned_chem": float(avg_banned),
+            "any_child_labor": float(any_child),
+            "any_banned_chem": float(any_banned),
+            "penalty_total": float(penalty_total),
+            "profit_total": float(profit_total),
+            "utility_num_over_k": float(utility_total),
+            "chosen": chosen,
+        }
 
-    return best_sol
+        if best is None:
+            best = cand
+        else:
+            # compare on the correct scale
+            if objective_mode == "profit":
+                if cand["profit_total"] > best["profit_total"] + 1e-12:
+                    best = cand
+            else:
+                if cand["utility_num_over_k"] > best["utility_num_over_k"] + 1e-12:
+                    best = cand
+
+    return best
+
+
 class MaxProfitAgent:
     def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Policy, cfg: MaxProfitConfig):
         if not GUROBI_AVAILABLE:
@@ -652,6 +594,8 @@ class MaxProfitAgent:
             social_cap=float(cfg.social_cap),
             output_flag=int(cfg.output_flag),
             objective_mode="profit",
+            price_per_user=float(cfg.price_per_user),
+            cost_scale=float(cfg.cost_scale),
         )
 
         if best is None:
@@ -667,28 +611,24 @@ class MaxProfitAgent:
                 },
             }
 
-        # Recompute totals using the official formulas (with customer selection)
-        served_user_ids = list(best.get("served_user_ids", []))
-        served = int(len(served_user_ids))
-
+        # Recompute totals using the official formulas
+        served = int(cfg.served_users)
         profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * float(best["avg_cost"])
         profit_total = served * profit_per_user
 
-        # utility_total over the served users
-        if served and len(self.users):
-            util_all = _user_utilities_from_avg(
-                self.users,
-                self.policy,
-                float(best["avg_env"]),
-                float(best["avg_social"]),
-                float(best["avg_cost"]),
-                float(best["avg_strategic"]),
-                float(best["avg_improvement"]),
-                float(best["avg_low_quality"]),
+        # utility_total using last served users
+        u = _select_last_n_users(self.users, served)
+        pol = self.policy
+        if len(u):
+            utility_per_user = (
+                u["w_env"] * (pol.env_mult * float(best["avg_env"]))
+                + u["w_social"] * (pol.social_mult * float(best["avg_social"]))
+                + u["w_cost"] * (pol.cost_mult * float(best["avg_cost"]))
+                + u["w_strategic"] * (pol.strategic_mult * float(best["avg_strategic"]))
+                + u["w_improvement"] * (pol.improvement_mult * float(best["avg_improvement"]))
+                + u["w_low_quality"] * (pol.low_quality_mult * float(best["avg_low_quality"]))
             )
-            tmp = self.users.copy()
-            tmp["utility"] = util_all.values
-            utility_total = float(tmp[tmp["user_id"].astype(str).isin(set(served_user_ids))]["utility"].sum())
+            utility_total = float(utility_per_user.sum())
         else:
             utility_total = 0.0
 
@@ -698,7 +638,6 @@ class MaxProfitAgent:
 
         return {
             "feasible": bool(feasible),
-            "served_user_ids": served_user_ids,
             "metrics": {
                 "k": float(best["k"]),
                 "avg_env": float(best["avg_env"]),
@@ -706,7 +645,6 @@ class MaxProfitAgent:
                 "avg_cost": float(best["avg_cost"]),
                 "profit_total": float(profit_total),
                 "utility_total": float(utility_total),
-                "served_users": float(served),
             },
         }
 
@@ -732,6 +670,8 @@ class MaxUtilAgent:
             social_cap=float(cfg.social_cap),
             output_flag=int(cfg.output_flag),
             objective_mode="utility",
+            price_per_user=float(cfg.price_per_user),
+            cost_scale=float(cfg.cost_scale),
         )
 
         if best is None:
@@ -747,27 +687,22 @@ class MaxUtilAgent:
                 },
             }
 
-        served_user_ids = list(best.get("served_user_ids", []))
-        served = int(len(served_user_ids))
-
+        served = int(cfg.served_users)
         profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * float(best["avg_cost"])
         profit_total = served * profit_per_user
 
-        # utility_total over the served users
-        if served and len(self.users):
-            util_all = _user_utilities_from_avg(
-                self.users,
-                self.policy,
-                float(best["avg_env"]),
-                float(best["avg_social"]),
-                float(best["avg_cost"]),
-                float(best["avg_strategic"]),
-                float(best["avg_improvement"]),
-                float(best["avg_low_quality"]),
+        u = _select_last_n_users(self.users, served)
+        pol = self.policy
+        if len(u):
+            utility_per_user = (
+                u["w_env"] * (pol.env_mult * float(best["avg_env"]))
+                + u["w_social"] * (pol.social_mult * float(best["avg_social"]))
+                + u["w_cost"] * (pol.cost_mult * float(best["avg_cost"]))
+                + u["w_strategic"] * (pol.strategic_mult * float(best["avg_strategic"]))
+                + u["w_improvement"] * (pol.improvement_mult * float(best["avg_improvement"]))
+                + u["w_low_quality"] * (pol.low_quality_mult * float(best["avg_low_quality"]))
             )
-            tmp = self.users.copy()
-            tmp["utility"] = util_all.values
-            utility_total = float(tmp[tmp["user_id"].astype(str).isin(set(served_user_ids))]["utility"].sum())
+            utility_total = float(utility_per_user.sum())
         else:
             utility_total = 0.0
 
@@ -777,7 +712,6 @@ class MaxUtilAgent:
 
         return {
             "feasible": bool(feasible),
-            "served_user_ids": served_user_ids,
             "metrics": {
                 "k": float(best["k"]),
                 "avg_env": float(best["avg_env"]),
@@ -785,6 +719,5 @@ class MaxUtilAgent:
                 "avg_cost": float(best["avg_cost"]),
                 "profit_total": float(profit_total),
                 "utility_total": float(utility_total),
-                "served_users": float(served),
             },
         }

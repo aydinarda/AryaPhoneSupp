@@ -37,12 +37,10 @@ div[data-testid="stSidebar"] {display: none;}
     unsafe_allow_html=True,
 )
 
-CAPACITY = 8
-UTILITY_MIN = 2.35
+SERVED_USERS = 10
 ENV_CAP = 2.75
 SOCIAL_CAP = 3.0
 COST_SCALE = 10.0
-FIXED_PRICE_PER_USER = 100.0
 
 FIXED_POLICY = Policy(
     env_mult=1.0,
@@ -120,20 +118,31 @@ def supplier_overview(suppliers_df: pd.DataFrame, users_df: pd.DataFrame) -> pd.
 
 def _metrics_panel(title: str, m: Dict[str, float], feasible: bool):
     st.markdown(f"### {title}")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total profit", f"{m['profit_total']:.3f}")
-    c2.metric("Total utility", f"{m['utility_total']:.3f}")
-    c3.metric("Avg env / avg social", f"{m['avg_env']:.3f} / {m['avg_social']:.3f}")
-    c4.metric("# suppliers", f"{int(m['k'])}")
 
-    if int(m["k"]) <= 0:
+    profit_net = float(m.get("profit_total", 0.0))
+    profit_gross = float(m.get("profit_total_gross", profit_net))
+    penalty_total = float(m.get("penalty_total", 0.0))
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Profit (net)", f"{profit_net:.3f}")
+    c2.metric("Total utility", f"{float(m.get('utility_total', 0.0)):.3f}")
+    c3.metric("Penalties", f"-{penalty_total:.1f}")
+    c4.metric("# suppliers", f"{int(m.get('k', 0))}")
+
+    # Extra context (only if penalties are active)
+    if penalty_total > 0 or "profit_total_gross" in m:
+        st.caption(f"Gross profit (before penalties): {profit_gross:.3f}")
+
+    c5, c6 = st.columns(2)
+    c5.metric("Avg env / avg social", f"{float(m.get('avg_env', 0.0)):.3f} / {float(m.get('avg_social', 0.0)):.3f}")
+    c6.metric("Child labor / banned chemicals", f"{int(float(m.get('any_child_labor', 0.0)))} / {int(float(m.get('any_banned_chem', 0.0)))}")
+
+    if int(m.get("k", 0)) <= 0:
         st.warning("Pick at least 1 supplier.")
     elif feasible:
         st.success("Feasible (risk caps satisfied).")
     else:
         st.error("Risk caps violated. You can still submit, but it will be marked as infeasible.")
-
-
 def _render_overview_with_selection(overview_df: pd.DataFrame, picks: List[str]):
     df = overview_df.copy()
     pick_set = set(str(x) for x in picks)
@@ -190,11 +199,10 @@ c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
     st.session_state.team_name = st.text_input("Name / team", value=st.session_state.team_name)
 with c2:
-    price_per_user = float(FIXED_PRICE_PER_USER)
-    st.text_input("Selling price per user", value=f"{price_per_user:.0f}", disabled=True)
+    price_per_user = st.number_input("Selling price per user", min_value=0.0, value=100.0, step=5.0)
 with c3:
     st.info(
-        f"Selling price per user: {price_per_user:.0f} (fixed) | Capacity: {CAPACITY} | Eligibility: utility ≥ {UTILITY_MIN} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
+        f"Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
         icon="ℹ️",
     )
 
@@ -226,7 +234,7 @@ with profit_tab:
     _render_overview_with_selection(overview, picks)
 
     cfg = MaxProfitConfig(
-        served_users=CAPACITY,
+        served_users=SERVED_USERS,
         price_per_user=float(price_per_user),
         cost_scale=COST_SCALE,
         env_cap=ENV_CAP,
@@ -293,7 +301,7 @@ with util_tab:
     _render_overview_with_selection(overview, picks)
 
     cfg = MaxUtilConfig(
-        served_users=CAPACITY,
+        served_users=SERVED_USERS,
         price_per_user=float(price_per_user),
         cost_scale=COST_SCALE,
         env_cap=ENV_CAP,
