@@ -41,6 +41,7 @@ SERVED_USERS = 10
 ENV_CAP = 2.75
 SOCIAL_CAP = 3.0
 COST_SCALE = 10.0
+FIXED_PRICE_PER_USER = 100.0
 
 FIXED_POLICY = Policy(
     env_mult=1.0,
@@ -188,10 +189,11 @@ c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
     st.session_state.team_name = st.text_input("Name / team", value=st.session_state.team_name)
 with c2:
-    price_per_user = st.number_input("Selling price per user", min_value=0.0, value=100.0, step=5.0)
+    price_per_user = float(FIXED_PRICE_PER_USER)
+    st.text_input("Selling price per user", value=f"{price_per_user:.0f}", disabled=True)
 with c3:
     st.info(
-        f"Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
+        f"Selling price per user: {price_per_user:.0f} (fixed) | Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
         icon="ℹ️",
     )
 
