@@ -1,4 +1,5 @@
 import os
+import runpy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -150,6 +151,20 @@ def _render_overview_with_selection(overview_df: pd.DataFrame, picks: List[str])
     }
     st.dataframe(df, use_container_width=True, hide_index=True, column_config=col_cfg)
 
+
+sidebar_page = st.sidebar.radio("Navigation", ["Main Game", "Baseline"], index=0)
+
+if sidebar_page == "Baseline":
+    baseline_candidates = [
+        Path(__file__).with_name("pages") / "01_Baseline.py",
+        Path(__file__).with_name("01_Baseline.py"),
+    ]
+    baseline_path = next((p for p in baseline_candidates if p.exists()), None)
+    if baseline_path is None:
+        st.error("Baseline page file not found. Expected one of: pages/01_Baseline.py or 01_Baseline.py next to UI.py.")
+        st.stop()
+    runpy.run_path(str(baseline_path), run_name="__main__")
+    st.stop()
 
 st.title("Arya Phones — Supplier Selection Game")
 
