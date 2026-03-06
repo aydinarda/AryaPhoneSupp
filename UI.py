@@ -31,7 +31,6 @@ st.markdown(
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
-div[data-testid="stSidebar"] {display: none;}
 </style>
 """,
     unsafe_allow_html=True,
