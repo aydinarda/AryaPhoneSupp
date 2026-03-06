@@ -9,8 +9,6 @@ import streamlit as st
 from supabase_db import insert_submission, fetch_all_submissions
 import pandas as pd
 from streamlit_autorefresh import st_autorefresh
-from visuals import render_scatter
-
 
 
 from MinCostAgent import (
@@ -39,7 +37,7 @@ div[data-testid="stSidebar"] {display: none;}
     unsafe_allow_html=True,
 )
 
-SERVED_USERS = 10
+SERVED_USERS = 8
 ENV_CAP = 2.75
 SOCIAL_CAP = 3.0
 COST_SCALE = 10.0
@@ -190,7 +188,8 @@ c1, c2, c3 = st.columns([2, 2, 3])
 with c1:
     st.session_state.team_name = st.text_input("Name / team", value=st.session_state.team_name)
 with c2:
-    price_per_user = st.number_input("Selling price per user", min_value=0.0, value=100.0, step=5.0)
+    price_per_user = 100.0
+    st.text_input("Selling price per user", value=f"{price_per_user:.2f}", disabled=True)
 with c3:
     st.info(
         f"Served users: {SERVED_USERS} | Risk caps: avg env ≤ {ENV_CAP}, avg social ≤ {SOCIAL_CAP} | Profit subtracts {COST_SCALE}×avg(cost_score)",
@@ -399,11 +398,9 @@ with lb_tab:
 
     cA, cB, cC = st.columns([2, 2, 3])
     with cA:
-        x_default = metrics.index("profit") if "profit" in metrics else 0
-        x = st.selectbox("X axis", metrics, index=x_default if metrics else 0)
+        x = st.selectbox("X axis", metrics, index=0 if metrics else 0)
     with cB:
-        y_default = metrics.index("utility") if "utility" in metrics else (1 if len(metrics) > 1 else 0)
-        y = st.selectbox("Y axis", metrics, index=y_default if metrics else 0)
+        y = st.selectbox("Y axis", metrics, index=1 if len(metrics) > 1 else 0)
     with cC:
         st.text_input("Your team name (for visibility)", value=(st.session_state.team_name or ""), disabled=True)
 
@@ -415,7 +412,7 @@ with lb_tab:
     plot_df = plot_df.rename(columns={"team": "Team", "selected_suppliers": "Suppliers", "objective": "Mode"})
 
     st.markdown("#### Scatter")
-    render_scatter(plot_df, x=x, y=y)
+    st.scatter_chart(plot_df.set_index("Team")[[x, y]])
 
     st.markdown("#### Latest submissions table")
     show_cols = ["Team", "Mode", "created_at", x, y, "Suppliers"]

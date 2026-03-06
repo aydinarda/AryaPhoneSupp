@@ -313,7 +313,7 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
 
 @dataclass
 class MaxProfitConfig:
-    served_users: int = 10
+    served_users: int = 8
     price_per_user: float = 100.0
     cost_scale: float = 10.0
     env_cap: float = 2.75
@@ -323,7 +323,7 @@ class MaxProfitConfig:
 
 @dataclass
 class MaxUtilConfig:
-    served_users: int = 10
+    served_users: int = 8
     price_per_user: float = 100.0
     cost_scale: float = 10.0
     env_cap: float = 2.75
@@ -349,26 +349,22 @@ def manual_metrics(
     if a["avg_social"] > float(cfg.social_cap) + 1e-12:
         feasible = False
 
-    served_cap = int(cfg.served_users)
-    served = int(min(served_cap, len(users_df)))
+    served = min(int(cfg.served_users), int(len(users_df)))
 
     profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * a["avg_cost"]
     profit_total = served * profit_per_user
 
-    # Matching proxy (single-group baseline): serve the top-'served' users by utility
-    # for the chosen supplier set. This enforces 'one sale per user'.
-    if served > 0:
-        u = users_df.copy()
-        u['utility'] = (
-            u['w_env'] * (pol.env_mult * a['avg_env'])
-            + u['w_social'] * (pol.social_mult * a['avg_social'])
-            + u['w_cost'] * (pol.cost_mult * a['avg_cost'])
-            + u['w_strategic'] * (pol.strategic_mult * a['avg_strategic'])
-            + u['w_improvement'] * (pol.improvement_mult * a['avg_improvement'])
-            + u['w_low_quality'] * (pol.low_quality_mult * a['avg_low_quality'])
+    u = _select_last_n_users(users_df, served)
+    if len(u):
+        utility_per_user = (
+            u["w_env"] * (pol.env_mult * a["avg_env"])
+            + u["w_social"] * (pol.social_mult * a["avg_social"])
+            + u["w_cost"] * (pol.cost_mult * a["avg_cost"])
+            + u["w_strategic"] * (pol.strategic_mult * a["avg_strategic"])
+            + u["w_improvement"] * (pol.improvement_mult * a["avg_improvement"])
+            + u["w_low_quality"] * (pol.low_quality_mult * a["avg_low_quality"])
         )
-        u = u.sort_values('utility', ascending=False).head(served)
-        utility_total = float(u['utility'].sum())
+        utility_total = float(utility_per_user.sum())
     else:
         utility_total = 0.0
 
@@ -559,7 +555,7 @@ class MaxProfitAgent:
             }
 
         # Recompute totals using the official formulas
-        served = int(cfg.served_users)
+        served = min(int(cfg.served_users), int(len(users_df)))
         profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * float(best["avg_cost"])
         profit_total = served * profit_per_user
 
@@ -632,7 +628,7 @@ class MaxUtilAgent:
                 },
             }
 
-        served = int(cfg.served_users)
+        served = min(int(cfg.served_users), int(len(users_df)))
         profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * float(best["avg_cost"])
         profit_total = served * profit_per_user
 
