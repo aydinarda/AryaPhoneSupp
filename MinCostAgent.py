@@ -350,30 +350,29 @@ def manual_metrics(
         feasible = False
 
     served_cap = int(cfg.served_users)
-    # A user can be served at most once. If there are fewer users than capacity,
-    # we can only serve up to len(users_df).
     served = int(min(served_cap, len(users_df)))
 
     profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * a["avg_cost"]
     profit_total = served * profit_per_user
 
     # Matching proxy (single-group baseline): serve the top-'served' users by utility
-    # for the chosen supplier set. This enforces "one sale per user".
+    # for the chosen supplier set. This enforces 'one sale per user'.
     if served > 0:
         u = users_df.copy()
-        u["utility"] = (
-            u["w_env"] * (pol.env_mult * a["avg_env"])
-            + u["w_social"] * (pol.social_mult * a["avg_social"])
-            + u["w_cost"] * (pol.cost_mult * a["avg_cost"])
-            + u["w_strategic"] * (pol.strategic_mult * a["avg_strategic"])
-            + u["w_improvement"] * (pol.improvement_mult * a["avg_improvement"])
-            + u["w_low_quality"] * (pol.low_quality_mult * a["avg_low_quality"])
+        u['utility'] = (
+            u['w_env'] * (pol.env_mult * a['avg_env'])
+            + u['w_social'] * (pol.social_mult * a['avg_social'])
+            + u['w_cost'] * (pol.cost_mult * a['avg_cost'])
+            + u['w_strategic'] * (pol.strategic_mult * a['avg_strategic'])
+            + u['w_improvement'] * (pol.improvement_mult * a['avg_improvement'])
+            + u['w_low_quality'] * (pol.low_quality_mult * a['avg_low_quality'])
         )
-        u = u.sort_values("utility", ascending=False).head(served)
-        utility_total = float(u["utility"].sum())
+        u = u.sort_values('utility', ascending=False).head(served)
+        utility_total = float(u['utility'].sum())
     else:
         utility_total = 0.0
-return {
+
+    return {
         "feasible": bool(feasible),
         "metrics": {
             "k": float(a["k"]),
