@@ -1,0 +1,90 @@
+# Secrets & Configuration
+secrets.toml
+.env
+.env.local
+.env.*.local
+config/secrets/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS/Temporary Files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+*.tmp
+~$*
+
+# Node (if applicable to frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Excel temporary/backup
+~$*.xlsx
+~$*.xls
