@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from .db import fetch_all_submissions, insert_submission
+from .schemas import BenchmarkRequest, EvalRequest, SubmitRequest
+from .service import evaluate_manual, get_game_constants, get_supplier_overview, run_benchmark
+
+app = FastAPI(title="Arya Phone Game API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/config")
+def config() -> dict[str, Any]:
+    return get_game_constants()
+
+
+@app.get("/api/suppliers")
+def suppliers() -> list[dict[str, Any]]:
+    try:
+        return get_supplier_overview()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/manual-eval")
+def manual_eval(req: EvalRequest) -> dict[str, Any]:
+    try:
+        return evaluate_manual(req.objective, req.picks)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/benchmark")
+def benchmark(req: BenchmarkRequest) -> dict[str, Any]:
+    try:
+        return run_benchmark(req.objective)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/submit")
+def submit(req: SubmitRequest) -> dict[str, Any]:
+    try:
+        result = evaluate_manual(req.objective, req.picks)
+        metrics = result["metrics"]
+        feasible = result.get("feasible", False)
+
+        payload = {
+            "team": (req.team or "(anonymous)").strip() or "(anonymous)",
+            "player_name": (req.player_name or "(anonymous)").strip() or "(anonymous)",
+            "selected_suppliers": ",".join([str(x) for x in req.picks]),
+            "objective": req.objective,
+            "comment": req.comment,
+            "feasible": feasible,
+            "num_suppliers": int(metrics.get("k", 0)),
+            "profit": float(metrics.get("profit_total", 0.0)),
+            "utility": float(metrics.get("utility_total", 0.0)),
+            "env_avg": float(metrics.get("avg_env", 0.0)),
+            "social_avg": float(metrics.get("avg_social", 0.0)),
+            "cost_avg": float(metrics.get("avg_cost", 0.0)),
+            "strategic_avg": float(metrics.get("avg_strategic", 0.0)),
+            "improvement_avg": float(metrics.get("avg_improvement", 0.0)),
+            "low_quality_avg": float(metrics.get("avg_low_quality", 0.0)),
+        }
+
+        insert_submission(payload)
+        return {"ok": True, "manual": result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/leaderboard")
+def leaderboard(limit: int = 5000, sort_by: str = "profit", feasible_only: bool = False) -> dict[str, Any]:
+    try:
+        res = fetch_all_submissions(limit=limit)
+        rows = getattr(res, "data", None)
+        if rows is None and isinstance(res, dict):
+            rows = res.get("data", [])
+        rows = rows or []
+
+        if not rows:
+            return {"rows": [], "latest": [], "top_profit": [], "top_utility": []}
+
+        df_all = pd.DataFrame(rows)
+        if "created_at" in df_all.columns:
+            df_all["created_at"] = pd.to_datetime(df_all["created_at"], errors="coerce")
+        else:
+            df_all["created_at"] = pd.NaT
+
+        if "team" not in df_all.columns:
+            raise RuntimeError("Supabase table is missing the 'team' column.")
+
+        # Feasibility filtresi
+        if feasible_only and "feasible" in df_all.columns:
+            df_all = df_all[df_all["feasible"] == True].copy()
+
+        # Her takımın en son submission'ı
+        latest = (
+            df_all.sort_values("created_at", ascending=True)
+            .groupby("team", as_index=False)
+            .tail(1)
+            .reset_index(drop=True)
+        )
+
+        # Profit'e göre en iyi 10
+        top_profit = latest.nlargest(10, "profit") if "profit" in latest.columns else pd.DataFrame()
+
+        # Utility'ye göre en iyi 10
+        top_utility = latest.nlargest(10, "utility") if "utility" in latest.columns else pd.DataFrame()
+
+        return {
+            "rows": df_all.sort_values("created_at", ascending=False).to_dict(orient="records"),
+            "latest": latest.sort_values("created_at", ascending=False).to_dict(orient="records"),
+            "top_profit": top_profit.to_dict(orient="records"),
+            "top_utility": top_utility.to_dict(orient="records"),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+CLIENT_DIR = Path(__file__).resolve().parents[2] / "client"
+
+if CLIENT_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=CLIENT_DIR), name="assets")
+
+
+@app.get("/")
+def home() -> FileResponse:
+    index_file = CLIENT_DIR / "index.html"
+    if not index_file.exists():
+        raise HTTPException(status_code=404, detail="Client index.html not found")
+    return FileResponse(index_file)

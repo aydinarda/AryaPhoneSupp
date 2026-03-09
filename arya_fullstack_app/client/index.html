@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Arya Phones Supplier Game</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260309-2" />
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header class="topbar">
+        <h1>Arya Phones — Supplier Selection</h1>
+        <div class="team-box">
+          <label for="teamName">Team Name</label>
+          <input id="teamName" type="text" placeholder="Enter team name" />
+          <label for="playerName">Player Name</label>
+          <input id="playerName" type="text" placeholder="Enter your name" />
+        </div>
+      </header>
+
+      <section class="card info" id="configInfo">Loading...</section>
+
+      <section class="card">
+        <div class="tabs">
+          <button class="tab active" data-tab="max_profit">Max Profit</button>
+          <button class="tab" data-tab="max_utility">Max Utility</button>
+          <button class="tab" data-tab="leaderboard">Leaderboard</button>
+        </div>
+
+        <div class="tab-panel" id="panel-game">
+          <div class="actions-row">
+            <button id="btnManual">Manual Evaluate</button>
+            <button id="btnBenchmark">Run Benchmark</button>
+            <button id="btnSubmit" class="primary">Submit</button>
+          </div>
+
+          <div class="layout-2">
+            <div>
+              <h3>Suppliers</h3>
+              <div id="supplierList" class="supplier-list"></div>
+            </div>
+            <div>
+              <h3>Metrics</h3>
+              <div class="metrics-grid" id="manualMetrics"></div>
+              <div class="metrics-grid benchmark" id="benchmarkMetrics"></div>
+              <p class="hint" id="statusText"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel hidden" id="panel-leaderboard">
+          <div class="actions-row">
+            <button id="btnRefreshLeaderboard">Refresh</button>
+            <select id="sortSelect">
+              <option value="profit">Sort by Profit</option>
+              <option value="utility">Sort by Utility</option>
+            </select>
+            <label>
+              <input type="checkbox" id="feasibleOnly" />
+              Show only feasible
+            </label>
+            <select id="plotXSelect" title="X axis"></select>
+            <select id="plotYSelect" title="Y axis"></select>
+          </div>
+          <div id="leaderboardScatter" class="card"></div>
+          <div class="table-wrap">
+            <table id="leaderboardTable">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Team</th>
+                  <th>Player</th>
+                  <th>Objective</th>
+                  <th>Feasible</th>
+                  <th>Profit</th>
+                  <th>Utility</th>
+                  <th># Suppliers</th>
+                  <th>Suppliers</th>
+                  <th>Avg Env</th>
+                  <th>Avg Social</th>
+                  <th>Avg Cost</th>
+                  <th>Created At</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/assets/app.js?v=20260309-2"></script>
+  </body>
+</html>
