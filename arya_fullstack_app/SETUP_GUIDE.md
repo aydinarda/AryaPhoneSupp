@@ -1,38 +1,38 @@
 # Arya Phones Full Stack App - Setup Guide
 
-## 🎯 Özellikler
+## 🎯 Features
 
-### Single Player Leaderboard Sistemi
-- ✅ Herkes aynı anda oynar (bağımsız)
-- ✅ Aynı supplier pool'undan seçim yapar
-- ✅ Aynı user pool'uyla matchlenir
-- ✅ Constraint'lere uygunluk kontrolü (feasibility)
+### Single-Player Leaderboard System
+- ✅ Everyone plays at the same time (independently)
+- ✅ Everyone selects from the same supplier pool
+- ✅ Everyone is matched with the same user pool
+- ✅ Feasibility is checked against the constraints
 - ✅ Real-time leaderboard
-- ✅ Profit ve Utility'ye göre sıralama
-- ✅ Sadece feasible sonuçları gösterme filtresi
+- ✅ Ranking by Profit and Utility
+- ✅ Filter to show only feasible results
 
-## 📦 Kurulum Adımları
+## 📦 Setup Steps
 
 ### 1. Supabase Database Setup
 
-1. [Supabase](https://supabase.com) hesabı aç
-2. Yeni proje oluştur
-3. SQL Editor'e git
-4. `database_schema.sql` dosyasındaki SQL'i çalıştır
+1. Create a [Supabase](https://supabase.com) account
+2. Create a new project
+3. Go to the SQL Editor
+4. Run the SQL from the `database_schema.sql` file
 
 ### 2. Environment Variables
 
-`secrets.toml` dosyası oluştur (proje root'unda):
+Create a `secrets.toml` file in the project root:
 
 ```toml
 SUPABASE_URL = "https://your-project.supabase.co"
 SUPABASE_ANON_KEY = "your-anon-key-here"
 ```
 
-**Supabase credentials'ı nereden bulursun?**
+**Where can you find your Supabase credentials?**
 - Supabase Dashboard > Settings > API
 - URL: Project URL
-- Key: `anon` `public` key
+- Key: `anon` / `public` key
 
 ### 3. Backend Server
 
@@ -42,88 +42,89 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 4. Frontend (Statik Dosyalar)
+### 4. Frontend (Static Files)
 
-Frontend otomatik olarak `/` route'unda serve edilir.
-Sunucu çalıştıktan sonra: **http://localhost:8000**
+The frontend is automatically served on the `/` route.
+After the server starts, open: **http://localhost:8000**
 
-## 🎮 Nasıl Oynanır?
+## 🎮 How to Play
 
-### Oyuncu Tarafı
+### Player Side
 
-1. **Team Name** ve **Player Name** gir
-2. **Supplier seç** (istediğin kadar)
-3. **Objective seç** (Max Profit veya Max Utility)
-4. **Manual Evaluate** ile sonuçları gör
-5. **Submit** ile leaderboard'a kaydet
+1. Enter **Team Name** and **Player Name**
+2. **Select suppliers** (as many as you want)
+3. Choose an **Objective** (Max Profit or Max Utility)
+4. Use **Manual Evaluate** to see the results
+5. Use **Submit** to save your result to the leaderboard
 
 ### Leaderboard
 
-- **Sort by Profit/Utility**: Hangi metriğe göre sıralanacağını seç
-- **Show only feasible**: Sadece constraint'leri sağlayan sonuçları göster
-- **Top 10**: En iyi 10 sonuç gösterilir
+- **Sort by Profit/Utility**: Choose which metric to rank by
+- **Show only feasible**: Show only results that satisfy the constraints
+- **Top 10**: Displays the best 10 results
 - **Color Coding**:
-  - 🟢 Yeşil = Feasible (constraint'ler sağlanıyor)
-  - 🔴 Kırmızı = Infeasible (constraint ihlali var)
+  - 🟢 Green = Feasible (constraints satisfied)
+  - 🔴 Red = Infeasible (constraint violation)
 
-## 🔧 Constraint'ler
+## 🔧 Constraints
 
-Aşağıdaki kısıtlar otomatik kontrol edilir:
+The following constraints are checked automatically:
 
 - **Avg Environmental Risk** ≤ 2.75
 - **Avg Social Risk** ≤ 3.0
-- **En az 1 tedarikçi** seçilmeli
+- At least **1 supplier** must be selected
 
-## 📊 Metrikler
+## 📊 Metrics
 
-Her submission için hesaplanan:
+Calculated for each submission:
 
-- ✅ **Feasibility** (constraint'lere uygunluk)
+- ✅ **Feasibility** (whether the constraints are satisfied)
 - 💰 **Profit** = served_users × (price_per_user - cost_scale × avg_cost)
-- 😊 **Utility** = Kullanıcı ağırlıklarına göre toplam fayda
+- 😊 **Utility** = total benefit based on user weights
 - 📈 **Averages**: env, social, cost, strategic, improvement, low_quality
 
-## 🚀 Deployment (Gelecek)
+## 🚀 Deployment (Future)
 
-Henüz deploy edilmedi, sadece local'de çalışıyor.
+The app has not been deployed yet; it currently runs only locally.
 
-Deploy için:
+For deployment:
 - Backend: Railway, Render, Heroku
 - Frontend: Netlify, Vercel
-- Database: Supabase (zaten cloud)
+- Database: Supabase (already cloud-hosted)
 
 ## 📝 API Endpoints
 
-- `GET /api/config` - Oyun ayarları
-- `GET /api/suppliers` - Tedarikçi listesi
-- `POST /api/manual-eval` - Manuel değerlendirme
-- `POST /api/benchmark` - Gurobi optimal çözümü
-- `POST /api/submit` - Leaderboard'a gönder
-- `GET /api/leaderboard?sort_by=profit&feasible_only=false` - Lider tablosu
+- `GET /api/config` - Game settings
+- `GET /api/suppliers` - Supplier list
+- `POST /api/manual-eval` - Manual evaluation
+- `POST /api/benchmark` - Gurobi optimal solution
+- `POST /api/submit` - Submit to leaderboard
+- `GET /api/leaderboard?sort_by=profit&feasible_only=false` - Leaderboard
 
-## 🎯 Oyun Mekaniği
+## 🎯 Game Mechanics
 
-### Single Player Mode
-- Her oyuncu bağımsız oynar
-- Aynı supplier ve user pool'u kullanılır
-- Herkes aynı constraint'lere tabidir
-- Leaderboard'da yarışma vardır ama birbirlerini etkilemezler
+### Single-Player Mode
+- Each player plays independently
+- Everyone uses the same supplier and user pool
+- Everyone is subject to the same constraints
+- There is competition on the leaderboard, but players do not affect one another
 
-### Nasıl Kazanılır?
-- **Max Profit Mode**: En yüksek profit'i elde eden kazanır
-- **Max Utility Mode**: En yüksek utility'yi elde eden kazanır
-- **DİKKAT**: Sadece **feasible** sonuçlar geçerlidir!
+### How to Win
+- **Max Profit Mode**: The player with the highest profit wins
+- **Max Utility Mode**: The player with the highest utility wins
+- **IMPORTANT**: Only **feasible** results are valid!
 
 ## 🐛 Troubleshooting
 
-**Supabase bağlantı hatası?**
-- `secrets.toml` dosyasını kontrol et
-- Supabase credentials'ın doğru olduğundan emin ol
+**Supabase connection error?**
+- Check the `secrets.toml` file
+- Make sure your Supabase credentials are correct
 
-**Gurobi hatası?**
-- Benchmark için Gurobi gerekli
-- Manuel evaluate için Gurobi gerekmez
+**Gurobi error?**
+- Gurobi is required for the benchmark
+- Gurobi is not required for manual evaluation
 
-**Leaderboard boş?**
-- Henüz kimse submit etmemiş olabilir
-- Database bağlantısını kontrol et
+**Leaderboard is empty?**
+- No one may have submitted yet
+- Check the database connection
+
