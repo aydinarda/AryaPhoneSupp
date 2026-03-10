@@ -9,6 +9,7 @@ SESSION_CODE_LENGTH = 6
 
 _sessions_lock = Lock()
 _sessions: dict[str, dict[str, Any]] = {}
+_session_players: dict[str, set[str]] = {}  # code -> set of lowercase team names
 
 
 def _normalize_session_code(raw_code: str) -> str:
@@ -49,3 +50,29 @@ def get_session(code: str) -> dict[str, Any] | None:
 
     with _sessions_lock:
         return _sessions.get(normalized)
+
+
+def join_session(code: str, team_name: str) -> dict[str, Any] | None:
+    """Register a player team name into a session.
+
+    Returns the session dict on success.
+    Returns None if the session code does not exist.
+    Raises ValueError if the team name is blank or already taken (case-insensitive).
+    """
+    normalized = _normalize_session_code(code)
+    clean_team = (team_name or "").strip()
+
+    if not clean_team:
+        raise ValueError("Team name is required")
+
+    with _sessions_lock:
+        session = _sessions.get(normalized)
+        if session is None:
+            return None
+
+        players = _session_players.setdefault(normalized, set())
+        if clean_team.lower() in players:
+            raise ValueError("A player with that team name has already joined this session")
+
+        players.add(clean_team.lower())
+        return session

@@ -22,6 +22,10 @@ class SessionCreateRequest(BaseModel):
     admin_name: Optional[str] = None
 
 
+class PlayerJoinRequest(BaseModel):
+    team_name: str
+
+
 class SubmitRequest(BaseModel):
     team: str = "(anonymous)"
     objective: Objective

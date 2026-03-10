@@ -158,7 +158,10 @@ async function enterAsPlayer() {
   }
 
   try {
-    const session = await api(`/api/sessions/${joinCode}`);
+    const session = await api(`/api/sessions/${joinCode}/join`, {
+      method: "POST",
+      body: JSON.stringify({ team_name: teamName }),
+    });
     state.role = "player";
     state.gameCode = session.code;
     state.gameName = session.game_name;
