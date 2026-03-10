@@ -1,95 +1,130 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260309-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260310-2" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
     <div class="container">
-      <header class="topbar">
-        <h1>Arya Phones — Supplier Selection</h1>
-        <div class="team-box">
-          <label for="teamName">Team Name</label>
-          <input id="teamName" type="text" placeholder="Enter team name" />
-          <label for="playerName">Player Name</label>
-          <input id="playerName" type="text" placeholder="Enter your name" />
+      <section id="lobbyScreen" class="lobby-screen">
+        <header class="lobby-header">
+          <h1>Arya Phones</h1>
+          <p>Step 1: choose your role and enter the game.</p>
+        </header>
+
+        <div class="lobby-grid">
+          <section class="card role-card">
+            <h2>Admin Screen</h2>
+            <p>Host the game and create a new session.</p>
+            <label for="adminGameName">Game Name</label>
+            <input id="adminGameName" type="text" placeholder="Ex: Supply Chain Round 1" />
+            <label for="adminName">Admin Name</label>
+            <input id="adminName" type="text" placeholder="Ex: Instructor A" />
+            <button id="btnEnterAdmin" class="primary">Continue as Admin</button>
+            <p class="hint" id="adminHint"></p>
+          </section>
+
+          <section class="card role-card">
+            <h2>Player Screen</h2>
+            <p>Join an existing game session as a player.</p>
+            <label for="playerJoinCode">Game Code</label>
+            <input id="playerJoinCode" type="text" maxlength="8" placeholder="Ex: AB12CD" />
+            <label for="playerTeamName">Team Name</label>
+            <input id="playerTeamName" type="text" placeholder="Ex: Team Blue" />
+            <button id="btnEnterPlayer" class="primary">Continue as Player</button>
+            <p class="hint" id="playerHint"></p>
+          </section>
         </div>
-      </header>
+      </section>
 
-      <section class="card info" id="configInfo">Loading...</section>
+      <section id="gameScreen" class="hidden">
+        <header class="topbar">
+          <h1>Arya Phones - Supplier Selection</h1>
+          <div class="team-box">
+            <div class="session-pill" id="sessionSummary"></div>
+            <label for="teamName">Team Name</label>
+            <input id="teamName" type="text" placeholder="Enter team name" />
+            <label for="playerName">Player Name</label>
+            <input id="playerName" type="text" placeholder="Enter your name" />
+            <button id="btnBackLobby">Role Screen</button>
+          </div>
+        </header>
 
-      <section class="card">
-        <div class="tabs">
-          <button class="tab active" data-tab="max_profit">Max Profit</button>
-          <button class="tab" data-tab="max_utility">Max Utility</button>
-          <button class="tab" data-tab="leaderboard">Leaderboard</button>
-        </div>
+        <section class="card info" id="configInfo">Loading...</section>
 
-        <div class="tab-panel" id="panel-game">
-          <div class="actions-row">
-            <button id="btnManual">Manual Evaluate</button>
-            <button id="btnBenchmark">Run Benchmark</button>
-            <button id="btnSubmit" class="primary">Submit</button>
+        <section class="card">
+          <div class="tabs">
+            <button class="tab active" data-tab="max_profit">Max Profit</button>
+            <button class="tab" data-tab="max_utility">Max Utility</button>
+            <button class="tab" data-tab="leaderboard">Leaderboard</button>
           </div>
 
-          <div class="layout-2">
-            <div>
-              <h3>Suppliers</h3>
-              <div id="supplierList" class="supplier-list"></div>
+          <div class="tab-panel" id="panel-game">
+            <div class="actions-row">
+              <button id="btnManual">Manual Evaluate</button>
+              <button id="btnBenchmark">Run Benchmark</button>
+              <button id="btnSubmit" class="primary">Submit</button>
             </div>
-            <div>
-              <h3>Metrics</h3>
-              <div class="metrics-grid" id="manualMetrics"></div>
-              <div class="metrics-grid benchmark" id="benchmarkMetrics"></div>
-              <p class="hint" id="statusText"></p>
+
+            <div class="layout-2">
+              <div>
+                <h3>Suppliers</h3>
+                <div id="supplierList" class="supplier-list"></div>
+              </div>
+              <div>
+                <h3>Metrics</h3>
+                <div class="metrics-grid" id="manualMetrics"></div>
+                <div class="metrics-grid benchmark" id="benchmarkMetrics"></div>
+                <p class="hint" id="statusText"></p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="tab-panel hidden" id="panel-leaderboard">
-          <div class="actions-row">
-            <button id="btnRefreshLeaderboard">Refresh</button>
-            <select id="sortSelect">
-              <option value="profit">Sort by Profit</option>
-              <option value="utility">Sort by Utility</option>
-            </select>
-            <label>
-              <input type="checkbox" id="feasibleOnly" />
-              Show only feasible
-            </label>
-            <select id="plotXSelect" title="X axis"></select>
-            <select id="plotYSelect" title="Y axis"></select>
+          <div class="tab-panel hidden" id="panel-leaderboard">
+            <div class="actions-row">
+              <button id="btnRefreshLeaderboard">Refresh</button>
+              <select id="sortSelect">
+                <option value="profit">Sort by Profit</option>
+                <option value="utility">Sort by Utility</option>
+              </select>
+              <label>
+                <input type="checkbox" id="feasibleOnly" />
+                Show only feasible
+              </label>
+              <select id="plotXSelect" title="X axis"></select>
+              <select id="plotYSelect" title="Y axis"></select>
+            </div>
+            <div id="leaderboardScatter" class="card"></div>
+            <div class="table-wrap">
+              <table id="leaderboardTable">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Team</th>
+                    <th>Player</th>
+                    <th>Objective</th>
+                    <th>Feasible</th>
+                    <th>Profit</th>
+                    <th>Utility</th>
+                    <th># Suppliers</th>
+                    <th>Suppliers</th>
+                    <th>Avg Env</th>
+                    <th>Avg Social</th>
+                    <th>Avg Cost</th>
+                    <th>Created At</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
           </div>
-          <div id="leaderboardScatter" class="card"></div>
-          <div class="table-wrap">
-            <table id="leaderboardTable">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Team</th>
-                  <th>Player</th>
-                  <th>Objective</th>
-                  <th>Feasible</th>
-                  <th>Profit</th>
-                  <th>Utility</th>
-                  <th># Suppliers</th>
-                  <th>Suppliers</th>
-                  <th>Avg Env</th>
-                  <th>Avg Social</th>
-                  <th>Avg Cost</th>
-                  <th>Created At</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
+        </section>
       </section>
     </div>
 
-    <script src="/assets/app.js?v=20260309-2"></script>
+    <script src="/assets/app.js?v=20260310-2"></script>
   </body>
 </html>

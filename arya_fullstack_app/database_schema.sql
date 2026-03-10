@@ -1,5 +1,5 @@
 -- Arya Phones Supplier Selection Game - Supabase Schema
--- Bu SQL'i Supabase Dashboard > SQL Editor'de çalıştır
+-- Run this SQL in Supabase Dashboard > SQL Editor
 
 CREATE TABLE IF NOT EXISTS submissions (
   id BIGSERIAL PRIMARY KEY,
@@ -21,14 +21,14 @@ CREATE TABLE IF NOT EXISTS submissions (
   low_quality_avg FLOAT8 DEFAULT 0.0
 );
 
--- Index'ler (performans için)
+-- Indexes (for performance)
 CREATE INDEX IF NOT EXISTS idx_submissions_team ON submissions(team);
 CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_profit ON submissions(profit DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_utility ON submissions(utility DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_feasible ON submissions(feasible);
 
--- RLS (Row Level Security) - herkes okuyabilir, herkes yazabilir
+-- RLS (Row Level Security) - everyone can read, everyone can write
 ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Enable read access for all users" ON submissions

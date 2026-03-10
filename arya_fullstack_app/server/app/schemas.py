@@ -17,6 +17,11 @@ class BenchmarkRequest(BaseModel):
     objective: Objective
 
 
+class SessionCreateRequest(BaseModel):
+    game_name: str
+    admin_name: Optional[str] = None
+
+
 class SubmitRequest(BaseModel):
     team: str = "(anonymous)"
     objective: Objective

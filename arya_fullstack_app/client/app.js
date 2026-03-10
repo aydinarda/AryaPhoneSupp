@@ -1,5 +1,8 @@
 const state = {
   objective: "max_profit",
+  role: null,
+  gameCode: "",
+  gameName: "",
   suppliers: [],
   selected: new Set(),
   config: null,
@@ -9,6 +12,8 @@ const state = {
   plotX: "profit",
   plotY: "utility",
 };
+
+const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
 
 const el = {
   supplierList: document.getElementById("supplierList"),
@@ -24,6 +29,18 @@ const el = {
   plotXSelect: document.getElementById("plotXSelect"),
   plotYSelect: document.getElementById("plotYSelect"),
   leaderboardScatter: document.getElementById("leaderboardScatter"),
+  lobbyScreen: document.getElementById("lobbyScreen"),
+  gameScreen: document.getElementById("gameScreen"),
+  sessionSummary: document.getElementById("sessionSummary"),
+  adminGameName: document.getElementById("adminGameName"),
+  adminName: document.getElementById("adminName"),
+  btnEnterAdmin: document.getElementById("btnEnterAdmin"),
+  adminHint: document.getElementById("adminHint"),
+  playerJoinCode: document.getElementById("playerJoinCode"),
+  playerTeamName: document.getElementById("playerTeamName"),
+  btnEnterPlayer: document.getElementById("btnEnterPlayer"),
+  playerHint: document.getElementById("playerHint"),
+  btnBackLobby: document.getElementById("btnBackLobby"),
 };
 
 const PLOT_COLUMNS = {
@@ -37,6 +54,122 @@ const PLOT_COLUMNS = {
   low_quality_avg: "Avg Low Quality",
   num_suppliers: "# Suppliers",
 };
+
+function saveLobbyState() {
+  const payload = {
+    role: state.role,
+    gameCode: state.gameCode,
+    gameName: state.gameName,
+    teamName: (el.teamName.value || "").trim(),
+    playerName: (el.playerName.value || "").trim(),
+  };
+  localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function loadLobbyState() {
+  try {
+    const raw = localStorage.getItem(LOBBY_STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved.gameName) el.adminGameName.value = saved.gameName;
+    if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
+    if (saved.teamName) el.playerTeamName.value = saved.teamName;
+    if (saved.playerName) {
+      el.adminName.value = saved.playerName;
+    }
+  } catch (_err) {
+    localStorage.removeItem(LOBBY_STORAGE_KEY);
+  }
+}
+
+function renderSessionSummary() {
+  if (!el.sessionSummary) return;
+  if (!state.role) {
+    el.sessionSummary.textContent = "";
+    return;
+  }
+  const roleLabel = state.role === "admin" ? "Admin" : "Player";
+  const gameLabel = state.gameName || "Untitled Game";
+  const codeLabel = state.gameCode || "------";
+  el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}`;
+}
+
+function showGameScreen() {
+  el.lobbyScreen.classList.add("hidden");
+  el.gameScreen.classList.remove("hidden");
+  renderSessionSummary();
+}
+
+function showLobbyScreen() {
+  el.gameScreen.classList.add("hidden");
+  el.lobbyScreen.classList.remove("hidden");
+}
+
+function clearLobbyHints() {
+  el.adminHint.textContent = "";
+  el.playerHint.textContent = "";
+}
+
+async function enterAsAdmin() {
+  clearLobbyHints();
+  const gameName = (el.adminGameName.value || "").trim();
+  const adminName = (el.adminName.value || "").trim();
+
+  if (!gameName) {
+    el.adminHint.textContent = "Please enter a game name.";
+    return;
+  }
+
+  try {
+    const session = await api("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        game_name: gameName,
+        admin_name: adminName || "Admin",
+      }),
+    });
+
+    state.role = "admin";
+    state.gameName = session.game_name;
+    state.gameCode = session.code;
+    el.teamName.value = session.game_name;
+    el.playerName.value = session.admin_name || "Admin";
+    el.playerJoinCode.value = session.code;
+    el.playerTeamName.value = session.game_name;
+    saveLobbyState();
+    showGameScreen();
+  } catch (e) {
+    el.adminHint.textContent = e.message || "Could not create session.";
+  }
+}
+
+async function enterAsPlayer() {
+  clearLobbyHints();
+  const joinCode = (el.playerJoinCode.value || "").trim().toUpperCase();
+  const teamName = (el.playerTeamName.value || "").trim();
+
+  if (!joinCode) {
+    el.playerHint.textContent = "A game code is required to join as a player.";
+    return;
+  }
+  if (!teamName) {
+    el.playerHint.textContent = "Please enter a team name.";
+    return;
+  }
+
+  try {
+    const session = await api(`/api/sessions/${joinCode}`);
+    state.role = "player";
+    state.gameCode = session.code;
+    state.gameName = session.game_name;
+    el.teamName.value = teamName;
+    el.playerName.value = "Player";
+    saveLobbyState();
+    showGameScreen();
+  } catch (e) {
+    el.playerHint.textContent = e.message || "Session code not found.";
+  }
+}
 
 function ensureLeaderboardPlotUI() {
   const panel = document.getElementById("panel-leaderboard");
@@ -187,11 +320,17 @@ async function runBenchmark() {
 
 async function submit() {
   try {
+    const sessionMeta = [
+      state.role ? `role:${state.role}` : null,
+      state.gameCode ? `code:${state.gameCode}` : null,
+      state.gameName ? `game:${state.gameName}` : null,
+    ].filter(Boolean).join(" | ");
+
     const payload = {
       ...currentPayload(),
       team: (el.teamName.value || "(anonymous)").trim(),
       player_name: (el.playerName.value || "(anonymous)").trim(),
-      comment: null,
+      comment: sessionMeta || null,
     };
     await api("/api/submit", {
       method: "POST",
@@ -382,6 +521,16 @@ function setupTabs() {
 }
 
 function setupEvents() {
+  el.btnEnterAdmin.addEventListener("click", enterAsAdmin);
+  el.btnEnterPlayer.addEventListener("click", enterAsPlayer);
+  el.btnBackLobby.addEventListener("click", showLobbyScreen);
+
+  el.teamName.addEventListener("change", saveLobbyState);
+  el.playerName.addEventListener("change", saveLobbyState);
+  el.playerJoinCode.addEventListener("change", () => {
+    el.playerJoinCode.value = (el.playerJoinCode.value || "").toUpperCase();
+  });
+
   document.getElementById("btnManual").addEventListener("click", runManual);
   document.getElementById("btnBenchmark").addEventListener("click", runBenchmark);
   document.getElementById("btnSubmit").addEventListener("click", submit);
@@ -414,8 +563,10 @@ function setupEvents() {
 }
 
 async function init() {
+  loadLobbyState();
   setupTabs();
   setupEvents();
+  showLobbyScreen();
   await loadConfigAndSuppliers();
   await runManual();
   await loadLeaderboard();

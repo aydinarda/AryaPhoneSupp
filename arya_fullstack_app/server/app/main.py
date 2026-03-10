@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import fetch_all_submissions, insert_submission
+from .routers.sessions import router as sessions_router
 from .schemas import BenchmarkRequest, EvalRequest, SubmitRequest
 from .service import evaluate_manual, get_game_constants, get_supplier_overview, run_benchmark
 
@@ -112,11 +113,11 @@ def leaderboard(limit: int = 5000, sort_by: str = "profit", feasible_only: bool 
         if "team" not in df_all.columns:
             raise RuntimeError("Supabase table is missing the 'team' column.")
 
-        # Feasibility filtresi
+        # Feasibility filter
         if feasible_only and "feasible" in df_all.columns:
             df_all = df_all[df_all["feasible"] == True].copy()
 
-        # Her takımın en son submission'ı
+        # Latest submission per team
         latest = (
             df_all.sort_values("created_at", ascending=True)
             .groupby("team", as_index=False)
@@ -124,10 +125,10 @@ def leaderboard(limit: int = 5000, sort_by: str = "profit", feasible_only: bool 
             .reset_index(drop=True)
         )
 
-        # Profit'e göre en iyi 10
+        # Top 10 by profit
         top_profit = latest.nlargest(10, "profit") if "profit" in latest.columns else pd.DataFrame()
 
-        # Utility'ye göre en iyi 10
+        # Top 10 by utility
         top_utility = latest.nlargest(10, "utility") if "utility" in latest.columns else pd.DataFrame()
 
         return {
@@ -144,6 +145,8 @@ CLIENT_DIR = Path(__file__).resolve().parents[2] / "client"
 
 if CLIENT_DIR.exists():
     app.mount("/assets", StaticFiles(directory=CLIENT_DIR), name="assets")
+
+app.include_router(sessions_router)
 
 
 @app.get("/")

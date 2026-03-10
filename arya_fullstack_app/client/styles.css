@@ -24,6 +24,49 @@ body {
   margin: 24px auto;
 }
 
+.lobby-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lobby-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.lobby-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.lobby-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-card h2 {
+  margin: 0;
+}
+
+.role-card p {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.role-card label,
+.team-box label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -55,19 +98,22 @@ body {
 }
 
 .team-box label {
-  font-size: 0.85rem;
-  color: var(--muted);
   margin-top: 6px;
-}
-
-.team-box label:first-child {
-  margin-top: 0;
 }
 
 input, select {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
+}
+
+.session-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #0b3a93;
+  background: var(--primary-weak);
+  font-size: 0.82rem;
 }
 
 .tabs {
@@ -239,7 +285,7 @@ td strong {
   color: var(--primary);
 }
 
-label {
+.actions-row label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -247,7 +293,16 @@ label {
 }
 
 @media (max-width: 900px) {
+  .lobby-grid {
+    grid-template-columns: 1fr;
+  }
+
   .layout-2 {
     grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
