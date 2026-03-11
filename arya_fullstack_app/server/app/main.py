@@ -74,8 +74,6 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "selected_suppliers": ",".join([str(x) for x in req.picks]),
             "objective": req.objective,
             "comment": req.comment,
-            "feasible": feasible,
-            "num_suppliers": int(metrics.get("k", 0)),
             "profit": float(metrics.get("profit_total", 0.0)),
             "utility": float(metrics.get("utility_total", 0.0)),
             "env_avg": float(metrics.get("avg_env", 0.0)),

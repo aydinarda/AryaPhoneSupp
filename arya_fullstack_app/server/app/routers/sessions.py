@@ -31,7 +31,10 @@ def join_game_session(code: str, req: PlayerJoinRequest) -> dict[str, Any]:
     try:
         session = join_session(code, req.team_name)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        msg = str(exc)
+        if "required" in msg.lower():
+            raise HTTPException(status_code=400, detail=msg) from exc
+        raise HTTPException(status_code=409, detail=msg) from exc
     if session is None:
         raise HTTPException(status_code=404, detail="Session code not found")
     return session

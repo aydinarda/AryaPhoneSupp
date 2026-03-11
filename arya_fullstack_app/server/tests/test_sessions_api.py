@@ -73,7 +73,7 @@ def test_duplicate_team_name_is_rejected() -> None:
 
     second = client.post(f"/api/sessions/{code}/join", json={"team_name": "TeamAlpha"})
     assert second.status_code == 409
-    assert "already" in second.json()["detail"].lower()
+    assert second.json()["detail"] == "same username exist"
 
 
 def test_duplicate_team_name_is_case_insensitive() -> None:
@@ -88,9 +88,23 @@ def test_duplicate_team_name_is_case_insensitive() -> None:
 
     response = client.post(f"/api/sessions/{code}/join", json={"team_name": "teambeta"})
     assert response.status_code == 409
+    assert response.json()["detail"] == "same username exist"
 
 
 def test_join_non_existing_session_returns_404() -> None:
     response = client.post("/api/sessions/ZZZZZZ/join", json={"team_name": "SomeTeam"})
     assert response.status_code == 404
     assert response.json()["detail"] == "Session code not found"
+
+
+def test_join_requires_team_name() -> None:
+    created = client.post(
+        "/api/sessions",
+        json={"game_name": "Validation Test", "admin_name": "Host"},
+    )
+    assert created.status_code == 200
+    code = created.json()["code"]
+
+    response = client.post(f"/api/sessions/{code}/join", json={"team_name": "   "})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Team name is required"

@@ -34,6 +34,14 @@ def get_supabase_credentials() -> tuple[str, str]:
     return str(url), str(key)
 
 
+def has_supabase_credentials() -> bool:
+    try:
+        get_supabase_credentials()
+        return True
+    except Exception:
+        return False
+
+
 @lru_cache(maxsize=1)
 def get_client() -> Client:
     url, key = get_supabase_credentials()
@@ -46,3 +54,27 @@ def insert_submission(payload: dict):
 
 def fetch_all_submissions(limit: int = 5000):
     return get_client().table("submissions").select("*").order("created_at", desc=True).limit(limit).execute()
+
+
+def insert_game_session(payload: dict):
+    return get_client().table("game_sessions").insert(payload).execute()
+
+
+def fetch_game_session_by_code(code: str):
+    return get_client().table("game_sessions").select("*").eq("session_code", code).limit(1).execute()
+
+
+def fetch_session_player(session_token: str, team_name_normalized: str):
+    return (
+        get_client()
+        .table("session_players")
+        .select("id")
+        .eq("session_token", session_token)
+        .eq("team_name_normalized", team_name_normalized)
+        .limit(1)
+        .execute()
+    )
+
+
+def insert_session_player(payload: dict):
+    return get_client().table("session_players").insert(payload).execute()
