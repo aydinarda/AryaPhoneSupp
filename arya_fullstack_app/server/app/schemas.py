@@ -26,9 +26,38 @@ class PlayerJoinRequest(BaseModel):
     team_name: str
 
 
+class RoundStartRequest(BaseModel):
+    duration_seconds: Optional[int] = None
+    market_capacity: int = 1
+
+
+class MatchRunRequest(BaseModel):
+    round_no: Optional[int] = None
+
+
 class SubmitRequest(BaseModel):
     team: str = "(anonymous)"
     objective: Objective
     picks: list[str] = Field(default_factory=list)
     comment: Optional[str] = None
     player_name: Optional[str] = None
+    session_code: Optional[str] = None
+    round_no: Optional[int] = None
+
+
+class MatchingUserRequest(BaseModel):
+    user_id: str
+    choices: list[str] = Field(default_factory=list)
+    utilities: dict[str, float] = Field(default_factory=dict)
+
+
+class MatchingMarketOptionRequest(BaseModel):
+    option_id: str
+    capacity: int = 0
+    priority: list[str] = Field(default_factory=list)
+    request_time: Optional[str] = None
+
+
+class MatchingRequest(BaseModel):
+    users: list[MatchingUserRequest] = Field(default_factory=list)
+    market_options: list[MatchingMarketOptionRequest] = Field(default_factory=list)

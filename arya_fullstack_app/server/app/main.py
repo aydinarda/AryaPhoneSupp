@@ -10,8 +10,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import fetch_all_submissions, insert_submission
+from .matching_engine import run_market_matching
 from .routers.sessions import router as sessions_router
-from .schemas import BenchmarkRequest, EvalRequest, SubmitRequest
+from .schemas import BenchmarkRequest, EvalRequest, MatchingRequest, SubmitRequest
 from .service import evaluate_manual, get_game_constants, get_supplier_overview, run_benchmark
 
 app = FastAPI(title="Arya Phone Game API", version="1.0.0")
@@ -74,6 +75,8 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "selected_suppliers": ",".join([str(x) for x in req.picks]),
             "objective": req.objective,
             "comment": req.comment,
+            "session_code": ((req.session_code or "").strip().upper() or None),
+            "round_no": int(req.round_no) if req.round_no is not None else None,
             "profit": float(metrics.get("profit_total", 0.0)),
             "utility": float(metrics.get("utility_total", 0.0)),
             "env_avg": float(metrics.get("avg_env", 0.0)),
@@ -135,6 +138,17 @@ def leaderboard(limit: int = 5000, sort_by: str = "profit", feasible_only: bool 
             "top_profit": top_profit.to_dict(orient="records"),
             "top_utility": top_utility.to_dict(orient="records"),
         }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/matching")
+def matching(req: MatchingRequest) -> dict[str, Any]:
+    try:
+        return run_market_matching(
+            users=[u.model_dump() for u in req.users],
+            market_options=[m.model_dump() for m in req.market_options],
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

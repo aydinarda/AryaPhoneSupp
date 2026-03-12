@@ -11,6 +11,9 @@ const state = {
   latestRows: [],
   plotX: "profit",
   plotY: "utility",
+  roundNo: null,
+  roundEndsAt: null,
+  roundTimerId: null,
 };
 
 const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
@@ -41,6 +44,16 @@ const el = {
   btnEnterPlayer: document.getElementById("btnEnterPlayer"),
   playerHint: document.getElementById("playerHint"),
   btnBackLobby: document.getElementById("btnBackLobby"),
+  roundSummary: document.getElementById("roundSummary"),
+  adminControls: document.getElementById("adminControls"),
+  roundTimerSeconds: document.getElementById("roundTimerSeconds"),
+  marketCapacity: document.getElementById("marketCapacity"),
+  btnStartRound: document.getElementById("btnStartRound"),
+  btnRunMatch: document.getElementById("btnRunMatch"),
+  adminRoundHint: document.getElementById("adminRoundHint"),
+  matchingResultCard: document.getElementById("matchingResultCard"),
+  matchingResultText: document.getElementById("matchingResultText"),
+  matchingTableBody: document.querySelector("#matchingTable tbody"),
 };
 
 const PLOT_COLUMNS = {
@@ -94,10 +107,177 @@ function renderSessionSummary() {
   el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}`;
 }
 
+function clearRoundTimer() {
+  if (state.roundTimerId) {
+    clearInterval(state.roundTimerId);
+    state.roundTimerId = null;
+  }
+}
+
+function renderRoundSummary() {
+  if (!el.roundSummary) return;
+  if (!state.roundNo) {
+    el.roundSummary.textContent = "Round: not started";
+    return;
+  }
+
+  if (state.roundEndsAt) {
+    const diffMs = new Date(state.roundEndsAt).getTime() - Date.now();
+    const sec = Math.max(0, Math.floor(diffMs / 1000));
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    el.roundSummary.textContent = `Round ${state.roundNo} | Remaining: ${mm}:${ss}`;
+    return;
+  }
+
+  el.roundSummary.textContent = `Round ${state.roundNo} | No timer`;
+}
+
+function startRoundCountdown() {
+  clearRoundTimer();
+  if (!state.roundEndsAt) {
+    renderRoundSummary();
+    return;
+  }
+
+  state.roundTimerId = setInterval(() => {
+    const diffMs = new Date(state.roundEndsAt).getTime() - Date.now();
+    if (diffMs <= 0) {
+      clearRoundTimer();
+      state.roundEndsAt = null;
+      renderRoundSummary();
+      if (el.adminRoundHint) {
+        el.adminRoundHint.textContent = "Timer ended. You can run Match now.";
+      }
+      return;
+    }
+    renderRoundSummary();
+  }, 1000);
+}
+
+function renderAdminControls() {
+  if (!el.adminControls) return;
+  const isAdmin = state.role === "admin";
+  el.adminControls.classList.toggle("hidden", !isAdmin);
+  if (el.matchingResultCard) {
+    el.matchingResultCard.classList.toggle("hidden", !isAdmin);
+  }
+}
+
+function renderMatchingResult(payload) {
+  if (!el.matchingResultText || !el.matchingTableBody) return;
+  if (!payload || !payload.market_to_users) {
+    el.matchingResultText.textContent = "No matching result yet.";
+    el.matchingTableBody.innerHTML = "";
+    return;
+  }
+
+  const meta = payload.meta || {};
+  el.matchingResultText.textContent = `Solver: ${meta.solver || "-"} | Matched: ${meta.matched_count ?? 0}`;
+  const entries = Object.entries(payload.market_to_users);
+  el.matchingTableBody.innerHTML = entries
+    .map(([marketId, users]) => `<tr><td>${marketId}</td><td>${(users || []).join(", ") || "-"}</td></tr>`)
+    .join("");
+}
+
+async function loadCurrentRound() {
+  if (!state.gameCode) return;
+  try {
+    const data = await api(`/api/sessions/${state.gameCode}/rounds/current`);
+    const r = data.round;
+    if (!r) {
+      state.roundNo = null;
+      state.roundEndsAt = null;
+      renderRoundSummary();
+      clearRoundTimer();
+      return;
+    }
+
+    state.roundNo = r.round_no;
+    state.roundEndsAt = r.ends_at || null;
+    renderRoundSummary();
+    startRoundCountdown();
+  } catch (e) {
+    if (el.adminRoundHint) {
+      el.adminRoundHint.textContent = e.message || "Could not load round.";
+    }
+  }
+}
+
+async function startRound() {
+  if (state.role !== "admin") return;
+  if (!state.gameCode) return;
+  if (el.adminRoundHint) el.adminRoundHint.textContent = "";
+
+  const durationRaw = Number(el.roundTimerSeconds?.value || 0);
+  const durationSeconds = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.floor(durationRaw) : null;
+  const capacityRaw = Number(el.marketCapacity?.value || 1);
+  const marketCapacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? Math.floor(capacityRaw) : 1;
+
+  try {
+    const data = await api(`/api/sessions/${state.gameCode}/rounds/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        duration_seconds: durationSeconds,
+        market_capacity: marketCapacity,
+      }),
+    });
+    state.roundNo = data.round_no;
+    state.roundEndsAt = data.ends_at || null;
+    renderRoundSummary();
+    startRoundCountdown();
+    if (el.adminRoundHint) {
+      el.adminRoundHint.textContent = `Round ${data.round_no} started.`;
+    }
+  } catch (e) {
+    if (el.adminRoundHint) {
+      el.adminRoundHint.textContent = e.message || "Could not start round.";
+    }
+  }
+}
+
+async function runMatchingNow() {
+  if (state.role !== "admin") return;
+  if (!state.gameCode) return;
+  if (el.adminRoundHint) el.adminRoundHint.textContent = "";
+
+  try {
+    const data = await api(`/api/sessions/${state.gameCode}/match`, {
+      method: "POST",
+      body: JSON.stringify({ round_no: state.roundNo }),
+    });
+    renderMatchingResult(data.matching);
+    if (el.adminRoundHint) {
+      el.adminRoundHint.textContent = `Matching completed for round ${data.round_no}.`;
+    }
+  } catch (e) {
+    if (el.adminRoundHint) {
+      el.adminRoundHint.textContent = e.message || "Matching failed.";
+    }
+  }
+}
+
+async function loadLatestMatch() {
+  if (state.role !== "admin" || !state.gameCode) {
+    renderMatchingResult(null);
+    return;
+  }
+
+  try {
+    const data = await api(`/api/sessions/${state.gameCode}/match/latest`);
+    const latest = data.match?.result || null;
+    renderMatchingResult(latest);
+  } catch (_e) {
+    renderMatchingResult(null);
+  }
+}
+
 function showGameScreen() {
   el.lobbyScreen.classList.add("hidden");
   el.gameScreen.classList.remove("hidden");
   renderSessionSummary();
+  renderAdminControls();
+  renderRoundSummary();
 }
 
 function showLobbyScreen() {
@@ -138,6 +318,8 @@ async function enterAsAdmin() {
     el.playerTeamName.value = session.game_name;
     saveLobbyState();
     showGameScreen();
+    await loadCurrentRound();
+    await loadLatestMatch();
   } catch (e) {
     el.adminHint.textContent = e.message || "Could not create session.";
   }
@@ -169,6 +351,8 @@ async function enterAsPlayer() {
     el.playerName.value = "Player";
     saveLobbyState();
     showGameScreen();
+    await loadCurrentRound();
+    await loadLatestMatch();
   } catch (e) {
     el.playerHint.textContent = e.message || "Session code not found.";
   }
@@ -333,6 +517,8 @@ async function submit() {
       ...currentPayload(),
       team: (el.teamName.value || "(anonymous)").trim(),
       player_name: (el.playerName.value || "(anonymous)").trim(),
+      session_code: state.gameCode || null,
+      round_no: state.roundNo,
       comment: sessionMeta || null,
     };
     await api("/api/submit", {
@@ -527,6 +713,8 @@ function setupEvents() {
   el.btnEnterAdmin.addEventListener("click", enterAsAdmin);
   el.btnEnterPlayer.addEventListener("click", enterAsPlayer);
   el.btnBackLobby.addEventListener("click", showLobbyScreen);
+  if (el.btnStartRound) el.btnStartRound.addEventListener("click", startRound);
+  if (el.btnRunMatch) el.btnRunMatch.addEventListener("click", runMatchingNow);
 
   el.teamName.addEventListener("change", saveLobbyState);
   el.playerName.addEventListener("change", saveLobbyState);
@@ -570,6 +758,7 @@ async function init() {
   setupTabs();
   setupEvents();
   showLobbyScreen();
+  renderRoundSummary();
   await loadConfigAndSuppliers();
   await runManual();
   await loadLeaderboard();

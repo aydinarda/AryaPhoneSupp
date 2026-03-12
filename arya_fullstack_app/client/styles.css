@@ -97,6 +97,22 @@ body {
   gap: 6px;
 }
 
+.admin-controls {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 4px;
+  background: #f8fbff;
+}
+
+.actions-row.compact {
+  margin-bottom: 0;
+}
+
+#matchingResultCard h3 {
+  margin-top: 0;
+}
+
 .team-box label {
   margin-top: 6px;
 }

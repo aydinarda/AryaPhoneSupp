@@ -78,3 +78,83 @@ def fetch_session_player(session_token: str, team_name_normalized: str):
 
 def insert_session_player(payload: dict):
     return get_client().table("session_players").insert(payload).execute()
+
+
+def close_active_rounds(session_token: str):
+    return (
+        get_client()
+        .table("game_rounds")
+        .update({"is_active": False})
+        .eq("session_token", session_token)
+        .eq("is_active", True)
+        .execute()
+    )
+
+
+def insert_game_round(payload: dict):
+    return get_client().table("game_rounds").insert(payload).execute()
+
+
+def fetch_latest_round(session_token: str):
+    return (
+        get_client()
+        .table("game_rounds")
+        .select("*")
+        .eq("session_token", session_token)
+        .order("round_no", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+
+def fetch_active_round(session_token: str):
+    return (
+        get_client()
+        .table("game_rounds")
+        .select("*")
+        .eq("session_token", session_token)
+        .eq("is_active", True)
+        .order("round_no", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+
+def fetch_round_by_number(session_token: str, round_no: int):
+    return (
+        get_client()
+        .table("game_rounds")
+        .select("*")
+        .eq("session_token", session_token)
+        .eq("round_no", int(round_no))
+        .limit(1)
+        .execute()
+    )
+
+
+def fetch_submissions_for_round(session_code: str, round_no: int):
+    return (
+        get_client()
+        .table("submissions")
+        .select("*")
+        .eq("session_code", session_code)
+        .eq("round_no", int(round_no))
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+
+def insert_matching_result(payload: dict):
+    return get_client().table("matching_results").insert(payload).execute()
+
+
+def fetch_latest_matching_result(session_token: str):
+    return (
+        get_client()
+        .table("matching_results")
+        .select("*")
+        .eq("session_token", session_token)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
