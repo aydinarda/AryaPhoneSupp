@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS game_rounds (
   round_no INTEGER NOT NULL,
   duration_seconds INTEGER,
   ends_at TIMESTAMPTZ,
-  market_capacity INTEGER NOT NULL DEFAULT 1,
+  market_capacity INTEGER NOT NULL DEFAULT 8,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (session_token, round_no)
 );
@@ -147,3 +147,6 @@ GRANT SELECT, INSERT, UPDATE ON TABLE game_rounds TO anon, authenticated;
 GRANT SELECT, INSERT ON TABLE matching_results TO anon, authenticated;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+
+-- Migration: update default market_capacity from 1 to 8 for existing databases
+ALTER TABLE game_rounds ALTER COLUMN market_capacity SET DEFAULT 8;

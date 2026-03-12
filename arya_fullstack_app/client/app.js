@@ -248,8 +248,8 @@ async function startRound() {
 
   const durationRaw = Number(el.roundTimerSeconds?.value || 0);
   const durationSeconds = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.floor(durationRaw) : null;
-  const capacityRaw = Number(el.marketCapacity?.value || 1);
-  const marketCapacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? Math.floor(capacityRaw) : 1;
+  const capacityRaw = Number(el.marketCapacity?.value || 8);
+  const marketCapacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? Math.floor(capacityRaw) : 8;
 
   try {
     const data = await api(`/api/sessions/${state.gameCode}/rounds/start`, {

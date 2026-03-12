@@ -227,7 +227,7 @@ def get_current_round(code: str) -> dict[str, Any]:
         "round": {
             "round_no": int(row.get("round_no", 0) or 0),
             "duration_seconds": row.get("duration_seconds"),
-            "market_capacity": int(row.get("market_capacity", 1) or 1),
+            "market_capacity": int(row.get("market_capacity", GAME_SETTINGS.default_market_capacity) or GAME_SETTINGS.default_market_capacity),
             "started_at": row.get("created_at"),
             "ends_at": row.get("ends_at"),
             "is_active": bool(row.get("is_active", False)),

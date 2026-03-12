@@ -28,7 +28,7 @@ class PlayerJoinRequest(BaseModel):
 
 class RoundStartRequest(BaseModel):
     duration_seconds: Optional[int] = None
-    market_capacity: int = 1
+    market_capacity: int = 8
 
 
 class MatchRunRequest(BaseModel):
