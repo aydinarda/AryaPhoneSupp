@@ -185,7 +185,7 @@ def _build_team_profiles(submissions_df: pd.DataFrame, suppliers_df: pd.DataFram
     return profiles, sorted(set(excluded))
 
 
-def _run_matching_for_submissions(submissions_df: pd.DataFrame, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, market_capacity: int) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+def _run_matching_for_submissions(submissions_df: pd.DataFrame, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, market_capacity: int, user_limit: int | None = None) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     feasible_mask = submissions_df["feasible"].map(_parse_bool_flag)
     eligible_df = submissions_df[feasible_mask].copy().reset_index(drop=True)
     excluded_teams = submissions_df.loc[~feasible_mask, "team"].tolist()
@@ -237,6 +237,8 @@ def _run_matching_for_submissions(submissions_df: pd.DataFrame, suppliers_df: pd
         }, {}
 
     served_df = users_df.copy().reset_index(drop=True)
+    if user_limit is not None and user_limit < len(served_df):
+        served_df = served_df.head(user_limit).reset_index(drop=True)
     team_ids = sorted(team_profiles.keys())
 
     user_score_map: dict[str, dict[str, float]] = {}
@@ -445,7 +447,7 @@ def _populate_run_sheet(ws, run_summary: dict[str, Any], run_df: pd.DataFrame, m
     _autosize_columns(ws)
 
 
-def generate_report(output_path: Path, runs: int, team_count: int, seed: int) -> Path:
+def generate_report(output_path: Path, runs: int, team_count: int, seed: int, user_limit: int | None = None) -> Path:
     suppliers_df, users_df = get_tables()
     suppliers_df = suppliers_df.copy()
     suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
@@ -466,7 +468,7 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int) ->
         for run_no in range(1, runs + 1):
             market_capacity = int(GAME_SETTINGS.default_market_capacity)
             submissions_df = _build_submission_rows(run_no, team_count, supplier_ids, rng)
-            matching, team_profiles = _run_matching_for_submissions(submissions_df, suppliers_df, users_df, market_capacity)
+            matching, team_profiles = _run_matching_for_submissions(submissions_df, suppliers_df, users_df, market_capacity, user_limit=user_limit)
             augmented_df = _augment_with_matching(submissions_df, matching)
             assignment_df = _build_matching_assignment_rows(run_no, matching, team_profiles)
             market_df = _build_market_rows(run_no, matching)
@@ -532,6 +534,8 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int) ->
         overview_ws["A2"] = f"Seed: {seed}"
         overview_ws["B2"] = f"Runs: {runs}"
         overview_ws["C2"] = f"Teams per run: {team_count}"
+        effective_users = user_limit if user_limit is not None else len(users_df)
+        overview_ws["D2"] = f"User pool: {effective_users}"
         _write_dataframe(overview_ws, summary_df, start_row=4)
         overview_ws.freeze_panes = "A5"
         _autosize_columns(overview_ws)
@@ -587,12 +591,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=DEFAULT_RUN_COUNT, help="Number of simulated runs")
     parser.add_argument("--teams", type=int, default=DEFAULT_TEAM_COUNT, help="Team count per run")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducible runs")
+    parser.add_argument("--users", type=int, default=None, help="Limit user pool size (default: all users)")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    output = generate_report(output_path=args.output, runs=args.runs, team_count=args.teams, seed=args.seed)
+    output = generate_report(output_path=args.output, runs=args.runs, team_count=args.teams, seed=args.seed, user_limit=args.users)
     print(output)
 
 
