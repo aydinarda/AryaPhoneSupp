@@ -35,6 +35,15 @@ def _assert_user_assignments_valid(result: dict, users_payload: list[dict], mark
 
     assert matched_count + len(unmatched) == len(valid_user_ids)
 
+    market_loads = result.get("market_loads") or {}
+    for market in market_options:
+        market_id = str(market["option_id"])
+        load = market_loads.get(market_id)
+        assert load is not None
+        assert load["assigned_count"] == len(result["market_to_users"].get(market_id, []))
+        assert load["capacity"] == int(market["capacity"])
+        assert load["remaining_capacity"] == int(market["capacity"]) - load["assigned_count"]
+
 
 def test_mock_dataset_matching_works_and_respects_constraints() -> None:
     users_payload = [
@@ -89,6 +98,7 @@ def test_mock_dataset_matching_works_and_respects_constraints() -> None:
     # In this setup, total capacity equals number of users, so everyone should be matched.
     assert result["unmatched_users"] == []
     assert result["meta"]["matched_count"] == len(users_payload)
+    assert result["meta"]["unmatched_count"] == 0
 
 
 def test_tie_break_prefers_earlier_request_time_when_other_scores_are_equal() -> None:
@@ -365,3 +375,62 @@ def test_combined_tie_break_priority() -> None:
         # The matched users should prefer m_high_util first
         matched_to_high = sum(1 for mid in result["user_to_market"].values() if mid == "m_high_util")
         assert matched_to_high >= 1
+
+
+def test_many_to_one_matching_with_capacity_8() -> None:
+    """85 users matched to team products each with capacity=8 via Gale-Shapley."""
+    rng = random.Random(99)
+    user_count = 85
+    team_count = 15
+
+    team_ids = [f"team_{i:02d}" for i in range(1, team_count + 1)]
+    user_ids = [f"user_{i}" for i in range(1, user_count + 1)]
+
+    # Build random utilities for each (user, team) pair
+    user_utilities: dict[str, dict[str, float]] = {}
+    for uid in user_ids:
+        utils = {tid: round(rng.uniform(1.0, 10.0), 2) for tid in team_ids}
+        user_utilities[uid] = utils
+
+    users_payload = []
+    for uid in user_ids:
+        utils = user_utilities[uid]
+        choices = sorted(team_ids, key=lambda t: -utils[t])
+        users_payload.append({"user_id": uid, "choices": choices, "utilities": utils})
+
+    market_options = []
+    for tid in team_ids:
+        priority = sorted(
+            user_ids,
+            key=lambda u: -user_utilities[u][tid],
+        )
+        market_options.append({
+            "option_id": tid,
+            "capacity": 8,
+            "priority": priority,
+            "request_time": "2026-03-12T10:00:00",
+        })
+
+    result = run_market_matching(users=users_payload, market_options=market_options)
+
+    _assert_capacity_respected(result, market_options)
+    _assert_user_assignments_valid(result, users_payload, market_options)
+
+    # Total capacity = 15 teams * 8 = 120 >= 85 users, all should match
+    assert result["meta"]["matched_count"] == user_count
+    assert len(result["unmatched_users"]) == 0
+
+    # Each market should have at most 8 users
+    for tid, assigned in result["market_to_users"].items():
+        assert len(assigned) <= 8
+
+    # Verify market_loads
+    for tid in team_ids:
+        load = result["market_loads"][tid]
+        assert load["capacity"] == 8
+        assert load["assigned_count"] <= 8
+        assert load["remaining_capacity"] == 8 - load["assigned_count"]
+
+    # Verify distribution: all 85 users placed somewhere
+    total_assigned = sum(len(users) for users in result["market_to_users"].values())
+    assert total_assigned == user_count

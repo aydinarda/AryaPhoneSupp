@@ -14,9 +14,11 @@ const state = {
   roundNo: null,
   roundEndsAt: null,
   roundTimerId: null,
+  roundSyncId: null,
 };
 
 const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
+const ROUND_SYNC_INTERVAL_MS = 3000;
 
 const el = {
   supplierList: document.getElementById("supplierList"),
@@ -114,6 +116,13 @@ function clearRoundTimer() {
   }
 }
 
+function clearRoundSync() {
+  if (state.roundSyncId) {
+    clearInterval(state.roundSyncId);
+    state.roundSyncId = null;
+  }
+}
+
 function renderRoundSummary() {
   if (!el.roundSummary) return;
   if (!state.roundNo) {
@@ -173,10 +182,18 @@ function renderMatchingResult(payload) {
   }
 
   const meta = payload.meta || {};
-  el.matchingResultText.textContent = `Solver: ${meta.solver || "-"} | Matched: ${meta.matched_count ?? 0}`;
+  const excluded = payload.excluded_infeasible_users || [];
+  const eligibleTeams = meta.eligible_team_count ?? 0;
+  const usersInPool = meta.user_pool_count ?? meta.user_count ?? 0;
+  el.matchingResultText.textContent = `Solver: ${meta.solver || "-"} | Team products: ${eligibleTeams} | Users in pool: ${usersInPool} | Matched users: ${meta.matched_count ?? 0} | Excluded infeasible teams: ${meta.infeasible_excluded_count ?? excluded.length}`;
   const entries = Object.entries(payload.market_to_users);
+  const loads = payload.market_loads || {};
   el.matchingTableBody.innerHTML = entries
-    .map(([marketId, users]) => `<tr><td>${marketId}</td><td>${(users || []).join(", ") || "-"}</td></tr>`)
+    .map(([marketId, users]) => {
+      const load = loads[marketId] || {};
+      const countLabel = `${load.assigned_count ?? (users || []).length}/${load.capacity ?? "-"}`;
+      return `<tr><td>${marketId} (${countLabel})</td><td>${(users || []).join(", ") || "-"}</td></tr>`;
+    })
     .join("");
 }
 
@@ -202,6 +219,26 @@ async function loadCurrentRound() {
       el.adminRoundHint.textContent = e.message || "Could not load round.";
     }
   }
+}
+
+function startRoundSync() {
+  clearRoundSync();
+  if (!state.gameCode) return;
+
+  state.roundSyncId = setInterval(async () => {
+    if (!state.gameCode || el.gameScreen.classList.contains("hidden")) {
+      return;
+    }
+
+    try {
+      await loadCurrentRound();
+      if (state.role === "admin") {
+        await loadLatestMatch();
+      }
+    } catch (_err) {
+      // Ignore transient polling failures; explicit user actions still show errors.
+    }
+  }, ROUND_SYNC_INTERVAL_MS);
 }
 
 async function startRound() {
@@ -278,9 +315,12 @@ function showGameScreen() {
   renderSessionSummary();
   renderAdminControls();
   renderRoundSummary();
+  startRoundSync();
 }
 
 function showLobbyScreen() {
+  clearRoundSync();
+  clearRoundTimer();
   el.gameScreen.classList.add("hidden");
   el.lobbyScreen.classList.remove("hidden");
 }

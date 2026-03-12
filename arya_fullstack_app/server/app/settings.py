@@ -7,7 +7,8 @@ from .mincost_agent import Policy
 
 @dataclass(frozen=True)
 class GameSettings:
-    served_users: int = 8
+    served_users: int = 8          # used for profit calc (profit_total = served_users * profit_per_user)
+    default_market_capacity: int = 8  # max users matched per team product
     env_cap: float = 2.75
     social_cap: float = 3.0
     cost_scale: float = 10.0

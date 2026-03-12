@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260312-1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260312-2" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -50,7 +50,7 @@
             <div id="adminControls" class="admin-controls hidden">
               <label for="roundTimerSeconds">Round Timer (seconds, optional)</label>
               <input id="roundTimerSeconds" type="number" min="0" step="10" placeholder="Ex: 120" />
-              <label for="marketCapacity">Market Capacity Per Option</label>
+              <label for="marketCapacity">User Capacity Per Team Product</label>
               <input id="marketCapacity" type="number" min="1" step="1" value="1" />
               <div class="actions-row compact">
                 <button id="btnStartRound">Start Round</button>
@@ -74,8 +74,8 @@
             <table id="matchingTable">
               <thead>
                 <tr>
-                  <th>Market Option</th>
-                  <th>Assigned Teams</th>
+                  <th>Team Product</th>
+                  <th>Assigned Users</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -155,6 +155,6 @@
       </section>
     </div>
 
-    <script src="/assets/app.js?v=20260312-1"></script>
+    <script src="/assets/app.js?v=20260312-2"></script>
   </body>
 </html>

@@ -343,14 +343,26 @@ def run_market_matching(users: list[dict[str, Any]], market_options: list[dict[s
         result = stable_many_to_one_matching(users=user_nodes, market_options=market_nodes)
         solver_name = "stable_gale_shapley"
 
+    market_loads = {
+        market.market_id: {
+            "assigned_count": len(result.market_to_users.get(market.market_id, [])),
+            "capacity": int(market.capacity),
+            "remaining_capacity": max(0, int(market.capacity) - len(result.market_to_users.get(market.market_id, []))),
+        }
+        for market in market_nodes
+    }
+
     return {
         "market_to_users": result.market_to_users,
         "user_to_market": result.user_to_market,
         "unmatched_users": result.unmatched_users,
+        "market_loads": market_loads,
         "meta": {
             "user_count": len(user_nodes),
             "market_option_count": len(market_nodes),
             "matched_count": len(user_nodes) - len(result.unmatched_users),
+            "unmatched_count": len(result.unmatched_users),
+            "total_capacity": sum(max(0, int(market.capacity)) for market in market_nodes),
             "solver": solver_name,
         },
     }
