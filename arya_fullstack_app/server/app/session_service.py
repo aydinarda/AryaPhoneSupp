@@ -66,6 +66,17 @@ def _is_missing_table_error(exc: Exception) -> bool:
     return "pgrst205" in text or "could not find the table" in text
 
 
+def _is_recoverable_db_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        _is_missing_table_error(exc)
+        or "row-level security" in text
+        or "violates row-level security policy" in text
+        or "permission denied" in text
+        or "42501" in text
+    )
+
+
 def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
     cleaned_game_name = (game_name or "").strip()
     cleaned_admin_name = (admin_name or "Admin").strip() or "Admin"
@@ -92,8 +103,8 @@ def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
                     "admin_name": cleaned_admin_name,
                 }
             except Exception as exc:
-                if _is_missing_table_error(exc):
-                    break
+                if _is_recoverable_db_error(exc):
+                    raise RuntimeError(f"DB access/config error while creating session: {exc}") from exc
                 if not _is_duplicate_db_error(exc):
                     raise RuntimeError(f"Failed to create session: {exc}") from exc
         else:
@@ -131,10 +142,9 @@ def get_session(code: str) -> dict[str, Any] | None:
                 "admin_name": session["admin_name"],
             }
         except Exception as exc:
-            if _is_missing_table_error(exc):
-                pass
-            else:
-                raise RuntimeError(f"Failed to fetch session: {exc}") from exc
+            if _is_recoverable_db_error(exc):
+                raise RuntimeError(f"DB access/config error while fetching session: {exc}") from exc
+            raise RuntimeError(f"Failed to fetch session: {exc}") from exc
 
     with _sessions_lock:
         return _sessions.get(normalized)
@@ -196,10 +206,9 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
         except ValueError:
             raise
         except Exception as exc:
-            if _is_missing_table_error(exc):
-                pass
-            else:
-                raise RuntimeError(f"Failed to join session: {exc}") from exc
+            if _is_recoverable_db_error(exc):
+                raise RuntimeError(f"DB access/config error while joining session: {exc}") from exc
+            raise RuntimeError(f"Failed to join session: {exc}") from exc
 
     with _sessions_lock:
         session = _sessions.get(normalized)
