@@ -32,9 +32,11 @@ CREATE INDEX IF NOT EXISTS idx_submissions_session_round ON submissions(session_
 -- RLS (Row Level Security) - everyone can read, everyone can write
 ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Enable read access for all users" ON submissions;
 CREATE POLICY "Enable read access for all users" ON submissions
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Enable insert for all users" ON submissions;
 CREATE POLICY "Enable insert for all users" ON submissions
   FOR INSERT WITH CHECK (true);
 
@@ -65,15 +67,19 @@ CREATE INDEX IF NOT EXISTS idx_session_players_token ON session_players(session_
 ALTER TABLE game_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_players ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Enable read access for all users (game_sessions)" ON game_sessions;
 CREATE POLICY "Enable read access for all users (game_sessions)" ON game_sessions
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Enable insert for all users (game_sessions)" ON game_sessions;
 CREATE POLICY "Enable insert for all users (game_sessions)" ON game_sessions
   FOR INSERT WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Enable read access for all users (session_players)" ON session_players;
 CREATE POLICY "Enable read access for all users (session_players)" ON session_players
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Enable insert for all users (session_players)" ON session_players;
 CREATE POLICY "Enable insert for all users (session_players)" ON session_players
   FOR INSERT WITH CHECK (true);
 
@@ -95,12 +101,15 @@ CREATE INDEX IF NOT EXISTS idx_game_rounds_active ON game_rounds(session_token, 
 
 ALTER TABLE game_rounds ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Enable read access for all users (game_rounds)" ON game_rounds;
 CREATE POLICY "Enable read access for all users (game_rounds)" ON game_rounds
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Enable insert for all users (game_rounds)" ON game_rounds;
 CREATE POLICY "Enable insert for all users (game_rounds)" ON game_rounds
   FOR INSERT WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Enable update for all users (game_rounds)" ON game_rounds;
 CREATE POLICY "Enable update for all users (game_rounds)" ON game_rounds
   FOR UPDATE USING (true) WITH CHECK (true);
 
@@ -120,8 +129,10 @@ CREATE INDEX IF NOT EXISTS idx_matching_results_session_round ON matching_result
 
 ALTER TABLE matching_results ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Enable read access for all users (matching_results)" ON matching_results;
 CREATE POLICY "Enable read access for all users (matching_results)" ON matching_results
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Enable insert for all users (matching_results)" ON matching_results;
 CREATE POLICY "Enable insert for all users (matching_results)" ON matching_results
   FOR INSERT WITH CHECK (true);
