@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -211,6 +212,22 @@ def _solve_with_gurobi_tie_breaks(
     user_ids = [u.user_id for u in users]
     market_ids = [m.market_id for m in market_options]
     market_by_id = {m.market_id: m for m in market_options}
+    user_by_id = {u.user_id: u for u in users}
+
+    # Build strict market-side rankings by completing missing users at the end.
+    # This avoids ties for users omitted from explicit priority lists.
+    market_rank: dict[str, dict[str, int]] = {}
+    for market in market_options:
+        explicit = [uid for uid in market.preference_list if uid in user_by_id]
+        seen = set(explicit)
+        missing = sorted(uid for uid in user_ids if uid not in seen)
+        ordered = explicit + missing
+        market_rank[market.market_id] = {uid: idx for idx, uid in enumerate(ordered)}
+
+    # Build user-side ranking over listed choices (strict by list order).
+    user_rank: dict[str, dict[str, int]] = {}
+    for u in users:
+        user_rank[u.user_id] = {mid: idx for idx, mid in enumerate(u.preference_list)}
 
     model = gp.Model("market_user_matching")
     model.Params.OutputFlag = 0
@@ -235,6 +252,29 @@ def _solve_with_gurobi_tie_breaks(
         market_edges = [x[(u, m)] for (u, m) in x if m == mid]
         if market_edges:
             model.addConstr(gp.quicksum(market_edges) <= cap, name=f"market_cap_{mid}")
+
+    # Stability constraints (blocking-pair elimination) for Hospital-Residents.
+    # For each acceptable pair (u, m):
+    # If u is not assigned to m or a better market, then m must be full with users
+    # that m strictly prefers over u.
+    for (uid, mid), _var in x.items():
+        cap = max(0, int(market_by_id[mid].capacity))
+        if cap == 0:
+            continue
+
+        u_rank_m = user_rank[uid][mid]
+        better_or_equal_markets = [
+            m2 for m2 in user_by_id[uid].preference_list if user_rank[uid].get(m2, 10**6) <= u_rank_m and (uid, m2) in x
+        ]
+
+        m_rank_u = market_rank[mid][uid]
+        better_users_for_market = [
+            u2 for u2 in user_ids if (u2, mid) in x and market_rank[mid].get(u2, 10**6) < m_rank_u
+        ]
+
+        lhs = gp.quicksum(x[(u2, mid)] for u2 in better_users_for_market)
+        rhs = cap * (1 - gp.quicksum(x[(uid, m2)] for m2 in better_or_equal_markets))
+        model.addConstr(lhs >= rhs, name=f"stable_{uid}_{mid}")
 
     utility_expr = gp.quicksum(utility_map.get((u, m), 0.0) * var for (u, m), var in x.items())
 
@@ -277,23 +317,31 @@ def run_market_matching(users: list[dict[str, Any]], market_options: list[dict[s
     """
     Orchestration layer for future DB integration.
 
-    Tie-break policy:
+    Default solver mode is stable many-to-one Gale-Shapley.
+    Set MATCHING_SOLVER=gurobi to opt into utility-driven lexicographic optimization.
+
+    Tie-break policy (inside the stable feasible set when using Gurobi):
     1) Maximize total utility with Gurobi.
     2) Among equal utility solutions, prefer lower occupancy ratio.
     3) If still tied, prefer earlier request time.
     """
     user_nodes, market_nodes, utility_map = from_market_payload(users=users, market_options=market_options)
 
-    if GUROBI_AVAILABLE:
+    solver_mode = os.getenv("MATCHING_SOLVER", "stable").strip().lower()
+
+    if solver_mode not in {"stable", "gurobi"}:
+        solver_mode = "stable"
+
+    if solver_mode == "gurobi" and GUROBI_AVAILABLE:
         result = _solve_with_gurobi_tie_breaks(
             users=user_nodes,
             market_options=market_nodes,
             utility_map=utility_map,
         )
-        solver_name = "gurobi_lexicographic"
+        solver_name = "gurobi_stable_lexicographic"
     else:
         result = stable_many_to_one_matching(users=user_nodes, market_options=market_nodes)
-        solver_name = "stable_fallback_no_gurobi"
+        solver_name = "stable_gale_shapley"
 
     return {
         "market_to_users": result.market_to_users,

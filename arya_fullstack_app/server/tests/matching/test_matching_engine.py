@@ -117,11 +117,11 @@ def test_tie_break_prefers_earlier_request_time_when_other_scores_are_equal() ->
 
     result = run_market_matching(users=users_payload, market_options=market_options)
 
-    if GUROBI_AVAILABLE:
+    if result["meta"]["solver"] == "gurobi_stable_lexicographic":
         # Utility tie + occupancy tie => earlier request_time should win.
         assert result["user_to_market"]["u1"] == "m_early"
     else:
-        # Fallback mode uses stable matching by preference order.
+        # Stable mode uses user preference order here.
         assert result["user_to_market"]["u1"] in {"m_late", "m_early"}
 
 
@@ -282,7 +282,7 @@ def test_tie_break_2_prefers_lower_occupancy_ratio() -> None:
     result = run_market_matching(users=users_payload, market_options=market_options)
 
     _assert_capacity_respected(result, market_options)
-    if GUROBI_AVAILABLE:
+    if result["meta"]["solver"] == "gurobi_stable_lexicographic":
         # With equal utility, should prefer higher-capacity market (lower occupancy)
         # Both users should prefer m_high_cap
         assert result["user_to_market"]["u1"] == "m_high_cap"
@@ -317,11 +317,11 @@ def test_tie_break_3_prefers_earlier_request_time() -> None:
 
     result = run_market_matching(users=users_payload, market_options=market_options)
 
-    if GUROBI_AVAILABLE:
+    if result["meta"]["solver"] == "gurobi_stable_lexicographic":
         # With utility and occupancy tied, should prefer earlier request_time
         assert result["user_to_market"]["u1"] == "m_early"
     else:
-        # Fallback may not preserve this tie-break
+        # Stable mode may not preserve this tie-break
         assert result["user_to_market"]["u1"] in {"m_early", "m_late"}
 
 
@@ -357,7 +357,7 @@ def test_combined_tie_break_priority() -> None:
 
     result = run_market_matching(users=users_payload, market_options=market_options)
 
-    if GUROBI_AVAILABLE:
+    if result["meta"]["solver"] == "gurobi_stable_lexicographic":
         # Both users should prefer m_high_util due to higher utility (100 > 50),
         # even though m_low_util has earlier request_time.
         # But capacity is only 1, so one will be unmatched.
