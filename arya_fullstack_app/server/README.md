@@ -94,12 +94,12 @@ Utility is also reported from the same chosen set using Model B utility formula 
 For each supplier `i`, define:
 
 `g_i = sum_{u in U_s} [`
-`  w_env^u * a_env * e_i`
-`+ w_soc^u * a_soc * r_i`
-`+ w_cost^u * a_cost * c_i`
+`  - w_env^u * a_env * e_i`
+`- w_soc^u * a_soc * r_i`
+`- w_cost^u * a_cost * c_i`
 `+ w_str^u * a_str * t_i`
 `+ w_imp^u * a_imp * m_i`
-`+ w_lq^u  * a_lq  * q_i`
+`- w_lq^u  * a_lq  * q_i`
 `]`
 
 This exactly matches `util_num_coeff[i]` in code.

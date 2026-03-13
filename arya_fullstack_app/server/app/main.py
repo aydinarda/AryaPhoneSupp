@@ -13,7 +13,7 @@ from .db import fetch_all_submissions, insert_submission
 from .matching_engine import run_market_matching
 from .routers.sessions import router as sessions_router
 from .schemas import BenchmarkRequest, EvalRequest, MatchingRequest, SubmitRequest
-from .service import evaluate_manual, get_game_constants, get_supplier_overview, run_benchmark
+from .service import evaluate_manual, get_both_benchmarks, get_game_constants, get_supplier_overview, run_benchmark
 
 app = FastAPI(title="Arya Phone Game API", version="1.0.0")
 
@@ -34,6 +34,11 @@ def health() -> dict[str, str]:
 @app.get("/api/config")
 def config() -> dict[str, Any]:
     return get_game_constants()
+
+
+@app.get("/api/benchmarks/both")
+def benchmarks_both() -> dict[str, Any]:
+    return get_both_benchmarks()
 
 
 @app.get("/api/suppliers")

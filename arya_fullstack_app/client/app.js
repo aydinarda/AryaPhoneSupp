@@ -26,6 +26,8 @@ const el = {
   benchmarkMetrics: document.getElementById("benchmarkMetrics"),
   statusText: document.getElementById("statusText"),
   configInfo: document.getElementById("configInfo"),
+  benchmarkProfitPanel: document.getElementById("benchmarkProfitPanel"),
+  benchmarkUtilPanel: document.getElementById("benchmarkUtilPanel"),
   teamName: document.getElementById("teamName"),
   playerName: document.getElementById("playerName"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
@@ -309,6 +311,44 @@ async function loadLatestMatch() {
   }
 }
 
+function renderBenchmarkPanel(title, result) {
+  if (!result) return `<h4>${title}</h4><p class="hint">Not available.</p>`;
+  if (result.available === false) {
+    return `<h4 style="margin:0 0 8px;">${title}</h4><p class="hint">${result.error || "Solver not available"}</p>`;
+  }
+  const m = result.metrics || {};
+  const feasibleBadge = result.feasible
+    ? '<span style="color:green;font-weight:bold;">✓ Feasible</span>'
+    : '<span style="color:red;font-weight:bold;">✗ Infeasible</span>';
+  return `
+    <h4 style="margin:0 0 8px;">${title}</h4>
+    <table class="bm-table">
+      <tbody>
+        <tr><td>Status</td><td>${feasibleBadge}</td></tr>
+        <tr><td>Optimal suppliers (k)</td><td>${Math.round(m.k || 0)}</td></tr>
+        <tr><td>Avg Cost Score</td><td>${fmt(m.avg_cost)}</td></tr>
+        <tr><td>Avg Env Risk</td><td>${fmt(m.avg_env)}</td></tr>
+        <tr><td>Avg Social Risk</td><td>${fmt(m.avg_social)}</td></tr>
+        <tr><td>Profit Total</td><td><strong>${fmt(m.profit_total)}</strong></td></tr>
+        <tr><td>Utility Total</td><td><strong>${fmt(m.utility_total)}</strong></td></tr>
+      </tbody>
+    </table>`;
+}
+
+async function loadBenchmarkSummary() {
+  if (!el.benchmarkProfitPanel) return;
+  el.benchmarkProfitPanel.innerHTML = `<em class="hint">Computing benchmarks...</em>`;
+  try {
+    const data = await api("/api/benchmarks/both");
+    el.benchmarkProfitPanel.innerHTML = renderBenchmarkPanel("Max Profit", data.max_profit);
+    if (el.benchmarkUtilPanel) {
+      el.benchmarkUtilPanel.innerHTML = renderBenchmarkPanel("Max Utility", data.max_utility);
+    }
+  } catch (e) {
+    el.benchmarkProfitPanel.innerHTML = `<p class="hint">${e.message}</p>`;
+  }
+}
+
 function showGameScreen() {
   el.lobbyScreen.classList.add("hidden");
   el.gameScreen.classList.remove("hidden");
@@ -316,6 +356,7 @@ function showGameScreen() {
   renderAdminControls();
   renderRoundSummary();
   startRoundSync();
+  loadBenchmarkSummary();
 }
 
 function showLobbyScreen() {
@@ -469,13 +510,21 @@ function renderSuppliers() {
     .map((s) => {
       const id = String(s.supplier_id);
       const checked = state.selected.has(id) ? "checked" : "";
+      const childLabor = Number(s.child_labor || 0) >= 0.5 ? "Yes" : "No";
+      const bannedChem = Number(s.banned_chem || 0) >= 0.5 ? "Yes" : "No";
       return `
       <label class="supplier-item">
         <input type="checkbox" data-id="${id}" ${checked} />
         <div>
           <div><strong>${id}</strong></div>
           <div class="supplier-meta">
-            Env: ${fmt(s.env_risk)} | Social: ${fmt(s.social_risk)} | Cost: ${fmt(s.cost_score)}
+            Env: ${fmt(s.env_risk)} (${fmt(s.env_bad_pct)}% bad) | Social: ${fmt(s.social_risk)} (${fmt(s.social_bad_pct)}% bad) | Cost: ${fmt(s.cost_score)} (${fmt(s.cost_bad_pct)}% bad)
+          </div>
+          <div class="supplier-meta">
+            Strategic: ${fmt(s.strategic)} (${fmt(s.strategic_good_pct)}% good) | Improvement: ${fmt(s.improvement)} (${fmt(s.improvement_good_pct)}% good) | Low Quality: ${fmt(s.low_quality)} (${fmt(s.low_quality_bad_pct)}% bad)
+          </div>
+          <div class="supplier-meta">
+            Child labor: ${childLabor} | Banned chemicals: ${bannedChem}
           </div>
         </div>
       </label>`;

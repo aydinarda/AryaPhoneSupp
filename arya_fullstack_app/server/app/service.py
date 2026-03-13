@@ -47,12 +47,11 @@ def get_supplier_overview() -> list[dict[str, Any]]:
     if len(users_df):
         uavg = users_df[["w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]].mean()
         df["expected_utility_avg_user"] = (
-            float(uavg["w_env"]) * (FIXED_POLICY.env_mult * df["env_risk"])
-            + float(uavg["w_social"]) * (FIXED_POLICY.social_mult * df["social_risk"])
-            + float(uavg["w_cost"]) * (FIXED_POLICY.cost_mult * df["cost_score"])
-            + float(uavg["w_strategic"]) * (FIXED_POLICY.strategic_mult * df["strategic"])
-            + float(uavg["w_improvement"]) * (FIXED_POLICY.improvement_mult * df["improvement"])
-            + float(uavg["w_low_quality"]) * (FIXED_POLICY.low_quality_mult * df["low_quality"])
+            float(uavg["w_env"]) * (FIXED_POLICY.env_mult * (5.0 - df["env_risk"]))
+            + float(uavg["w_social"]) * (FIXED_POLICY.social_mult * (5.0 - df["social_risk"]))
+            + float(uavg["w_strategic"]) * (FIXED_POLICY.strategic_mult * (df["strategic"] - 1.0))
+            + float(uavg["w_improvement"]) * (FIXED_POLICY.improvement_mult * (df["improvement"] - 1.0))
+            + float(uavg["w_low_quality"]) * (FIXED_POLICY.low_quality_mult * (5.0 - df["low_quality"]))
         ).astype(float)
     else:
         df["expected_utility_avg_user"] = 0.0
@@ -124,3 +123,16 @@ def get_game_constants() -> dict[str, Any]:
         "price_per_user": GAME_SETTINGS.price_per_user,
         "gurobi_available": GUROBI_AVAILABLE,
     }
+
+
+@lru_cache(maxsize=1)
+def get_both_benchmarks() -> dict[str, Any]:
+    results: dict[str, Any] = {}
+    for obj in ("max_profit", "max_utility"):
+        try:
+            r = run_benchmark(obj)
+            r["available"] = True
+            results[obj] = r
+        except Exception as exc:
+            results[obj] = {"available": False, "error": str(exc), "metrics": {}, "feasible": False}
+    return results

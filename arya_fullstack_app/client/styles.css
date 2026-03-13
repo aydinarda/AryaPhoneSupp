@@ -91,6 +91,22 @@ body {
   color: var(--muted);
 }
 
+.bm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.bm-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bm-table td:first-child {
+  color: var(--muted);
+  width: 55%;
+}
+
 .team-box {
   display: flex;
   flex-direction: column;

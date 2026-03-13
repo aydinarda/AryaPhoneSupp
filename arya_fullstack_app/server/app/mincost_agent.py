@@ -15,8 +15,17 @@ Objectives:
     profit_total    = served_users * profit_per_user
 
 - Max Utility:
+    Attributes are transformed directionally before use (scale 1-5):
+            bad attrs  (env_risk, social_risk, low_quality): (5 - x)  ->  lower raw = higher utility
+      good attrs (strategic, improvement):                         (x - 1)  ->  higher raw = higher utility
+            cost_score is intentionally excluded from utility to preserve Profit-vs-Utility trade-off.
+    All terms are non-negative. Formula:
     utility_total = sum_{u in selected_users}
-        [ w_env*u * env_mult*avg(env_risk) + ... + w_low_quality*u * low_quality_mult*avg(low_quality) ]
+        [ w_env*u   * env_mult        * (5 - avg(env_risk))
+        + w_social*u * social_mult    * (5 - avg(social_risk))
+        + w_strategic*u * strategic_mult * (avg(strategic) - 1)
+        + w_improvement*u * improvement_mult * (avg(improvement) - 1)
+        + w_low_quality*u * low_quality_mult * (5 - avg(low_quality)) ]
 
 Benchmarks:
 - The optimizer is allowed to choose **any number of suppliers** (no fixed K).
@@ -356,13 +365,17 @@ def manual_metrics(
 
     u = _select_last_n_users(users_df, served)
     if len(u):
+        ut_env = 5.0 - a["avg_env"]
+        ut_social = 5.0 - a["avg_social"]
+        ut_strategic = a["avg_strategic"] - 1.0
+        ut_improvement = a["avg_improvement"] - 1.0
+        ut_lq = 5.0 - a["avg_low_quality"]
         utility_per_user = (
-            u["w_env"] * (pol.env_mult * a["avg_env"])
-            + u["w_social"] * (pol.social_mult * a["avg_social"])
-            + u["w_cost"] * (pol.cost_mult * a["avg_cost"])
-            + u["w_strategic"] * (pol.strategic_mult * a["avg_strategic"])
-            + u["w_improvement"] * (pol.improvement_mult * a["avg_improvement"])
-            + u["w_low_quality"] * (pol.low_quality_mult * a["avg_low_quality"])
+            u["w_env"] * (pol.env_mult * ut_env)
+            + u["w_social"] * (pol.social_mult * ut_social)
+            + u["w_strategic"] * (pol.strategic_mult * ut_strategic)
+            + u["w_improvement"] * (pol.improvement_mult * ut_improvement)
+            + u["w_low_quality"] * (pol.low_quality_mult * ut_lq)
         )
         utility_total = float(utility_per_user.sum())
     else:
@@ -424,12 +437,11 @@ def _solve_best_over_k(
     if len(u):
         W_env = float(u["w_env"].sum())
         W_soc = float(u["w_social"].sum())
-        W_cost = float(u["w_cost"].sum())
         W_str = float(u["w_strategic"].sum())
         W_imp = float(u["w_improvement"].sum())
         W_lq = float(u["w_low_quality"].sum())
     else:
-        W_env = W_soc = W_cost = W_str = W_imp = W_lq = 0.0
+        W_env = W_soc = W_str = W_imp = W_lq = 0.0
 
     env = dict(zip(df["supplier_id"], df["env_risk"].astype(float)))
     soc = dict(zip(df["supplier_id"], df["social_risk"].astype(float)))
@@ -438,14 +450,22 @@ def _solve_best_over_k(
     imp = dict(zip(df["supplier_id"], df["improvement"].astype(float)))
     lq = dict(zip(df["supplier_id"], df["low_quality"].astype(float)))
 
+    # Directional transformation for utility (profit uses raw values)
+    # bad attrs (env, social, lq): lower raw = better -> (5 - x)
+    # good attrs (strategic, improvement): higher raw = better -> (x - 1)
+    env_ut = {i: 5.0 - env[i] for i in S}
+    soc_ut = {i: 5.0 - soc[i] for i in S}
+    strat_ut = {i: strat[i] - 1.0 for i in S}
+    imp_ut = {i: imp[i] - 1.0 for i in S}
+    lq_ut = {i: 5.0 - lq[i] for i in S}
+
     util_num_coeff = {
         i: (
-            W_env * (pol.env_mult * env[i])
-            + W_soc * (pol.social_mult * soc[i])
-            + W_cost * (pol.cost_mult * cost[i])
-            + W_str * (pol.strategic_mult * strat[i])
-            + W_imp * (pol.improvement_mult * imp[i])
-            + W_lq * (pol.low_quality_mult * lq[i])
+            W_env * (pol.env_mult * env_ut[i])
+            + W_soc * (pol.social_mult * soc_ut[i])
+            + W_str * (pol.strategic_mult * strat_ut[i])
+            + W_imp * (pol.improvement_mult * imp_ut[i])
+            + W_lq * (pol.low_quality_mult * lq_ut[i])
         )
         for i in S
     }
@@ -467,7 +487,7 @@ def _solve_best_over_k(
 
         if objective_mode == "profit":
             # Max profit <=> minimize avg cost <=> minimize sum(cost*y) for fixed k
-            m.setObjective(-gp.quicksum(cost[i] * y[i] for i in S), GRB.MAXIMIZE)
+            m.setObjective(-3.0 * gp.quicksum(cost[i] * y[i] for i in S), GRB.MAXIMIZE)
         elif objective_mode == "utility":
             # True utility_total = (1/k) * sum(util_num_coeff[i] * y[i])
             # For fixed k, maximizing numerator is enough.
@@ -566,13 +586,17 @@ class MaxProfitAgent:
         u = _select_last_n_users(self.users, served)
         pol = self.policy
         if len(u):
+            ut_env = 5.0 - float(best["avg_env"])
+            ut_social = 5.0 - float(best["avg_social"])
+            ut_strategic = float(best["avg_strategic"]) - 1.0
+            ut_improvement = float(best["avg_improvement"]) - 1.0
+            ut_lq = 5.0 - float(best["avg_low_quality"])
             utility_per_user = (
-                u["w_env"] * (pol.env_mult * float(best["avg_env"]))
-                + u["w_social"] * (pol.social_mult * float(best["avg_social"]))
-                + u["w_cost"] * (pol.cost_mult * float(best["avg_cost"]))
-                + u["w_strategic"] * (pol.strategic_mult * float(best["avg_strategic"]))
-                + u["w_improvement"] * (pol.improvement_mult * float(best["avg_improvement"]))
-                + u["w_low_quality"] * (pol.low_quality_mult * float(best["avg_low_quality"]))
+                u["w_env"] * (pol.env_mult * ut_env)
+                + u["w_social"] * (pol.social_mult * ut_social)
+                + u["w_strategic"] * (pol.strategic_mult * ut_strategic)
+                + u["w_improvement"] * (pol.improvement_mult * ut_improvement)
+                + u["w_low_quality"] * (pol.low_quality_mult * ut_lq)
             )
             utility_total = float(utility_per_user.sum())
         else:
@@ -638,13 +662,17 @@ class MaxUtilAgent:
         u = _select_last_n_users(self.users, served)
         pol = self.policy
         if len(u):
+            ut_env = 5.0 - float(best["avg_env"])
+            ut_social = 5.0 - float(best["avg_social"])
+            ut_strategic = float(best["avg_strategic"]) - 1.0
+            ut_improvement = float(best["avg_improvement"]) - 1.0
+            ut_lq = 5.0 - float(best["avg_low_quality"])
             utility_per_user = (
-                u["w_env"] * (pol.env_mult * float(best["avg_env"]))
-                + u["w_social"] * (pol.social_mult * float(best["avg_social"]))
-                + u["w_cost"] * (pol.cost_mult * float(best["avg_cost"]))
-                + u["w_strategic"] * (pol.strategic_mult * float(best["avg_strategic"]))
-                + u["w_improvement"] * (pol.improvement_mult * float(best["avg_improvement"]))
-                + u["w_low_quality"] * (pol.low_quality_mult * float(best["avg_low_quality"]))
+                u["w_env"] * (pol.env_mult * ut_env)
+                + u["w_social"] * (pol.social_mult * ut_social)
+                + u["w_strategic"] * (pol.strategic_mult * ut_strategic)
+                + u["w_improvement"] * (pol.improvement_mult * ut_improvement)
+                + u["w_low_quality"] * (pol.low_quality_mult * ut_lq)
             )
             utility_total = float(utility_per_user.sum())
         else:

@@ -320,7 +320,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
         w_env = _safe_float(user_row.get("w_env"))
         w_social = _safe_float(user_row.get("w_social"))
-        w_cost = _safe_float(user_row.get("w_cost"))
         w_str = _safe_float(user_row.get("w_strategic"))
         w_imp = _safe_float(user_row.get("w_improvement"))
         w_lq = _safe_float(user_row.get("w_low_quality"))
@@ -329,12 +328,11 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         for team_id in team_ids_sorted:
             profile = team_profiles[team_id]
             score = (
-                w_env * (float(FIXED_POLICY.env_mult) * float(profile["avg_env"]))
-                + w_social * (float(FIXED_POLICY.social_mult) * float(profile["avg_social"]))
-                + w_cost * (float(FIXED_POLICY.cost_mult) * float(profile["avg_cost"]))
-                + w_str * (float(FIXED_POLICY.strategic_mult) * float(profile["avg_strategic"]))
-                + w_imp * (float(FIXED_POLICY.improvement_mult) * float(profile["avg_improvement"]))
-                + w_lq * (float(FIXED_POLICY.low_quality_mult) * float(profile["avg_low_quality"]))
+                w_env * (float(FIXED_POLICY.env_mult) * (5.0 - float(profile["avg_env"])))
+                + w_social * (float(FIXED_POLICY.social_mult) * (5.0 - float(profile["avg_social"])))
+                + w_str * (float(FIXED_POLICY.strategic_mult) * (float(profile["avg_strategic"]) - 1.0))
+                + w_imp * (float(FIXED_POLICY.improvement_mult) * (float(profile["avg_improvement"]) - 1.0))
+                + w_lq * (float(FIXED_POLICY.low_quality_mult) * (5.0 - float(profile["avg_low_quality"])))
             )
             utilities[team_id] = float(score)
 
