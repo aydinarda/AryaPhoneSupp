@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import pandas as pd
@@ -19,6 +21,10 @@ from .mincost_agent import (
 from .settings import FIXED_POLICY, GAME_SETTINGS
 
 
+_CACHE_LOCK = Lock()
+_LAST_XLSX_SIGNATURE: tuple[int, int] | None = None
+
+
 def _norm01(series: pd.Series) -> pd.Series:
     s = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
     mn, mx = float(s.min()), float(s.max())
@@ -27,10 +33,40 @@ def _norm01(series: pd.Series) -> pd.Series:
     return (s - mn) / (mx - mn)
 
 
+def _xlsx_signature(path: Path) -> tuple[int, int]:
+    st = path.stat()
+    return (int(st.st_mtime_ns), int(st.st_size))
+
+
+def _maybe_invalidate_caches() -> None:
+    global _LAST_XLSX_SIGNATURE
+    path = Path(DEFAULT_XLSX_PATH)
+    try:
+        current_sig = _xlsx_signature(path)
+    except Exception:
+        # Keep existing caches if file is temporarily unavailable.
+        return
+
+    if _LAST_XLSX_SIGNATURE == current_sig:
+        return
+
+    with _CACHE_LOCK:
+        if _LAST_XLSX_SIGNATURE == current_sig:
+            return
+        _get_tables_cached.cache_clear()
+        _get_both_benchmarks_cached.cache_clear()
+        _LAST_XLSX_SIGNATURE = current_sig
+
+
 @lru_cache(maxsize=1)
-def get_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+def _get_tables_cached() -> tuple[pd.DataFrame, pd.DataFrame]:
     xlsx_path = DEFAULT_XLSX_PATH
     return load_supplier_user_tables(xlsx_path)
+
+
+def get_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+    _maybe_invalidate_caches()
+    return _get_tables_cached()
 
 
 def get_supplier_overview() -> list[dict[str, Any]]:
@@ -126,7 +162,7 @@ def get_game_constants() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
-def get_both_benchmarks() -> dict[str, Any]:
+def _get_both_benchmarks_cached() -> dict[str, Any]:
     results: dict[str, Any] = {}
     for obj in ("max_profit", "max_utility"):
         try:
@@ -136,3 +172,8 @@ def get_both_benchmarks() -> dict[str, Any]:
         except Exception as exc:
             results[obj] = {"available": False, "error": str(exc), "metrics": {}, "feasible": False}
     return results
+
+
+def get_both_benchmarks() -> dict[str, Any]:
+    _maybe_invalidate_caches()
+    return _get_both_benchmarks_cached()
