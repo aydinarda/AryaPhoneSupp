@@ -19,6 +19,7 @@ SESSION_CODE_LENGTH = 6
 _sessions_lock = Lock()
 _sessions: dict[str, dict[str, Any]] = {}
 _session_players: dict[str, set[str]] = {}  # code -> set of lowercase team names
+_session_round_limits: dict[str, int] = {}
 
 
 def _use_db_backend() -> bool:
@@ -48,11 +49,25 @@ def _normalize_team_name(team_name: str) -> str:
 
 
 def _from_db_row(row: dict[str, Any]) -> dict[str, Any]:
+    rounds = row.get("number_of_rounds", None)
+    code = str(row.get("session_code", ""))
+    if rounds is None and code in _session_round_limits:
+        rounds = _session_round_limits[code]
+    if rounds is None:
+        rounds = 5
+    try:
+        rounds = int(rounds)
+    except Exception:
+        rounds = 5
+    if rounds < 1:
+        rounds = 1
+
     return {
         "code": row.get("session_code", ""),
         "game_name": row.get("game_name", ""),
         "admin_name": row.get("admin_name", "Admin"),
         "session_token": row.get("session_token", ""),
+        "number_of_rounds": rounds,
     }
 
 
@@ -66,6 +81,15 @@ def _is_missing_table_error(exc: Exception) -> bool:
     return "pgrst205" in text or "could not find the table" in text
 
 
+def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
+    text = str(exc).lower()
+    return column_name.lower() in text and (
+        "column" in text
+        or "pgrst204" in text
+        or "could not find the" in text
+    )
+
+
 def _is_recoverable_db_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return (
@@ -77,12 +101,15 @@ def _is_recoverable_db_error(exc: Exception) -> bool:
     )
 
 
-def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
+def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -> dict[str, Any]:
     cleaned_game_name = (game_name or "").strip()
     cleaned_admin_name = (admin_name or "Admin").strip() or "Admin"
+    rounds = int(number_of_rounds)
 
     if not cleaned_game_name:
         raise ValueError("Game name is required")
+    if rounds < 1:
+        raise ValueError("number_of_rounds must be at least 1")
 
     if _use_db_backend():
         for _ in range(100):
@@ -93,6 +120,7 @@ def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
                 "session_token": token,
                 "game_name": cleaned_game_name,
                 "admin_name": cleaned_admin_name,
+                "number_of_rounds": rounds,
                 "is_active": True,
             }
             try:
@@ -101,8 +129,31 @@ def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
                     "code": code,
                     "game_name": cleaned_game_name,
                     "admin_name": cleaned_admin_name,
+                    "number_of_rounds": rounds,
                 }
             except Exception as exc:
+                if _is_missing_column_error(exc, "number_of_rounds"):
+                    legacy_payload = {
+                        "session_code": code,
+                        "session_token": token,
+                        "game_name": cleaned_game_name,
+                        "admin_name": cleaned_admin_name,
+                        "is_active": True,
+                    }
+                    try:
+                        insert_game_session(legacy_payload)
+                        _session_round_limits[code] = rounds
+                        return {
+                            "code": code,
+                            "game_name": cleaned_game_name,
+                            "admin_name": cleaned_admin_name,
+                            "number_of_rounds": rounds,
+                        }
+                    except Exception as legacy_exc:
+                        if _is_recoverable_db_error(legacy_exc):
+                            raise RuntimeError(f"DB access/config error while creating session: {legacy_exc}") from legacy_exc
+                        if not _is_duplicate_db_error(legacy_exc):
+                            raise RuntimeError(f"Failed to create session: {legacy_exc}") from legacy_exc
                 if _is_recoverable_db_error(exc):
                     raise RuntimeError(f"DB access/config error while creating session: {exc}") from exc
                 if not _is_duplicate_db_error(exc):
@@ -116,6 +167,7 @@ def create_session(game_name: str, admin_name: str) -> dict[str, Any]:
             "code": code,
             "game_name": cleaned_game_name,
             "admin_name": cleaned_admin_name,
+            "number_of_rounds": rounds,
         }
         _sessions[code] = payload
         return payload
@@ -140,6 +192,7 @@ def get_session(code: str) -> dict[str, Any] | None:
                 "code": session["code"],
                 "game_name": session["game_name"],
                 "admin_name": session["admin_name"],
+                "number_of_rounds": session.get("number_of_rounds", 5),
             }
         except Exception as exc:
             if _is_recoverable_db_error(exc):
@@ -202,6 +255,7 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
                 "code": session["code"],
                 "game_name": session["game_name"],
                 "admin_name": session["admin_name"],
+                "number_of_rounds": session.get("number_of_rounds", 5),
             }
         except ValueError:
             raise

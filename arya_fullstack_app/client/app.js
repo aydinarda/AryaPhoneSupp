@@ -12,6 +12,7 @@ const state = {
   plotX: "profit",
   plotY: "utility",
   roundNo: null,
+  totalRounds: null,
   roundEndsAt: null,
   roundTimerId: null,
   roundSyncId: null,
@@ -41,6 +42,7 @@ const el = {
   sessionSummary: document.getElementById("sessionSummary"),
   adminGameName: document.getElementById("adminGameName"),
   adminName: document.getElementById("adminName"),
+  adminNumberOfRounds: document.getElementById("adminNumberOfRounds"),
   btnEnterAdmin: document.getElementById("btnEnterAdmin"),
   adminHint: document.getElementById("adminHint"),
   playerJoinCode: document.getElementById("playerJoinCode"),
@@ -77,6 +79,7 @@ function saveLobbyState() {
     role: state.role,
     gameCode: state.gameCode,
     gameName: state.gameName,
+    totalRounds: state.totalRounds,
     teamName: (el.teamName.value || "").trim(),
     playerName: (el.playerName.value || "").trim(),
   };
@@ -89,6 +92,7 @@ function loadLobbyState() {
     if (!raw) return;
     const saved = JSON.parse(raw);
     if (saved.gameName) el.adminGameName.value = saved.gameName;
+    if (saved.totalRounds) el.adminNumberOfRounds.value = saved.totalRounds;
     if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
     if (saved.teamName) el.playerTeamName.value = saved.teamName;
     if (saved.playerName) {
@@ -108,7 +112,8 @@ function renderSessionSummary() {
   const roleLabel = state.role === "admin" ? "Admin" : "Player";
   const gameLabel = state.gameName || "Untitled Game";
   const codeLabel = state.gameCode || "------";
-  el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}`;
+  const roundsLabel = state.totalRounds ? ` | Rounds: ${state.totalRounds}` : "";
+  el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}${roundsLabel}`;
 }
 
 function clearRoundTimer() {
@@ -128,7 +133,8 @@ function clearRoundSync() {
 function renderRoundSummary() {
   if (!el.roundSummary) return;
   if (!state.roundNo) {
-    el.roundSummary.textContent = "Round: not started";
+    const suffix = state.totalRounds ? ` / ${state.totalRounds}` : "";
+    el.roundSummary.textContent = `Round: not started${suffix}`;
     return;
   }
 
@@ -137,11 +143,13 @@ function renderRoundSummary() {
     const sec = Math.max(0, Math.floor(diffMs / 1000));
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
-    el.roundSummary.textContent = `Round ${state.roundNo} | Remaining: ${mm}:${ss}`;
+    const suffix = state.totalRounds ? `/${state.totalRounds}` : "";
+    el.roundSummary.textContent = `Round ${state.roundNo}${suffix} | Remaining: ${mm}:${ss}`;
     return;
   }
 
-  el.roundSummary.textContent = `Round ${state.roundNo} | No timer`;
+  const suffix = state.totalRounds ? `/${state.totalRounds}` : "";
+  el.roundSummary.textContent = `Round ${state.roundNo}${suffix} | No timer`;
 }
 
 function startRoundCountdown() {
@@ -204,6 +212,7 @@ async function loadCurrentRound() {
   try {
     const data = await api(`/api/sessions/${state.gameCode}/rounds/current`);
     const r = data.round;
+    state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
     if (!r) {
       state.roundNo = null;
       state.roundEndsAt = null;
@@ -262,11 +271,14 @@ async function startRound() {
       }),
     });
     state.roundNo = data.round_no;
+    state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
     state.roundEndsAt = data.ends_at || null;
     renderRoundSummary();
     startRoundCountdown();
     if (el.adminRoundHint) {
-      el.adminRoundHint.textContent = `Round ${data.round_no} started.`;
+      const remaining = Number.isFinite(Number(data.remaining_rounds)) ? Number(data.remaining_rounds) : null;
+      const suffix = remaining === null ? "" : ` Remaining rounds: ${remaining}.`;
+      el.adminRoundHint.textContent = `Round ${data.round_no} started.${suffix}`;
     }
   } catch (e) {
     if (el.adminRoundHint) {
@@ -375,6 +387,8 @@ async function enterAsAdmin() {
   clearLobbyHints();
   const gameName = (el.adminGameName.value || "").trim();
   const adminName = (el.adminName.value || "").trim();
+  const roundsRaw = Number(el.adminNumberOfRounds?.value || 5);
+  const numberOfRounds = Number.isFinite(roundsRaw) && roundsRaw >= 1 ? Math.floor(roundsRaw) : 5;
 
   if (!gameName) {
     el.adminHint.textContent = "Please enter a game name.";
@@ -387,12 +401,14 @@ async function enterAsAdmin() {
       body: JSON.stringify({
         game_name: gameName,
         admin_name: adminName || "Admin",
+        number_of_rounds: numberOfRounds,
       }),
     });
 
     state.role = "admin";
     state.gameName = session.game_name;
     state.gameCode = session.code;
+    state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : numberOfRounds;
     el.teamName.value = session.game_name;
     el.playerName.value = session.admin_name || "Admin";
     el.playerJoinCode.value = session.code;
@@ -428,6 +444,7 @@ async function enterAsPlayer() {
     state.role = "player";
     state.gameCode = session.code;
     state.gameName = session.game_name;
+    state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : state.totalRounds;
     el.teamName.value = teamName;
     el.playerName.value = "Player";
     saveLobbyState();

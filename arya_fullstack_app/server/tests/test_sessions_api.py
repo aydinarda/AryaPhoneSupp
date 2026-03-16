@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers import sessions as sessions_router
+from app.settings import GAME_SETTINGS
 
 
 client = TestClient(app)
@@ -23,8 +24,20 @@ def test_admin_can_create_session() -> None:
 
     assert payload["game_name"] == "Round 1"
     assert payload["admin_name"] == "Instructor"
+    assert payload["number_of_rounds"] == 5
     assert isinstance(payload["code"], str)
     assert len(payload["code"]) == 6
+
+
+def test_admin_can_set_number_of_rounds() -> None:
+    response = client.post(
+        "/api/sessions",
+        json={"game_name": "Round Config", "admin_name": "Instructor", "number_of_rounds": 7},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["number_of_rounds"] == 7
 
 
 def test_player_can_join_existing_session_code() -> None:
@@ -137,7 +150,7 @@ def test_round_matching_excludes_infeasible_submissions(monkeypatch) -> None:
             data=[
                 {
                     "round_no": 1,
-                    "market_capacity": 8,
+                    "market_capacity": GAME_SETTINGS.default_market_capacity,
                     "created_at": "2026-03-12T10:00:00+00:00",
                     "is_active": True,
                 }
@@ -245,9 +258,11 @@ def test_round_matching_excludes_infeasible_submissions(monkeypatch) -> None:
     assert matching["meta"]["matched_count"] == 10
     assert len(matching["unmatched_users"]) == 0
 
-    # Each team can have up to 8 users
+    # Each team can have at most default_market_capacity users
     for team_id, users in matching["market_to_users"].items():
-        assert len(users) <= 8, f"{team_id} has {len(users)} users, exceeds capacity 8"
+        assert len(users) <= GAME_SETTINGS.default_market_capacity, (
+            f"{team_id} has {len(users)} users, exceeds capacity {GAME_SETTINGS.default_market_capacity}"
+        )
 
     # All 10 users are distributed across the 2 feasible teams
     total_matched = sum(len(u) for u in matching["market_to_users"].values())
@@ -255,5 +270,73 @@ def test_round_matching_excludes_infeasible_submissions(monkeypatch) -> None:
     assert set(payload["matching"]["market_to_users"].keys()) == {"FeasibleA", "FeasibleC"}
     expected_user_ids = {f"U{i}" for i in range(1, 11)}
     assert set(payload["matching"]["user_to_market"].keys()) == expected_user_ids
-    assert payload["matching"]["market_loads"]["FeasibleA"]["capacity"] == 8
+    assert payload["matching"]["market_loads"]["FeasibleA"]["capacity"] == GAME_SETTINGS.default_market_capacity
     assert stored_result["matched_count"] == payload["matching"]["meta"]["matched_count"]
+    # Solver must always be reported regardless of which path was taken
+    assert payload["matching"]["meta"]["solver"] in {
+        "stable_gale_shapley",
+        "gurobi_stable_lexicographic",
+    }
+
+    # Round financials: realized profit must be based on actual matched users.
+    round_financials = payload["matching"].get("round_financials") or {}
+    team_financials = round_financials.get("team_financials") or []
+    assert len(team_financials) == 2
+
+    by_team = {row["team"]: row for row in team_financials}
+    assert set(by_team.keys()) == {"FeasibleA", "FeasibleC"}
+
+    for team_id, row in by_team.items():
+        matched_users = payload["matching"]["market_to_users"].get(team_id, [])
+        assert row["matched_user_count"] == len(matched_users)
+        assert row["matched_users"] == matched_users
+
+        expected_realized = row["matched_user_count"] * (
+            row["sale_price_per_user"] - row["cost_component_per_user"] - row["penalty_per_user"]
+        )
+        assert abs(row["realized_profit"] - expected_realized) < 1e-9
+
+    expected_round_total = sum(float(row["realized_profit"]) for row in team_financials)
+    assert abs(float(round_financials["round_profit_total"]) - expected_round_total) < 1e-9
+    assert abs(float(payload["matching"]["meta"]["round_profit_total"]) - expected_round_total) < 1e-9
+    assert abs(float(stored_result["result"]["round_financials"]["round_profit_total"]) - expected_round_total) < 1e-9
+
+
+def test_start_round_respects_configured_round_limit(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[
+                {
+                    "session_code": code,
+                    "session_token": "token-1",
+                    "is_active": True,
+                    "number_of_rounds": 2,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_latest_round",
+        lambda session_token: SimpleNamespace(data=[{"round_no": 2}]),
+    )
+    monkeypatch.setattr(sessions_router, "close_active_rounds", lambda session_token: None)
+
+    called = {"insert": 0}
+
+    def _insert_stub(payload):
+        called["insert"] += 1
+        return SimpleNamespace(data=[payload])
+
+    monkeypatch.setattr(sessions_router, "insert_game_round", _insert_stub)
+
+    response = client.post(
+        "/api/sessions/ABC123/rounds/start",
+        json={"duration_seconds": 120, "market_capacity": 8},
+    )
+
+    assert response.status_code == 400
+    assert "Configured round limit reached" in response.json()["detail"]
+    assert called["insert"] == 0

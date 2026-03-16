@@ -48,8 +48,13 @@ CREATE TABLE IF NOT EXISTS game_sessions (
   session_token TEXT NOT NULL UNIQUE,
   game_name TEXT NOT NULL,
   admin_name TEXT NOT NULL DEFAULT 'Admin',
+  number_of_rounds INTEGER NOT NULL DEFAULT 5,
   is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS number_of_rounds INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE game_sessions DROP CONSTRAINT IF EXISTS game_sessions_number_of_rounds_check;
+ALTER TABLE game_sessions ADD CONSTRAINT game_sessions_number_of_rounds_check CHECK (number_of_rounds >= 1);
 
 CREATE TABLE IF NOT EXISTS session_players (
   id BIGSERIAL PRIMARY KEY,

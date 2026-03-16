@@ -62,6 +62,24 @@ def _parse_bool_flag(value: Any) -> bool:
     return False
 
 
+def _resolve_total_rounds(session_row: dict[str, Any]) -> int:
+    raw = session_row.get("number_of_rounds", None)
+    if raw is None:
+        code = str(session_row.get("session_code", "")).strip().upper()
+        if code:
+            try:
+                session = get_session(code)
+                if session is not None:
+                    raw = session.get("number_of_rounds", None)
+            except Exception:
+                raw = None
+
+    try:
+        return max(1, int(raw))
+    except Exception:
+        return 5
+
+
 def _submission_is_feasible(row: dict[str, Any]) -> bool:
     env_avg = row.get("env_avg")
     social_avg = row.get("social_avg")
@@ -112,6 +130,8 @@ def _build_team_product_profiles(
         avg_strategic = sum(_safe_float(r.get("strategic")) for r in selected_rows) / count
         avg_improvement = sum(_safe_float(r.get("improvement")) for r in selected_rows) / count
         avg_low_quality = sum(_safe_float(r.get("low_quality")) for r in selected_rows) / count
+        avg_child_labor = sum(_safe_float(r.get("child_labor")) for r in selected_rows) / count
+        avg_banned_chem = sum(_safe_float(r.get("banned_chem")) for r in selected_rows) / count
 
         profile_feasible = (
             avg_env <= float(GAME_SETTINGS.env_cap) + 1e-12
@@ -131,6 +151,8 @@ def _build_team_product_profiles(
             "avg_strategic": avg_strategic,
             "avg_improvement": avg_improvement,
             "avg_low_quality": avg_low_quality,
+            "avg_child_labor": avg_child_labor,
+            "avg_banned_chem": avg_banned_chem,
         }
 
     return profiles, sorted(set(excluded))
@@ -139,7 +161,7 @@ def _build_team_product_profiles(
 @router.post("")
 def create_game_session(req: SessionCreateRequest) -> dict[str, Any]:
     try:
-        return create_session(req.game_name, req.admin_name or "Admin")
+        return create_session(req.game_name, req.admin_name or "Admin", req.number_of_rounds)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -180,11 +202,19 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
     if not session_token:
         raise HTTPException(status_code=400, detail="Session token not found")
 
+    total_rounds = _resolve_total_rounds(session_row)
+
     duration_seconds = req.duration_seconds if req.duration_seconds and req.duration_seconds > 0 else None
     market_capacity = max(1, int(req.market_capacity or 1))
 
     latest_rows = _extract_rows(fetch_latest_round(session_token))
     next_round_no = int(latest_rows[0].get("round_no", 0) or 0) + 1 if latest_rows else 1
+
+    if next_round_no > total_rounds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Configured round limit reached ({total_rounds}). No more rounds can be started.",
+        )
 
     now = datetime.now(UTC)
     ends_at = (now + timedelta(seconds=duration_seconds)).isoformat() if duration_seconds else None
@@ -203,6 +233,8 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
     return {
         "session_code": str(session_row.get("session_code", "")),
         "round_no": next_round_no,
+        "total_rounds": total_rounds,
+        "remaining_rounds": max(0, total_rounds - next_round_no),
         "duration_seconds": duration_seconds,
         "market_capacity": market_capacity,
         "started_at": now.isoformat(),
@@ -218,9 +250,11 @@ def get_current_round(code: str) -> dict[str, Any]:
     if not session_token:
         raise HTTPException(status_code=400, detail="Session token not found")
 
+    total_rounds = _resolve_total_rounds(session_row)
+
     rows = _extract_rows(fetch_active_round(session_token))
     if not rows:
-        return {"round": None}
+        return {"round": None, "total_rounds": total_rounds}
 
     row = rows[0]
     return {
@@ -231,7 +265,8 @@ def get_current_round(code: str) -> dict[str, Any]:
             "started_at": row.get("created_at"),
             "ends_at": row.get("ends_at"),
             "is_active": bool(row.get("is_active", False)),
-        }
+        },
+        "total_rounds": total_rounds,
     }
 
 
@@ -293,6 +328,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "strategic": row.get("strategic"),
             "improvement": row.get("improvement"),
             "low_quality": row.get("low_quality"),
+            "child_labor": row.get("child_labor"),
+            "banned_chem": row.get("banned_chem"),
         }
         for _, row in suppliers_df.iterrows()
     }
@@ -373,6 +410,57 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     result_meta["eligible_team_count"] = len(team_profiles)
     result_meta["user_pool_count"] = len(users_payload)
     result_meta["infeasible_excluded_count"] = len(excluded_infeasible_teams)
+
+    # Realized round profit is computed from actual matched users per team,
+    # not from leaderboard position.
+    market_to_users = result.get("market_to_users") or {}
+    team_round_financials: list[dict[str, Any]] = []
+    round_profit_total = 0.0
+
+    for team_id in team_ids_sorted:
+        profile = team_profiles[team_id]
+        matched_users = [str(uid) for uid in (market_to_users.get(team_id) or [])]
+        matched_count = len(matched_users)
+
+        sale_price_per_user = float(GAME_SETTINGS.price_per_user)
+        avg_cost_score = float(profile.get("avg_cost", 0.0))
+        cost_component_per_user = float(GAME_SETTINGS.cost_scale) * avg_cost_score
+        avg_child_labor = float(profile.get("avg_child_labor", 0.0))
+        avg_banned_chem = float(profile.get("avg_banned_chem", 0.0))
+
+        penalty_per_user = (
+            float(FIXED_POLICY.child_labor_penalty) * avg_child_labor
+            + float(FIXED_POLICY.banned_chem_penalty) * avg_banned_chem
+        )
+
+        unit_margin = sale_price_per_user - cost_component_per_user - penalty_per_user
+        realized_profit = unit_margin * float(matched_count)
+        round_profit_total += realized_profit
+
+        team_round_financials.append(
+            {
+                "team": team_id,
+                "matched_user_count": matched_count,
+                "matched_users": matched_users,
+                "sale_price_per_user": sale_price_per_user,
+                "avg_cost_score": avg_cost_score,
+                "cost_component_per_user": cost_component_per_user,
+                "penalty_per_user": penalty_per_user,
+                "unit_margin": unit_margin,
+                "realized_profit": realized_profit,
+                "avg_child_labor": avg_child_labor,
+                "avg_banned_chem": avg_banned_chem,
+            }
+        )
+
+    result["round_financials"] = {
+        "formula": "realized_profit = matched_user_count * (sale_price_per_user - cost_scale*avg_cost_score - penalty_per_user)",
+        "price_per_user": float(GAME_SETTINGS.price_per_user),
+        "cost_scale": float(GAME_SETTINGS.cost_scale),
+        "team_financials": team_round_financials,
+        "round_profit_total": float(round_profit_total),
+    }
+    result_meta["round_profit_total"] = float(round_profit_total)
 
     insert_matching_result(
         {

@@ -26,7 +26,7 @@ from app.settings import FIXED_POLICY, GAME_SETTINGS
 
 
 DEFAULT_OUTPUT = PROJECT_ROOT / "random_session_matching_report.xlsx"
-DEFAULT_RUN_COUNT = 15
+DEFAULT_ROUND_COUNT = 10
 DEFAULT_TEAM_COUNT = 30
 DEFAULT_SEED = 20260312
 
@@ -90,8 +90,7 @@ def _build_submission_rows(run_no: int, team_count: int, supplier_ids: list[str]
     for order_idx, team in enumerate(teams):
         pick_count = rng.randint(1, max_pick_count)
         picks = rng.sample(supplier_ids, pick_count)
-        objective = rng.choice(["max_profit", "max_utility"])
-        manual = evaluate_manual(objective, picks)
+        manual = evaluate_manual("max_profit", picks)
         metrics = manual["metrics"]
         created_at = start_time + timedelta(seconds=order_idx)
 
@@ -101,7 +100,6 @@ def _build_submission_rows(run_no: int, team_count: int, supplier_ids: list[str]
                 "submission_order": order_idx + 1,
                 "team": team,
                 "player_name": team,
-                "objective": objective,
                 "num_suppliers": pick_count,
                 "selected_suppliers": ",".join(picks),
                 "feasible": bool(manual.get("feasible", False)),
@@ -138,6 +136,8 @@ def _build_team_profiles(submissions_df: pd.DataFrame, suppliers_df: pd.DataFram
             "strategic": row.get("strategic"),
             "improvement": row.get("improvement"),
             "low_quality": row.get("low_quality"),
+            "child_labor": row.get("child_labor"),
+            "banned_chem": row.get("banned_chem"),
         }
         for _, row in suppliers.iterrows()
     }
@@ -162,6 +162,8 @@ def _build_team_profiles(submissions_df: pd.DataFrame, suppliers_df: pd.DataFram
         avg_strategic = sum(_safe_float(r.get("strategic")) for r in selected) / count
         avg_improvement = sum(_safe_float(r.get("improvement")) for r in selected) / count
         avg_low_quality = sum(_safe_float(r.get("low_quality")) for r in selected) / count
+        avg_child_labor = sum(_safe_float(r.get("child_labor")) for r in selected) / count
+        avg_banned_chem = sum(_safe_float(r.get("banned_chem")) for r in selected) / count
 
         if not (
             avg_env <= float(GAME_SETTINGS.env_cap) + 1e-12
@@ -180,6 +182,8 @@ def _build_team_profiles(submissions_df: pd.DataFrame, suppliers_df: pd.DataFram
             "avg_strategic": avg_strategic,
             "avg_improvement": avg_improvement,
             "avg_low_quality": avg_low_quality,
+            "avg_child_labor": avg_child_labor,
+            "avg_banned_chem": avg_banned_chem,
         }
 
     return profiles, sorted(set(excluded))
@@ -314,6 +318,54 @@ def _augment_with_matching(submissions_df: pd.DataFrame, matching: dict[str, Any
     return df
 
 
+def _build_round_financial_rows(
+    run_no: int,
+    submissions_df: pd.DataFrame,
+    matching: dict[str, Any],
+    team_profiles: dict[str, dict[str, Any]],
+) -> pd.DataFrame:
+    market_to_users = matching.get("market_to_users", {}) or {}
+    rows: list[dict[str, Any]] = []
+
+    for row in submissions_df.itertuples(index=False):
+        team = str(row.team)
+        profile = team_profiles.get(team)
+        matched_users = [str(uid) for uid in (market_to_users.get(team) or [])]
+        matched_count = len(matched_users)
+
+        if profile is None:
+            unit_margin = 0.0
+            cost_component = 0.0
+            penalty = 0.0
+        else:
+            avg_cost = float(profile.get("avg_cost", 0.0))
+            avg_child_labor = float(profile.get("avg_child_labor", 0.0))
+            avg_banned_chem = float(profile.get("avg_banned_chem", 0.0))
+            cost_component = float(GAME_SETTINGS.cost_scale) * avg_cost
+            penalty = (
+                float(FIXED_POLICY.child_labor_penalty) * avg_child_labor
+                + float(FIXED_POLICY.banned_chem_penalty) * avg_banned_chem
+            )
+            unit_margin = float(GAME_SETTINGS.price_per_user) - cost_component - penalty
+
+        realized_profit = float(matched_count) * unit_margin
+        rows.append(
+            {
+                "run_no": run_no,
+                "team": team,
+                "matched_user_count": matched_count,
+                "matched_users": ", ".join(matched_users),
+                "sale_price_per_user": float(GAME_SETTINGS.price_per_user),
+                "cost_component_per_user": float(cost_component),
+                "penalty_per_user": float(penalty),
+                "unit_margin": float(unit_margin),
+                "realized_profit_round": float(realized_profit),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def _build_matching_assignment_rows(
     run_no: int,
     matching: dict[str, Any],
@@ -389,7 +441,6 @@ def _build_run_summary(run_no: int, market_capacity: int, submissions_df: pd.Dat
 def _create_leaderboard_plot(run_df: pd.DataFrame, out_path: Path, title: str) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
     color_map = {True: "#059669", False: "#dc2626"}
-    marker_map = {"max_profit": "o", "max_utility": "D"}
 
     for row in run_df.itertuples(index=False):
         is_eligible = bool(getattr(row, "matching_eligible", False))
@@ -398,7 +449,7 @@ def _create_leaderboard_plot(run_df: pd.DataFrame, out_path: Path, title: str) -
             row.profit,
             row.utility,
             color=color_map[bool(row.matched)],
-            marker=marker_map.get(row.objective, "o"),
+            marker="o",
             s=70,
             alpha=alpha,
             edgecolors="white",
@@ -415,8 +466,6 @@ def _create_leaderboard_plot(run_df: pd.DataFrame, out_path: Path, title: str) -
         "Green = matched",
         "Red = unmatched",
         "Faded = infeasible, excluded",
-        "Circle = max_profit",
-        "Diamond = max_utility",
     ]
     ax.text(1.01, 0.5, "\n".join(legend_labels), transform=ax.transAxes, va="center", fontsize=8)
     fig.tight_layout()
@@ -424,8 +473,70 @@ def _create_leaderboard_plot(run_df: pd.DataFrame, out_path: Path, title: str) -
     plt.close(fig)
 
 
+def _create_round_progress_plot(
+    progress_df: pd.DataFrame,
+    out_path: Path,
+    title: str,
+    top_n_labeled: int = 10,
+) -> None:
+    """Plot each team's cumulative profit progression across rounds.
+
+    y-axis: round number (1 → N), x-axis: cumulative realized profit (total gained).
+    Top-N teams by final profit are highlighted and labeled; rest are shown faded.
+    """
+    teams = sorted(progress_df["team"].unique())
+    final_profits = (
+        progress_df.groupby("team")["cumulative_profit"]
+        .max()
+        .sort_values(ascending=False)
+    )
+    top_teams = set(final_profits.head(top_n_labeled).index.tolist())
+
+    cmap = plt.get_cmap("tab20")
+    color_map = {team: cmap((i % 20) / 20.0) for i, team in enumerate(sorted(teams))}
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    for team in teams:
+        team_data = progress_df[progress_df["team"] == team].sort_values("run_no")
+        x = team_data["cumulative_profit"].values
+        y = team_data["run_no"].values
+        is_top = team in top_teams
+        color = color_map[team] if is_top else "#bbbbbb"
+        alpha = 0.90 if is_top else 0.25
+        lw = 2.2 if is_top else 0.8
+        zorder = 3 if is_top else 1
+        ax.plot(x, y, color=color, alpha=alpha, linewidth=lw, marker="o", markersize=3.5, zorder=zorder)
+        if is_top:
+            ax.annotate(
+                str(team),
+                (x[-1], y[-1]),
+                fontsize=7.5,
+                color=color,
+                xytext=(6, 0),
+                textcoords="offset points",
+                va="center",
+                fontweight="bold",
+            )
+
+    rounds = sorted(progress_df["run_no"].unique())
+    ax.set_yticks(rounds)
+    ax.set_yticklabels([f"Round {r:02d}" for r in rounds])
+    ax.set_xlabel("Total Gained — Cumulative Realized Profit", fontsize=11)
+    ax.set_ylabel("Round", fontsize=11)
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.grid(True, axis="x", alpha=0.25, linestyle="--")
+    ax.grid(True, axis="y", alpha=0.15)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _populate_run_sheet(ws, run_summary: dict[str, Any], run_df: pd.DataFrame, market_df: pd.DataFrame, image_path: Path) -> None:
-    ws["A1"] = f"Run {int(run_summary['run_no']):02d} Summary"
+    ws["A1"] = f"Round {int(run_summary['run_no']):02d} Summary"
     ws["A1"].font = Font(bold=True, size=14)
 
     summary_df = pd.DataFrame([run_summary])
@@ -445,7 +556,7 @@ def _populate_run_sheet(ws, run_summary: dict[str, Any], run_df: pd.DataFrame, m
     _autosize_columns(ws)
 
 
-def generate_report(output_path: Path, runs: int, team_count: int, seed: int, user_limit: int | None = None) -> Path:
+def generate_report(output_path: Path, rounds: int, team_count: int, seed: int, user_limit: int | None = None) -> Path:
     suppliers_df, users_df = get_tables()
     suppliers_df = suppliers_df.copy()
     suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
@@ -456,29 +567,55 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
     all_submissions: list[pd.DataFrame] = []
     all_assignments: list[pd.DataFrame] = []
     all_market_rows: list[pd.DataFrame] = []
+    all_round_financials: list[pd.DataFrame] = []
     run_frames: dict[int, pd.DataFrame] = {}
     run_market_frames: dict[int, pd.DataFrame] = {}
     image_paths: dict[int, Path] = {}
+    cumulative_profit_by_team = {f"Team_{idx:02d}": 0.0 for idx in range(1, team_count + 1)}
+    cumulative_matched_by_team = {f"Team_{idx:02d}": 0 for idx in range(1, team_count + 1)}
 
     with tempfile.TemporaryDirectory(prefix="arya_random_report_") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
 
-        for run_no in range(1, runs + 1):
+        for run_no in range(1, rounds + 1):
             market_capacity = int(GAME_SETTINGS.default_market_capacity)
             submissions_df = _build_submission_rows(run_no, team_count, supplier_ids, rng)
             matching, team_profiles = _run_matching_for_submissions(submissions_df, suppliers_df, users_df, market_capacity, user_limit=user_limit)
             augmented_df = _augment_with_matching(submissions_df, matching)
+            round_financial_df = _build_round_financial_rows(run_no, augmented_df, matching, team_profiles)
+
+            round_profit_map = {
+                str(r.team): float(r.realized_profit_round)
+                for r in round_financial_df.itertuples(index=False)
+            }
+            round_matched_map = {
+                str(r.team): int(r.matched_user_count)
+                for r in round_financial_df.itertuples(index=False)
+            }
+
+            augmented_df["realized_profit_round"] = augmented_df["team"].map(lambda t: round_profit_map.get(str(t), 0.0))
+            augmented_df["matched_user_count"] = augmented_df["team"].map(lambda t: round_matched_map.get(str(t), 0))
+            augmented_df["cumulative_profit"] = augmented_df["team"].map(lambda t: cumulative_profit_by_team.get(str(t), 0.0)) + augmented_df["realized_profit_round"]
+            augmented_df["cumulative_matched_users"] = augmented_df["team"].map(lambda t: cumulative_matched_by_team.get(str(t), 0)) + augmented_df["matched_user_count"]
+
+            for row in augmented_df.itertuples(index=False):
+                team = str(row.team)
+                cumulative_profit_by_team[team] = float(getattr(row, "cumulative_profit", cumulative_profit_by_team.get(team, 0.0)))
+                cumulative_matched_by_team[team] = int(getattr(row, "cumulative_matched_users", cumulative_matched_by_team.get(team, 0)))
+
             assignment_df = _build_matching_assignment_rows(run_no, matching, team_profiles)
             market_df = _build_market_rows(run_no, matching)
             summary = _build_run_summary(run_no, market_capacity, augmented_df, matching)
+            summary["round_realized_profit_total"] = float(round_financial_df["realized_profit_round"].sum()) if len(round_financial_df) else 0.0
 
             image_path = temp_dir / f"run_{run_no:02d}_leaderboard.png"
-            _create_leaderboard_plot(augmented_df, image_path, f"Run {run_no:02d} Leaderboard")
+            _create_leaderboard_plot(augmented_df, image_path, f"Round {run_no:02d} Leaderboard")
 
             run_summaries.append(summary)
             all_submissions.append(augmented_df)
             all_assignments.append(assignment_df)
             all_market_rows.append(market_df)
+            all_round_financials.append(round_financial_df)
             run_frames[run_no] = augmented_df
             run_market_frames[run_no] = market_df
             image_paths[run_no] = image_path
@@ -487,6 +624,7 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
         submissions_df = pd.concat(all_submissions, ignore_index=True)
         assignments_df = pd.concat(all_assignments, ignore_index=True)
         market_rows_df = pd.concat(all_market_rows, ignore_index=True)
+        round_financials_df = pd.concat(all_round_financials, ignore_index=True)
 
         team_match_counts = (
             submissions_df.groupby("team", as_index=False)
@@ -511,6 +649,20 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
         )
         team_overview_df = team_match_counts.merge(team_metrics, on="team", how="left")
 
+        final_game_results_df = (
+            submissions_df.groupby("team", as_index=False)
+            .agg(
+                total_realized_profit=("realized_profit_round", "sum"),
+                total_matched_users=("matched_user_count", "sum"),
+                feasible_rounds=("feasible", "sum"),
+                avg_submission_profit=("profit", "mean"),
+                avg_submission_utility=("utility", "mean"),
+            )
+            .sort_values(["total_realized_profit", "total_matched_users", "team"], ascending=[False, False, True])
+            .reset_index(drop=True)
+        )
+        final_game_results_df.insert(0, "final_rank", range(1, len(final_game_results_df) + 1))
+
         supplier_overview_df = (
             market_rows_df.groupby("team_product", as_index=False)
             .agg(
@@ -524,14 +676,22 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
             .sort_values(["total_assigned_users", "team_product"], ascending=[False, True])
         )
 
+        # Round-by-round progress chart (y=round, x=cumulative profit)
+        progress_image_path = temp_dir / "round_progress.png"
+        _create_round_progress_plot(
+            submissions_df[["run_no", "team", "cumulative_profit"]].copy(),
+            progress_image_path,
+            f"Round-by-Round Progression — {rounds} Rounds, {team_count} Teams",
+        )
+
         workbook = Workbook()
         overview_ws = workbook.active
         overview_ws.title = "Overview"
-        overview_ws["A1"] = "Random Session Matching Overview"
+        overview_ws["A1"] = "Random Multi-round Matching Overview"
         overview_ws["A1"].font = Font(bold=True, size=14)
         overview_ws["A2"] = f"Seed: {seed}"
-        overview_ws["B2"] = f"Runs: {runs}"
-        overview_ws["C2"] = f"Teams per run: {team_count}"
+        overview_ws["B2"] = f"Rounds: {rounds}"
+        overview_ws["C2"] = f"Teams per round: {team_count}"
         effective_users = user_limit if user_limit is not None else len(users_df)
         overview_ws["D2"] = f"User pool: {effective_users}"
         _write_dataframe(overview_ws, summary_df, start_row=4)
@@ -539,14 +699,21 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
         _autosize_columns(overview_ws)
 
         team_ws = workbook.create_sheet("Team Match Counts")
-        team_ws["A1"] = "Per-team match performance across all runs"
+        team_ws["A1"] = "Per-team match performance across all rounds"
         team_ws["A1"].font = Font(bold=True, size=14)
         _write_dataframe(team_ws, team_overview_df, start_row=3)
         team_ws.freeze_panes = "A4"
         _autosize_columns(team_ws)
 
+        final_ws = workbook.create_sheet("Final Game Results")
+        final_ws["A1"] = "Final standings after all rounds"
+        final_ws["A1"].font = Font(bold=True, size=14)
+        _write_dataframe(final_ws, final_game_results_df, start_row=3)
+        final_ws.freeze_panes = "A4"
+        _autosize_columns(final_ws)
+
         supplier_ws = workbook.create_sheet("Team Product Match Counts")
-        supplier_ws["A1"] = "Per-team-product assigned user counts across all runs"
+        supplier_ws["A1"] = "Per-team-product assigned user counts across all rounds"
         supplier_ws["A1"].font = Font(bold=True, size=14)
         _write_dataframe(supplier_ws, supplier_overview_df, start_row=3)
         supplier_ws.freeze_panes = "A4"
@@ -573,8 +740,24 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
         market_ws.freeze_panes = "A4"
         _autosize_columns(market_ws)
 
-        for run_no in range(1, runs + 1):
-            ws = workbook.create_sheet(_safe_sheet_title(f"Run {run_no:02d}"))
+        financial_ws = workbook.create_sheet("Round Financials")
+        financial_ws["A1"] = "Per-round realized financial results"
+        financial_ws["A1"].font = Font(bold=True, size=14)
+        _write_dataframe(financial_ws, round_financials_df, start_row=3)
+        financial_ws.freeze_panes = "A4"
+        _autosize_columns(financial_ws)
+
+        progress_ws = workbook.create_sheet("Round Progress")
+        progress_ws["A1"] = "Cumulative profit progression per team across rounds (y=round, x=total gained)"
+        progress_ws["A1"].font = Font(bold=True, size=14)
+        prog_img = XLImage(str(progress_image_path))
+        prog_img.width = 1100
+        prog_img.height = 700
+        progress_ws.add_image(prog_img, "A3")
+        _autosize_columns(progress_ws)
+
+        for run_no in range(1, rounds + 1):
+            ws = workbook.create_sheet(_safe_sheet_title(f"Round {run_no:02d}"))
             _populate_run_sheet(ws, run_summaries[run_no - 1], run_frames[run_no], run_market_frames[run_no], image_paths[run_no])
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -584,18 +767,20 @@ def generate_report(output_path: Path, runs: int, team_count: int, seed: int, us
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate a random-session matching Excel report.")
+    parser = argparse.ArgumentParser(description="Generate a random, multi-round matching Excel report for one game.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output XLSX path")
-    parser.add_argument("--runs", type=int, default=DEFAULT_RUN_COUNT, help="Number of simulated runs")
-    parser.add_argument("--teams", type=int, default=DEFAULT_TEAM_COUNT, help="Team count per run")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducible runs")
+    parser.add_argument("--rounds", type=int, default=DEFAULT_ROUND_COUNT, help="Number of rounds in the single simulation")
+    parser.add_argument("--runs", type=int, default=None, help="Deprecated alias of --rounds")
+    parser.add_argument("--teams", type=int, default=DEFAULT_TEAM_COUNT, help="Team count per round")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducible rounds")
     parser.add_argument("--users", type=int, default=None, help="Limit user pool size (default: all users)")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    output = generate_report(output_path=args.output, runs=args.runs, team_count=args.teams, seed=args.seed, user_limit=args.users)
+    rounds = int(args.runs) if args.runs is not None else int(args.rounds)
+    output = generate_report(output_path=args.output, rounds=rounds, team_count=args.teams, seed=args.seed, user_limit=args.users)
     print(output)
 
 
