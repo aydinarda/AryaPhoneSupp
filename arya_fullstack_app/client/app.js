@@ -751,10 +751,9 @@ function renderLeaderboardScatter(rows) {
     const left = px(xVal);
     const top = py(yVal);
     const color = teamColors.get(team) ?? "#1f2937";
-    const shapeClass = r.objective === "max_utility" ? "diamond" : "circle";
+    const shapeClass = "circle";
     const title = [
       `Team: ${team}`,
-      `Mode: ${r.objective ?? "-"}`,
       `${xLabel}: ${fmt(xVal)}`,
       `${yLabel}: ${fmt(yVal)}`,
       `Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : "-"}`,
@@ -771,7 +770,7 @@ function renderLeaderboardScatter(rows) {
   el.leaderboardScatter.innerHTML = `
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
       <strong>${xLabel} vs ${yLabel}</strong>
-      <div style="font-size:12px;color:#6b7280;">Shape: circle=max_profit, diamond=max_utility</div>
+      <div style="font-size:12px;color:#6b7280;">Points are color-coded by team</div>
     </div>
     <div style="font-size:12px;color:#374151;margin-bottom:8px;">${legend}</div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:#6b7280;margin-bottom:6px;">
@@ -795,22 +794,23 @@ function setupTabs() {
 
   tabs.forEach((tab) => {
     tab.addEventListener("click", async () => {
-      tabs.forEach((t) => t.classList.remove("active"));
-      tab.classList.add("active");
       const key = tab.dataset.tab;
 
       if (key === "leaderboard") {
+        const isShowingLeaderboard = !panelLeaderboard.classList.contains("hidden");
+        if (isShowingLeaderboard) {
+          panelLeaderboard.classList.add("hidden");
+          panelGame.classList.remove("hidden");
+          tab.classList.remove("active");
+          return;
+        }
+
         panelGame.classList.add("hidden");
         panelLeaderboard.classList.remove("hidden");
+        tab.classList.add("active");
         await loadLeaderboard();
         return;
       }
-
-      state.objective = key;
-      panelLeaderboard.classList.add("hidden");
-      panelGame.classList.remove("hidden");
-      el.benchmarkMetrics.innerHTML = "";
-      await runManual();
     });
   });
 }
