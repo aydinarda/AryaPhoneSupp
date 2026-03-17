@@ -31,6 +31,7 @@ const el = {
   benchmarkUtilPanel: document.getElementById("benchmarkUtilPanel"),
   teamName: document.getElementById("teamName"),
   playerName: document.getElementById("playerName"),
+  pricePerUser: document.getElementById("pricePerUser"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
   sortSelect: document.getElementById("sortSelect"),
   feasibleOnly: document.getElementById("feasibleOnly"),
@@ -573,14 +574,22 @@ async function loadConfigAndSuppliers() {
   const [config, suppliers] = await Promise.all([api("/api/config"), api("/api/suppliers")]);
   state.config = config;
   state.suppliers = suppliers;
+  if (el.pricePerUser && (el.pricePerUser.value === "" || el.pricePerUser.value == null)) {
+    el.pricePerUser.value = Number.isFinite(Number(config.price_per_user)) ? String(config.price_per_user) : "100";
+  }
   el.configInfo.textContent = `Served users: ${config.served_users} | Risk caps: avg env ≤ ${config.env_cap}, avg social ≤ ${config.social_cap} | Price per user: ${config.price_per_user} | Cost scale: ${config.cost_scale}`;
   renderSuppliers();
 }
 
 function currentPayload() {
+  const rawPrice = Number(el.pricePerUser?.value);
+  const defaultPrice = Number(state.config?.price_per_user ?? 100);
+  const pricePerUser = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : defaultPrice;
+
   return {
     objective: state.objective,
     picks: [...state.selected],
+    price_per_user: pricePerUser,
   };
 }
 

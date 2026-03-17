@@ -11,6 +11,7 @@ Objective = Literal["max_profit", "max_utility"]
 class EvalRequest(BaseModel):
     objective: Objective
     picks: list[str] = Field(default_factory=list)
+    price_per_user: Optional[float] = None
 
 
 class BenchmarkRequest(BaseModel):
@@ -40,6 +41,7 @@ class SubmitRequest(BaseModel):
     team: str = "(anonymous)"
     objective: Objective
     picks: list[str] = Field(default_factory=list)
+    price_per_user: Optional[float] = None
     comment: Optional[str] = None
     player_name: Optional[str] = None
     session_code: Optional[str] = None
@@ -50,6 +52,8 @@ class MatchingUserRequest(BaseModel):
     user_id: str
     choices: list[str] = Field(default_factory=list)
     utilities: dict[str, float] = Field(default_factory=dict)
+    price_sensitivity: Optional[float] = None
+    sustainability_sensitivity: Optional[float] = None
 
 
 class MatchingMarketOptionRequest(BaseModel):
@@ -57,6 +61,8 @@ class MatchingMarketOptionRequest(BaseModel):
     capacity: int = 0
     priority: list[str] = Field(default_factory=list)
     request_time: Optional[str] = None
+    price: Optional[float] = None
+    sustainability: Optional[float] = None
 
 
 class MatchingRequest(BaseModel):

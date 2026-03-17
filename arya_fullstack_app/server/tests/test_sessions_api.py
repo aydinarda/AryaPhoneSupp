@@ -276,6 +276,7 @@ def test_round_matching_excludes_infeasible_submissions(monkeypatch) -> None:
     assert payload["matching"]["meta"]["solver"] in {
         "stable_gale_shapley",
         "gurobi_stable_lexicographic",
+        "market_demand_v1",
     }
 
     # Round financials: realized profit must be based on actual matched users.

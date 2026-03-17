@@ -144,6 +144,7 @@ def _build_team_product_profiles(
         profiles[team] = {
             "team": team,
             "created_at": str(row.get("created_at") or ""),
+            "price_per_user": _safe_float(row.get("price_per_user"), float(GAME_SETTINGS.price_per_user)),
             "picked_suppliers": valid,
             "avg_env": avg_env,
             "avg_social": avg_social,
@@ -357,6 +358,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
         w_env = _safe_float(user_row.get("w_env"))
         w_social = _safe_float(user_row.get("w_social"))
+        w_cost = _safe_float(user_row.get("w_cost"), 1.0)
         w_str = _safe_float(user_row.get("w_strategic"))
         w_imp = _safe_float(user_row.get("w_improvement"))
         w_lq = _safe_float(user_row.get("w_low_quality"))
@@ -379,6 +381,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
                 "user_id": user_id,
                 "choices": ordered,
                 "utilities": utilities,
+                "price_sensitivity": w_cost,
+                "sustainability_sensitivity": (w_env + w_social + w_lq) / 3.0,
             }
         )
         user_score_map[user_id] = utilities
@@ -388,16 +392,39 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
     market_options = []
     for team_id in team_ids_sorted:
+        profile = team_profiles[team_id]
         ranked_users = sorted(
             [str(u.get("user_id", "")) for u in users_payload],
             key=lambda uid: (-user_score_map.get(uid, {}).get(team_id, 0.0), uid),
         )
+
+        avg_env = float(profile.get("avg_env", 5.0))
+        avg_social = float(profile.get("avg_social", 5.0))
+        avg_low_quality = float(profile.get("avg_low_quality", 5.0))
+        avg_strategic = float(profile.get("avg_strategic", 1.0))
+        avg_improvement = float(profile.get("avg_improvement", 1.0))
+        avg_cost = float(profile.get("avg_cost", 0.0))
+        avg_child_labor = float(profile.get("avg_child_labor", 0.0))
+        avg_banned_chem = float(profile.get("avg_banned_chem", 0.0))
+
+        sustainability = (
+            (5.0 - avg_env)
+            + (5.0 - avg_social)
+            + (5.0 - avg_low_quality)
+            + (avg_strategic - 1.0)
+            + (avg_improvement - 1.0)
+        ) / 5.0
+
+        market_price = float(profile.get("price_per_user", GAME_SETTINGS.price_per_user))
+
         market_options.append(
             {
                 "option_id": team_id,
                 "capacity": market_capacity,
                 "priority": ranked_users,
-                "request_time": team_profiles[team_id].get("created_at") or target_round.get("created_at"),
+                "request_time": profile.get("created_at") or target_round.get("created_at"),
+                "price": market_price,
+                "sustainability": sustainability,
             }
         )
 
@@ -422,7 +449,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         matched_users = [str(uid) for uid in (market_to_users.get(team_id) or [])]
         matched_count = len(matched_users)
 
-        sale_price_per_user = float(GAME_SETTINGS.price_per_user)
+        sale_price_per_user = float(profile.get("price_per_user", GAME_SETTINGS.price_per_user))
         avg_cost_score = float(profile.get("avg_cost", 0.0))
         cost_component_per_user = float(GAME_SETTINGS.cost_scale) * avg_cost_score
         avg_child_labor = float(profile.get("avg_child_labor", 0.0))
@@ -455,7 +482,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
     result["round_financials"] = {
         "formula": "realized_profit = matched_user_count * (sale_price_per_user - cost_scale*avg_cost_score - penalty_per_user)",
-        "price_per_user": float(GAME_SETTINGS.price_per_user),
+        "price_per_user": "team_submitted_price_per_user",
         "cost_scale": float(GAME_SETTINGS.cost_scale),
         "team_financials": team_round_financials,
         "round_profit_total": float(round_profit_total),

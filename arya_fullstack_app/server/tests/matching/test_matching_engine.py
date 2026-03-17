@@ -9,7 +9,7 @@ from app.matching_engine import GUROBI_AVAILABLE, run_market_matching
 from app.mincost_agent import DEFAULT_XLSX_PATH, load_supplier_user_tables
 from app.settings import GAME_SETTINGS
 
-_VALID_SOLVERS = {"stable_gale_shapley", "gurobi_stable_lexicographic"}
+_VALID_SOLVERS = {"stable_gale_shapley", "gurobi_stable_lexicographic", "market_demand_v1"}
 
 
 def _assert_capacity_respected(result: dict, market_options: list[dict]) -> None:
@@ -455,7 +455,7 @@ def test_many_to_one_matching_with_capacity_8() -> None:
 
 
 def test_default_solver_mode_uses_stable_gale_shapley() -> None:
-    """Without MATCHING_SOLVER=gurobi, the engine MUST use the stable Gale-Shapley fallback."""
+    """Without explicit solver override, the engine should use market demand mode."""
     prev = os.environ.pop("MATCHING_SOLVER", None)
     try:
         users_payload = [
@@ -469,9 +469,8 @@ def test_default_solver_mode_uses_stable_gale_shapley() -> None:
 
         result = run_market_matching(users=users_payload, market_options=market_options)
 
-        assert result["meta"]["solver"] == "stable_gale_shapley", (
-            f"Expected fallback solver but got: {result['meta']['solver']!r}. "
-            "Set MATCHING_SOLVER=gurobi to use Gurobi."
+        assert result["meta"]["solver"] == "market_demand_v1", (
+            f"Expected market demand solver but got: {result['meta']['solver']!r}."
         )
     finally:
         if prev is not None:
@@ -479,7 +478,7 @@ def test_default_solver_mode_uses_stable_gale_shapley() -> None:
 
 
 def test_gurobi_mode_falls_back_to_stable_when_unavailable(monkeypatch) -> None:
-    """If MATCHING_SOLVER=gurobi but Gurobi is not installed, engine must fall back to stable_gale_shapley."""
+    """If MATCHING_SOLVER=gurobi is requested, engine should route to market demand and mark deprecation."""
     monkeypatch.setenv("MATCHING_SOLVER", "gurobi")
     monkeypatch.setattr(_engine_module, "GUROBI_AVAILABLE", False)
 
@@ -492,9 +491,10 @@ def test_gurobi_mode_falls_back_to_stable_when_unavailable(monkeypatch) -> None:
 
     result = _engine_module.run_market_matching(users=users_payload, market_options=market_options)
 
-    assert result["meta"]["solver"] == "stable_gale_shapley", (
-        f"Expected fallback when Gurobi unavailable, got: {result['meta']['solver']!r}"
+    assert result["meta"]["solver"] == "market_demand_v1", (
+        f"Expected market demand routing for deprecated gurobi mode, got: {result['meta']['solver']!r}"
     )
+    assert result["meta"].get("deprecated_solver_requested") is True
     assert result["user_to_market"]["u1"] == "m1"
 
 

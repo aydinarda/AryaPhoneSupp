@@ -118,10 +118,11 @@ def get_supplier_overview() -> list[dict[str, Any]]:
     return out.to_dict(orient="records")
 
 
-def _build_cfg(objective: str):
+def _build_cfg(objective: str, price_per_user: float | None = None):
+    price_value = GAME_SETTINGS.price_per_user if price_per_user is None else max(0.0, float(price_per_user))
     kwargs = dict(
         served_users=GAME_SETTINGS.served_users,
-        price_per_user=GAME_SETTINGS.price_per_user,
+        price_per_user=price_value,
         cost_scale=GAME_SETTINGS.cost_scale,
         env_cap=GAME_SETTINGS.env_cap,
         social_cap=GAME_SETTINGS.social_cap,
@@ -132,9 +133,9 @@ def _build_cfg(objective: str):
     return MaxUtilConfig(**kwargs)
 
 
-def evaluate_manual(objective: str, picks: list[str]) -> dict[str, Any]:
+def evaluate_manual(objective: str, picks: list[str], price_per_user: float | None = None) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
-    cfg = _build_cfg(objective)
+    cfg = _build_cfg(objective, price_per_user=price_per_user)
     return manual_metrics(suppliers_df, users_df, FIXED_POLICY, cfg, [str(x) for x in picks])
 
 

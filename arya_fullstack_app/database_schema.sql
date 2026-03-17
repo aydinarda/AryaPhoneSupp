@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 -- Backward-compatible extensions for session/round-scoped gameplay
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS session_code TEXT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS round_no INTEGER;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS price_per_user DOUBLE PRECISION;
 
 -- Indexes (for performance)
 CREATE INDEX IF NOT EXISTS submissions_team_created_at_idx ON submissions(team, created_at DESC);
