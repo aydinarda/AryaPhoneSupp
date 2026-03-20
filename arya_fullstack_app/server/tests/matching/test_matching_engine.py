@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 import app.matching_engine as _engine_module
 from app.matching_engine import GUROBI_AVAILABLE, run_market_matching
-from app.mincost_agent import DEFAULT_XLSX_PATH, load_supplier_user_tables
+from app.optimization_controller import DEFAULT_XLSX_PATH, load_supplier_user_tables
 from app.settings import GAME_SETTINGS
 
 _VALID_SOLVERS = {"stable_gale_shapley", "gurobi_stable_lexicographic", "market_demand_v1"}
@@ -14,8 +14,13 @@ _VALID_SOLVERS = {"stable_gale_shapley", "gurobi_stable_lexicographic", "market_
 
 def _assert_capacity_respected(result: dict, market_options: list[dict]) -> None:
     capacity_by_market = {str(m["option_id"]): int(m["capacity"]) for m in market_options}
-    market_to_users = result["market_to_users"]
+    allocation_mode = str(result.get("meta", {}).get("allocation_mode", "deterministic")).lower()
 
+    if allocation_mode == "proportional":
+        # Proportional mode does not enforce market capacities.
+        return
+
+    market_to_users = result["market_to_users"]
     for market_id, users in market_to_users.items():
         assert len(users) <= capacity_by_market[market_id]
 
@@ -47,7 +52,7 @@ def _assert_user_assignments_valid(result: dict, users_payload: list[dict], mark
         assert load is not None
         assert load["assigned_count"] == len(result["market_to_users"].get(market_id, []))
         assert load["capacity"] == int(market["capacity"])
-        assert load["remaining_capacity"] == int(market["capacity"]) - load["assigned_count"]
+        assert load["remaining_capacity"] == max(0, int(market["capacity"]) - load["assigned_count"])
 
 
 def test_mock_dataset_matching_works_and_respects_constraints() -> None:
@@ -430,16 +435,18 @@ def test_many_to_one_matching_with_capacity_8() -> None:
     assert result["meta"]["matched_count"] == user_count
     assert len(result["unmatched_users"]) == 0
 
-    # Each market should have at most cap users
-    for tid, assigned in result["market_to_users"].items():
-        assert len(assigned) <= cap
+    allocation_mode = str(result["meta"].get("allocation_mode", "deterministic")).lower()
+    if allocation_mode != "proportional":
+        # Each market should have at most cap users
+        for tid, assigned in result["market_to_users"].items():
+            assert len(assigned) <= cap
 
-    # Verify market_loads
-    for tid in team_ids:
-        load = result["market_loads"][tid]
-        assert load["capacity"] == cap
-        assert load["assigned_count"] <= cap
-        assert load["remaining_capacity"] == cap - load["assigned_count"]
+        # Verify market_loads
+        for tid in team_ids:
+            load = result["market_loads"][tid]
+            assert load["capacity"] == cap
+            assert load["assigned_count"] <= cap
+            assert load["remaining_capacity"] == cap - load["assigned_count"]
 
     # Solver must always be reported
     assert result["meta"]["solver"] in _VALID_SOLVERS

@@ -97,7 +97,6 @@ For deployment:
 - `GET /api/config` - Game settings
 - `GET /api/suppliers` - Supplier list
 - `POST /api/manual-eval` - Manual evaluation
-- `POST /api/benchmark` - Gurobi optimal solution
 - `POST /api/submit` - Submit to leaderboard
 - `GET /api/leaderboard?sort_by=profit&feasible_only=false` - Leaderboard
 
@@ -121,8 +120,8 @@ For deployment:
 - Make sure your Supabase credentials are correct
 
 **Gurobi error?**
-- Gurobi is required for the benchmark
-- Gurobi is not required for manual evaluation
+- Gurobi-backed optimization remains on the backend for internal optimization flows
+- Manual evaluation endpoint does not require running benchmark endpoints
 
 **Leaderboard is empty?**
 - No one may have submitted yet

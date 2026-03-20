@@ -24,7 +24,6 @@ const ROUND_SYNC_INTERVAL_MS = 3000;
 const el = {
   supplierList: document.getElementById("supplierList"),
   manualMetrics: document.getElementById("manualMetrics"),
-  benchmarkMetrics: document.getElementById("benchmarkMetrics"),
   statusText: document.getElementById("statusText"),
   configInfo: document.getElementById("configInfo"),
   benchmarkProfitPanel: document.getElementById("benchmarkProfitPanel"),
@@ -608,18 +607,6 @@ async function runManual() {
   }
 }
 
-async function runBenchmark() {
-  try {
-    const res = await api("/api/benchmark", {
-      method: "POST",
-      body: JSON.stringify({ objective: state.objective }),
-    });
-    renderMetrics(el.benchmarkMetrics, "Benchmark", res);
-  } catch (e) {
-    el.statusText.textContent = e.message;
-  }
-}
-
 async function submit() {
   try {
     const sessionMeta = [
@@ -838,7 +825,6 @@ function setupEvents() {
   });
 
   document.getElementById("btnManual").addEventListener("click", runManual);
-  document.getElementById("btnBenchmark").addEventListener("click", runBenchmark);
   document.getElementById("btnSubmit").addEventListener("click", submit);
   document.getElementById("btnRefreshLeaderboard").addEventListener("click", loadLeaderboard);
   

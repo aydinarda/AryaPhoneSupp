@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .mincost_agent import Policy
+from .optimization_controller import Policy
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ GAME_SETTINGS = GameSettings()
 FIXED_POLICY = Policy(
     env_mult=1.0,
     social_mult=1.0,
-    cost_mult=1.0,
+    cost_mult=0.0,
     strategic_mult=1.0,
     improvement_mult=1.0,
     low_quality_mult=1.0,

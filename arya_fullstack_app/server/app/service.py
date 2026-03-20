@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from .mincost_agent import (
+from .optimization_controller import (
     DEFAULT_XLSX_PATH,
     GUROBI_AVAILABLE,
     MaxProfitAgent,
@@ -167,9 +167,9 @@ def _get_both_benchmarks_cached() -> dict[str, Any]:
     results: dict[str, Any] = {}
     for obj in ("max_profit", "max_utility"):
         try:
-            r = run_benchmark(obj)
-            r["available"] = True
-            results[obj] = r
+            result = run_benchmark(obj)
+            result["available"] = True
+            results[obj] = result
         except Exception as exc:
             results[obj] = {"available": False, "error": str(exc), "metrics": {}, "feasible": False}
     return results

@@ -21,7 +21,6 @@ This folder contains a server/client version of the app migrated from the existi
 
 ## Notes
 
-- The backend imports the existing `MinCostAgent.py` module directly.
+- The backend imports the optimization controller module.
 - For DB credentials, environment variables (`SUPABASE_URL`, `SUPABASE_ANON_KEY`) are checked first.
 - If environment variables are missing, values are read from the root `secrets.toml` file.
-- `gurobipy` must be available for benchmark endpoints.
