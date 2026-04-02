@@ -37,15 +37,57 @@ def apply_policy_bans(model: Any, y, suppliers_df: pd.DataFrame, policy: Any) ->
                 model.addConstr(y[str(row["supplier_id"])] == 0)
 
 
+def _density_weighted_sums(
+    users_df: pd.DataFrame,
+    density_weights: Optional[Dict[str, float]],
+) -> tuple:
+    """
+    Return density-weighted sums of user preference weights.
+
+    density_weights: {user_id -> unnormalised weight}
+                     If None, all users are weighted equally.
+    Returns: (w_env, w_soc, w_str, w_imp, w_lq, w_cost, total_users)
+    """
+    df = users_df.copy()
+    df["user_id"] = df["user_id"].astype(str)
+
+    if not len(df):
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0
+
+    if density_weights:
+        total_w = sum(density_weights.values())
+        if total_w <= 0.0:
+            total_w = 1.0
+        weights = {uid: w / total_w for uid, w in density_weights.items()}
+        w_env = sum(float(row["w_env"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+        w_soc = sum(float(row["w_social"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+        w_str = sum(float(row["w_strategic"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+        w_imp = sum(float(row["w_improvement"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+        w_lq  = sum(float(row["w_low_quality"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+        w_cost = sum(float(row["w_cost"]) * weights.get(str(row["user_id"]), 0.0) for _, row in df.iterrows())
+    else:
+        n = float(len(df))
+        w_env  = float(df["w_env"].sum()) / n
+        w_soc  = float(df["w_social"].sum()) / n
+        w_str  = float(df["w_strategic"].sum()) / n
+        w_imp  = float(df["w_improvement"].sum()) / n
+        w_lq   = float(df["w_low_quality"].sum()) / n
+        w_cost = float(df["w_cost"].sum()) / n
+
+    return w_env, w_soc, w_str, w_imp, w_lq, w_cost, len(df)
+
+
 def solve_best_over_k(
     suppliers_df: pd.DataFrame,
     users_df: pd.DataFrame,
     policy: Any,
-    served_users: int,
     env_cap: float,
     social_cap: float,
     output_flag: int,
     objective_mode: str,
+    density_weights: Optional[Dict[str, float]] = None,
+    # kept for backward compatibility — ignored, use density_weights instead
+    served_users: int = 0,
 ) -> Optional[Dict[str, Any]]:
     if not GUROBI_AVAILABLE:
         raise RuntimeError("gurobipy is not available")
@@ -59,15 +101,7 @@ def solve_best_over_k(
     if supplier_count == 0:
         return None
 
-    selected_users = select_last_n_users(users_df, served_users)
-    if len(selected_users):
-        w_env = float(selected_users["w_env"].sum())
-        w_soc = float(selected_users["w_social"].sum())
-        w_str = float(selected_users["w_strategic"].sum())
-        w_imp = float(selected_users["w_improvement"].sum())
-        w_lq = float(selected_users["w_low_quality"].sum())
-    else:
-        w_env = w_soc = w_str = w_imp = w_lq = 0.0
+    w_env, w_soc, w_str, w_imp, w_lq, w_cost, _ = _density_weighted_sums(users_df, density_weights)
 
     env = dict(zip(df["supplier_id"], df["env_risk"].astype(float)))
     soc = dict(zip(df["supplier_id"], df["social_risk"].astype(float)))
@@ -156,23 +190,59 @@ def solve_best_over_k(
     return best
 
 
-def compute_utility_total(users_df: pd.DataFrame, served_users: int, policy: Any, best: Dict[str, Any]) -> float:
-    selected_users = select_last_n_users(users_df, served_users)
-    if not len(selected_users):
+def compute_utility_total(
+    users_df: pd.DataFrame,
+    policy: Any,
+    best: Dict[str, Any],
+    density_weights: Optional[Dict[str, float]] = None,
+    # kept for backward compatibility — ignored
+    served_users: int = 0,
+    price_per_user: float = 0.0,
+) -> float:
+    """
+    Density-weighted total utility across all users.
+
+    Utility = quality dimensions only (env, social, strategic, improvement, low_quality).
+    Price is excluded — profit is tracked separately to keep the benchmark bounded.
+
+    Each user's contribution is weighted by their density weight (normalised to sum 1),
+    then scaled by N so the result is a total rather than an average.
+    """
+    if not len(users_df):
         return 0.0
 
     pol = policy.clamp_nonnegative()
-    ut_env = 5.0 - float(best["avg_env"])
-    ut_social = 5.0 - float(best["avg_social"])
-    ut_strategic = float(best["avg_strategic"]) - 1.0
+    ut_env         = 5.0 - float(best["avg_env"])
+    ut_social      = 5.0 - float(best["avg_social"])
+    ut_strategic   = float(best["avg_strategic"]) - 1.0
     ut_improvement = float(best["avg_improvement"]) - 1.0
-    ut_lq = 5.0 - float(best["avg_low_quality"])
+    ut_lq          = 5.0 - float(best["avg_low_quality"])
 
-    utility_per_user = (
-        selected_users["w_env"] * (pol.env_mult * ut_env)
-        + selected_users["w_social"] * (pol.social_mult * ut_social)
-        + selected_users["w_strategic"] * (pol.strategic_mult * ut_strategic)
-        + selected_users["w_improvement"] * (pol.improvement_mult * ut_improvement)
-        + selected_users["w_low_quality"] * (pol.low_quality_mult * ut_lq)
-    )
-    return float(utility_per_user.sum())
+    df = users_df.copy()
+    df["user_id"] = df["user_id"].astype(str)
+    n = float(len(df))
+
+    if density_weights:
+        total_w = sum(density_weights.values())
+        if total_w <= 0.0:
+            total_w = 1.0
+        utility_total = 0.0
+        for _, row in df.iterrows():
+            w = density_weights.get(str(row["user_id"]), 0.0) / total_w * n
+            utility_total += w * (
+                float(row["w_env"])           * (pol.env_mult         * ut_env)
+                + float(row["w_social"])      * (pol.social_mult      * ut_social)
+                + float(row["w_strategic"])   * (pol.strategic_mult   * ut_strategic)
+                + float(row["w_improvement"]) * (pol.improvement_mult * ut_improvement)
+                + float(row["w_low_quality"]) * (pol.low_quality_mult * ut_lq)
+            )
+        return utility_total
+    else:
+        utility_per_user = (
+            df["w_env"]           * (pol.env_mult         * ut_env)
+            + df["w_social"]      * (pol.social_mult      * ut_social)
+            + df["w_strategic"]   * (pol.strategic_mult   * ut_strategic)
+            + df["w_improvement"] * (pol.improvement_mult * ut_improvement)
+            + df["w_low_quality"] * (pol.low_quality_mult * ut_lq)
+        )
+        return float(utility_per_user.sum())

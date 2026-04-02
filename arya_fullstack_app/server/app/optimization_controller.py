@@ -188,6 +188,8 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
         "cost": "w_cost",
         "cost_score": "w_cost",
         "w_cost": "w_cost",
+        "price sensitivity": "w_cost",
+        "price_sensitivity": "w_cost",
 
         "strategic importance": "w_strategic",
         "strategic": "w_strategic",
@@ -212,7 +214,7 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
         r"^user( id)?$": "user_id",
         r"^(env|environment|environmental)( risk| score)?$": "w_env",
         r"^social( risk| score)?$": "w_social",
-        r"^(cost|price)( risk| score)?$": "w_cost",
+        r"^(cost|price)( risk| score| sensitivity)?$": "w_cost",
         r"^strategic( importance)?( score)?$": "w_strategic",
         r"^improvement( potential)?( score)?$": "w_improvement",
         r"^(low product quality|product quality|low quality|lowquality|quality)( risk| score)?$": "w_low_quality",

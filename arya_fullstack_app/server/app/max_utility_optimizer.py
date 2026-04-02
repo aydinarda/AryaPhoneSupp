@@ -8,13 +8,21 @@ from .optimizer_common import GUROBI_AVAILABLE, compute_utility_total, solve_bes
 
 
 class MaxUtilityAgent:
-    def __init__(self, suppliers_df: pd.DataFrame, users_df: pd.DataFrame, policy: Any, cfg: Any):
+    def __init__(
+        self,
+        suppliers_df: pd.DataFrame,
+        users_df: pd.DataFrame,
+        policy: Any,
+        cfg: Any,
+        density_weights: Dict[str, float] | None = None,
+    ):
         if not GUROBI_AVAILABLE:
             raise RuntimeError("gurobipy is not available")
         self.suppliers = suppliers_df.copy()
         self.users = users_df.copy()
         self.policy = policy.clamp_nonnegative()
         self.cfg = cfg
+        self.density_weights = density_weights
 
     def solve(self) -> Dict[str, Any]:
         cfg = self.cfg
@@ -23,11 +31,11 @@ class MaxUtilityAgent:
             self.suppliers,
             self.users,
             self.policy,
-            served_users=int(cfg.served_users),
             env_cap=float(cfg.env_cap),
             social_cap=float(cfg.social_cap),
             output_flag=int(cfg.output_flag),
             objective_mode="utility",
+            density_weights=self.density_weights,
         )
 
         if best is None:
@@ -43,11 +51,14 @@ class MaxUtilityAgent:
                 },
             }
 
-        served = min(int(cfg.served_users), int(len(self.users)))
+        total_users = len(self.users)
         profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * float(best["avg_cost"])
-        profit_total = served * profit_per_user
+        profit_total = total_users * profit_per_user
 
-        utility_total = compute_utility_total(self.users, served, self.policy, best)
+        utility_total = compute_utility_total(
+            self.users, self.policy, best,
+            density_weights=self.density_weights,
+        )
 
         feasible = (float(best["avg_env"]) <= float(cfg.env_cap) + 1e-12) and (
             float(best["avg_social"]) <= float(cfg.social_cap) + 1e-12

@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from .beta_density import BetaDensity
 from .optimization_controller import (
     DEFAULT_XLSX_PATH,
     GUROBI_AVAILABLE,
@@ -121,7 +122,6 @@ def get_supplier_overview() -> list[dict[str, Any]]:
 def _build_cfg(objective: str, price_per_user: float | None = None):
     price_value = GAME_SETTINGS.price_per_user if price_per_user is None else max(0.0, float(price_per_user))
     kwargs = dict(
-        served_users=GAME_SETTINGS.served_users,
         price_per_user=price_value,
         cost_scale=GAME_SETTINGS.cost_scale,
         env_cap=GAME_SETTINGS.env_cap,
@@ -133,13 +133,35 @@ def _build_cfg(objective: str, price_per_user: float | None = None):
     return MaxUtilConfig(**kwargs)
 
 
+def build_density_weights(users_df: Any) -> dict[str, float]:
+    """
+    Produce density weights for all users by sorting them by w_cost
+    and evaluating a Beta(3, 3) density at each user's position on [0, 1].
+
+    Returns {user_id -> unnormalised weight}.
+    The default Beta(3, 3) symmetric bell can be changed once the admin
+    configuration panel is wired up.
+    """
+    df = users_df.copy()
+    df["user_id"] = df["user_id"].astype(str)
+    df = df.sort_values("w_cost").reset_index(drop=True)
+    n = len(df)
+    if n == 0:
+        return {}
+    bd = BetaDensity(alpha=3.0, beta=3.0)
+    return {
+        str(row["user_id"]): bd.density_at((i + 0.5) / n)
+        for i, (_, row) in enumerate(df.iterrows())
+    }
+
+
 def evaluate_manual(objective: str, picks: list[str], price_per_user: float | None = None) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
     cfg = _build_cfg(objective, price_per_user=price_per_user)
     return manual_metrics(suppliers_df, users_df, FIXED_POLICY, cfg, [str(x) for x in picks])
 
 
-def run_benchmark(objective: str) -> dict[str, Any]:
+def run_benchmark(objective: str, density_weights: dict[str, float] | None = None) -> dict[str, Any]:
     if not GUROBI_AVAILABLE:
         raise RuntimeError("gurobipy is not available")
 
@@ -147,13 +169,12 @@ def run_benchmark(objective: str) -> dict[str, Any]:
     cfg = _build_cfg(objective)
 
     if objective == "max_profit":
-        return MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg).solve()
-    return MaxUtilAgent(suppliers_df, users_df, FIXED_POLICY, cfg).solve()
+        return MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg, density_weights=density_weights).solve()
+    return MaxUtilAgent(suppliers_df, users_df, FIXED_POLICY, cfg, density_weights=density_weights).solve()
 
 
 def get_game_constants() -> dict[str, Any]:
     return {
-        "served_users": GAME_SETTINGS.served_users,
         "env_cap": GAME_SETTINGS.env_cap,
         "social_cap": GAME_SETTINGS.social_cap,
         "cost_scale": GAME_SETTINGS.cost_scale,
@@ -164,10 +185,12 @@ def get_game_constants() -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _get_both_benchmarks_cached() -> dict[str, Any]:
+    _, users_df = _get_tables_cached()
+    density_weights = build_density_weights(users_df)
     results: dict[str, Any] = {}
     for obj in ("max_profit", "max_utility"):
         try:
-            result = run_benchmark(obj)
+            result = run_benchmark(obj, density_weights=density_weights)
             result["available"] = True
             results[obj] = result
         except Exception as exc:
