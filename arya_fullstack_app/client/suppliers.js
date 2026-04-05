@@ -61,6 +61,9 @@ export async function loadConfigAndSuppliers() {
   const [config, suppliers] = await Promise.all([api("/api/config"), api("/api/suppliers")]);
   state.config = config;
   state.suppliers = suppliers;
+  if (Number.isFinite(Number(config.num_segments)) && config.num_segments > 0) {
+    state.numSegments = Number(config.num_segments);
+  }
   if (el.pricePerUser && (el.pricePerUser.value === "" || el.pricePerUser.value == null)) {
     el.pricePerUser.value = Number.isFinite(Number(config.price_per_user)) ? String(config.price_per_user) : "100";
   }

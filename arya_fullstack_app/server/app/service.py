@@ -174,12 +174,14 @@ def run_benchmark(objective: str, density_weights: dict[str, float] | None = Non
 
 
 def get_game_constants() -> dict[str, Any]:
+    _, users_df = get_tables()
     return {
         "env_cap": GAME_SETTINGS.env_cap,
         "social_cap": GAME_SETTINGS.social_cap,
         "cost_scale": GAME_SETTINGS.cost_scale,
         "price_per_user": GAME_SETTINGS.price_per_user,
         "gurobi_available": GUROBI_AVAILABLE,
+        "num_segments": int(len(users_df)),
     }
 
 

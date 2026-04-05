@@ -18,6 +18,7 @@ export const state = {
   roundSyncId: null,
   betaAlpha: 3.0,
   betaBeta: 3.0,
+  numSegments: 0,
 };
 
 export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
