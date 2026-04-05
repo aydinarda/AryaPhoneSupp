@@ -1,5 +1,6 @@
 import { state, el, ROUND_SYNC_INTERVAL_MS } from "./state.js";
 import { api } from "./api.js";
+import { renderDistributionChart } from "./distribution.js";
 
 export function clearRoundTimer() {
   if (state.roundTimerId) {
@@ -93,12 +94,26 @@ export function renderMatchingResult(payload) {
     .join("");
 }
 
+function _applyBetaFromData(data) {
+  const a = Number(data.beta_alpha);
+  const b = Number(data.beta_beta);
+  let changed = false;
+  if (Number.isFinite(a) && a > 0 && a !== state.betaAlpha) { state.betaAlpha = a; changed = true; }
+  if (Number.isFinite(b) && b > 0 && b !== state.betaBeta) { state.betaBeta = b; changed = true; }
+  if (changed) {
+    if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
+    if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
+    renderDistributionChart();
+  }
+}
+
 export async function loadCurrentRound() {
   if (!state.gameCode) return;
   try {
     const data = await api(`/api/sessions/${state.gameCode}/rounds/current`);
     const r = data.round;
     state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
+    _applyBetaFromData(data);
     if (!r) {
       state.roundNo = null;
       state.roundEndsAt = null;
@@ -160,15 +175,12 @@ export async function startRound() {
 
   const durationRaw = Number(el.roundTimerSeconds?.value || 0);
   const durationSeconds = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.floor(durationRaw) : null;
-  const capacityRaw = Number(el.marketCapacity?.value || 8);
-  const marketCapacity = Number.isFinite(capacityRaw) && capacityRaw > 0 ? Math.floor(capacityRaw) : 8;
 
   try {
     const data = await api(`/api/sessions/${state.gameCode}/rounds/start`, {
       method: "POST",
       body: JSON.stringify({
         duration_seconds: durationSeconds,
-        market_capacity: marketCapacity,
       }),
     });
     state.roundNo = data.round_no;

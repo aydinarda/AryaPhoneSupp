@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260313-1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260405-1" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -52,8 +52,19 @@
             <div id="adminControls" class="admin-controls hidden">
               <label for="roundTimerSeconds">Round Timer (seconds, optional)</label>
               <input id="roundTimerSeconds" type="number" min="0" step="10" placeholder="Ex: 120" />
-              <label for="marketCapacity">User Capacity Per Team Product</label>
-              <input id="marketCapacity" type="number" min="1" step="1" value="8" />
+
+              <label class="section-label">Segment Density Distribution</label>
+              <div class="beta-params-row">
+                <div class="beta-param">
+                  <label for="betaAlpha">Alpha (α)</label>
+                  <input id="betaAlpha" type="number" min="0.1" step="0.1" value="3.0" />
+                </div>
+                <div class="beta-param">
+                  <label for="betaBeta">Beta (β)</label>
+                  <input id="betaBeta" type="number" min="0.1" step="0.1" value="3.0" />
+                </div>
+              </div>
+
               <div class="actions-row compact">
                 <button id="btnStartRound">Start Round</button>
                 <button id="btnRunMatch" class="primary">Match</button>
@@ -88,6 +99,7 @@
         </section>
 
         <section class="card info" id="configInfo">Loading...</section>
+
         <section class="card" id="benchmarkSummary">
           <h3 style="margin:0 0 12px;">Benchmark Results (Optimal Solutions)</h3>
           <div class="layout-2">
@@ -95,6 +107,13 @@
             <div id="benchmarkUtilPanel"></div>
           </div>
         </section>
+
+        <section class="card" id="distributionCard">
+          <h3 style="margin:0 0 8px;">Segment Density Distribution</h3>
+          <p class="hint" style="margin:0 0 8px;">Shows how customer segments are weighted across the market. Admin can adjust the shape via α and β parameters.</p>
+          <div id="distributionChart" style="min-height:220px;"></div>
+        </section>
+
         <section class="card">
           <div class="tabs">
             <button class="tab" data-tab="leaderboard">Leaderboard</button>
@@ -121,6 +140,7 @@
 
           <div class="tab-panel hidden" id="panel-leaderboard">
             <div class="actions-row">
+              <button id="btnBackToSelection">← Back to Selection</button>
               <button id="btnRefreshLeaderboard">Refresh</button>
               <select id="sortSelect">
                 <option value="profit">Sort by Profit</option>
@@ -161,6 +181,6 @@
       </section>
     </div>
 
-    <script type="module" src="/assets/app.js?v=20260318-2"></script>
+    <script type="module" src="/assets/app.js?v=20260405-1"></script>
   </body>
 </html>

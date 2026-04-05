@@ -18,11 +18,18 @@ from ..db import (
 )
 from ..matching_engine import run_market_matching
 from ..service import get_tables
-from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionCreateRequest
+from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
 from ..session_service import create_session, get_session, join_session
 from ..settings import FIXED_POLICY, GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+# In-memory beta distribution config per session code.
+# Resets on server restart (acceptable for a classroom game).
+_session_beta: dict[str, tuple[float, float]] = {}
+
+_DEFAULT_ALPHA = 3.0
+_DEFAULT_BETA = 3.0
 
 
 def _extract_rows(res: Any) -> list[dict[str, Any]]:
@@ -254,8 +261,11 @@ def get_current_round(code: str) -> dict[str, Any]:
     total_rounds = _resolve_total_rounds(session_row)
 
     rows = _extract_rows(fetch_active_round(session_token))
+    normalized = (code or "").strip().upper()
+    beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+
     if not rows:
-        return {"round": None, "total_rounds": total_rounds}
+        return {"round": None, "total_rounds": total_rounds, "beta_alpha": beta_alpha, "beta_beta": beta_beta}
 
     row = rows[0]
     return {
@@ -268,7 +278,16 @@ def get_current_round(code: str) -> dict[str, Any]:
             "is_active": bool(row.get("is_active", False)),
         },
         "total_rounds": total_rounds,
+        "beta_alpha": beta_alpha,
+        "beta_beta": beta_beta,
     }
+
+
+@router.patch("/{code}/config")
+def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any]:
+    normalized = (code or "").strip().upper()
+    _session_beta[normalized] = (float(req.beta_alpha), float(req.beta_beta))
+    return {"ok": True, "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta}
 
 
 @router.post("/{code}/match")

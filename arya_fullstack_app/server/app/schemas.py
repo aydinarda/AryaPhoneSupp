@@ -33,6 +33,11 @@ class RoundStartRequest(BaseModel):
     market_capacity: int = 8
 
 
+class SessionConfigRequest(BaseModel):
+    beta_alpha: float = Field(default=3.0, gt=0)
+    beta_beta: float = Field(default=3.0, gt=0)
+
+
 class MatchRunRequest(BaseModel):
     round_no: Optional[int] = None
 

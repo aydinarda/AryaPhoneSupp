@@ -64,7 +64,7 @@ export async function loadConfigAndSuppliers() {
   if (el.pricePerUser && (el.pricePerUser.value === "" || el.pricePerUser.value == null)) {
     el.pricePerUser.value = Number.isFinite(Number(config.price_per_user)) ? String(config.price_per_user) : "100";
   }
-  el.configInfo.textContent = `Served users: ${config.served_users} | Risk caps: avg env ≤ ${config.env_cap}, avg social ≤ ${config.social_cap} | Price per user: ${config.price_per_user} | Cost scale: ${config.cost_scale}`;
+  el.configInfo.textContent = `Risk caps: avg env ≤ ${config.env_cap}, avg social ≤ ${config.social_cap} | Price per user: ${config.price_per_user} | Cost scale: ${config.cost_scale}`;
   renderSuppliers();
 }
 

@@ -16,6 +16,8 @@ export const state = {
   roundEndsAt: null,
   roundTimerId: null,
   roundSyncId: null,
+  betaAlpha: 3.0,
+  betaBeta: 3.0,
 };
 
 export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
@@ -65,11 +67,14 @@ export const el = {
   roundSummary: document.getElementById("roundSummary"),
   adminControls: document.getElementById("adminControls"),
   roundTimerSeconds: document.getElementById("roundTimerSeconds"),
-  marketCapacity: document.getElementById("marketCapacity"),
+  betaAlpha: document.getElementById("betaAlpha"),
+  betaBeta: document.getElementById("betaBeta"),
   btnStartRound: document.getElementById("btnStartRound"),
   btnRunMatch: document.getElementById("btnRunMatch"),
   adminRoundHint: document.getElementById("adminRoundHint"),
   matchingResultCard: document.getElementById("matchingResultCard"),
   matchingResultText: document.getElementById("matchingResultText"),
   matchingTableBody: document.querySelector("#matchingTable tbody"),
+  distributionChart: document.getElementById("distributionChart"),
+  btnBackToSelection: document.getElementById("btnBackToSelection"),
 };

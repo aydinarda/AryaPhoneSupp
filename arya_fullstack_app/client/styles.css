@@ -125,6 +125,34 @@ body {
   margin-bottom: 0;
 }
 
+.section-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 8px;
+  display: block;
+}
+
+.beta-params-row {
+  display: flex;
+  gap: 10px;
+}
+
+.beta-param {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.beta-param label {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.beta-param input {
+  width: 100%;
+}
+
 #matchingResultCard h3 {
   margin-top: 0;
 }

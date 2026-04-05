@@ -10,6 +10,7 @@ import {
   loadLatestMatch,
 } from "./round.js";
 import { loadBenchmarkSummary } from "./benchmark.js";
+import { renderDistributionChart } from "./distribution.js";
 
 export function saveLobbyState() {
   const payload = {
@@ -59,6 +60,7 @@ export function showGameScreen() {
   renderSessionSummary();
   renderAdminControls();
   renderRoundSummary();
+  renderDistributionChart();
   startRoundSync();
   loadBenchmarkSummary();
 }
