@@ -1,10 +1,11 @@
 # Mathematical Models for Supplier-Set Averaging Game
 
-This document formalizes the two optimization models implemented in `app/mincost_agent.py`:
+This document formalizes the models implemented in the server:
 1. Max Profit benchmark
 2. Max Utility benchmark
+3. Multinomial Logit (MNL) demand model
 
-The formulations below are consistent with the current code path (`_solve_best_over_k`, `MaxProfitAgent`, `MaxUtilAgent`, and `manual_metrics`).
+The formulations below are consistent with the current code path (`_solve_best_over_k`, `MaxProfitAgent`, `MaxUtilAgent`, `manual_metrics`, and `mnl_market`).
 
 ## 1. Notation
 
@@ -152,8 +153,97 @@ This is mathematically consistent with the implemented benchmark behavior.
 - Profit benchmark wrapper: `MaxProfitAgent.solve`
 - Utility benchmark wrapper: `MaxUtilAgent.solve`
 
-## 8. Validation Notes
+## 8. MNL Demand Model (`app/mnl_market.py`)
+
+### 8.1 Overview
+
+The Multinomial Logit (MNL) model determines how each customer segment splits
+its demand among competing buyers in a single round.
+
+### 8.2 Notation additions
+
+- `S`: set of customer segments (loaded from Excel User sheet, sorted by `w_cost`)
+- `d_s`: density weight of segment `s` (from `BetaDensity`, normalised so `Σ d_s = 1`)
+- `B`: set of competing buyers (teams) in the round
+- `p_i`: price per user set by buyer `i`
+- `q_{i,s}`: quality utility that buyer `i` delivers to segment `s` (price-free)
+
+### 8.3 Quality utility (price-free)
+
+```
+q_{i,s} = w_env_s   * (5 - avg_env_i)
+         + w_social_s * (5 - avg_social_i)
+         + w_strategic_s  * (avg_strategic_i  - 1)
+         + w_improvement_s * (avg_improvement_i - 1)
+         + w_low_quality_s * (5 - avg_low_quality_i)
+```
+
+This is identical to the frictionless/benchmark utility formula.
+
+### 8.4 MNL logit (includes price)
+
+Price enters only the MNL choice model — not the utility comparison metric:
+
+```
+U_{i,s} = q_{i,s} - w_cost_s * p_i
+```
+
+### 8.5 MNL share for segment s
+
+```
+share_{i,s} = exp(U_{i,s}) / Σ_{j in B} exp(U_{j,s})
+```
+
+Computed with numerically stable softmax (subtract max logit before exp).
+
+Outside option: `u_outside = None` by default (all demand is served by buyers).
+Can be set to a calibrated float to model "no purchase" behaviour.
+
+### 8.6 Realized outcomes per buyer
+
+```
+demand_{i,s}        = d_s * share_{i,s}          (density-weighted)
+realized_earnings_i = Σ_s  p_i * demand_{i,s}
+realized_utility_i  = Σ_s  q_{i,s} * demand_{i,s}   (no price term)
+```
+
+`realized_utility` uses the price-free quality score so it is directly
+comparable with the frictionless and benchmark utility values.
+
+### 8.7 Parallelisation
+
+Each segment's MNL computation is independent.  `run_mnl_market()` dispatches
+all segments to a `ThreadPoolExecutor` and aggregates results after all futures
+complete.
+
+### 8.8 Example
+
+```python
+from app.mnl_market import BuyerProfile, run_mnl_market
+
+profiles = [
+    BuyerProfile("TeamA", price_per_user=90.0,
+                 avg_env=1.5, avg_social=1.8, avg_strategic=4.0,
+                 avg_improvement=4.0, avg_low_quality=1.2),
+    BuyerProfile("TeamB", price_per_user=110.0,
+                 avg_env=3.5, avg_social=3.0, avg_strategic=2.0,
+                 avg_improvement=2.0, avg_low_quality=3.5),
+]
+
+result = run_mnl_market(profiles, segments)   # segments: list[CustomerSegment]
+
+for name, br in result.buyer_results.items():
+    print(f"{name}: demand={br.total_demand:.3f}  "
+          f"earnings={br.realized_earnings:.2f}  "
+          f"utility={br.realized_utility:.4f}")
+# TeamA: demand=0.961  earnings=86.51  utility=2.500
+# TeamB: demand=0.039  earnings=4.27   utility=0.060
+```
+
+## 9. Validation Notes
 
 - If Gurobi is unavailable: benchmark methods raise `RuntimeError("gurobipy is not available")`.
 - If no feasible selection exists for all `k`: returns `feasible=False` with zero metrics.
 - Ban constraints are active only when corresponding policy penalty >= 0.5.
+- MNL `total_demand` across all buyers sums to 1.0 when `u_outside=None`.
+- Density weights are normalised inside `run_mnl_market`; raw Beta PDF values can be passed directly.
