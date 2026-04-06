@@ -26,14 +26,14 @@ function betaPDF(x, alpha, beta) {
   return Math.exp((alpha - 1) * Math.log(x) + (beta - 1) * Math.log(1 - x) - logB);
 }
 
-function buildCurve(alpha, beta, nPoints = 300) {
+function buildCurve(alpha, beta, N = 0, nPoints = 300) {
   const xs = [];
   const ys = [];
   // avoid exact 0 and 1 to prevent -Infinity
   for (let i = 1; i < nPoints; i++) {
-    const x = i / nPoints;
-    xs.push(x);
-    ys.push(betaPDF(x, alpha, beta));
+    const t = i / nPoints;  // normalised position in (0, 1)
+    xs.push(N > 1 ? t * N : t);  // scale to [0, N] when segments are known
+    ys.push(betaPDF(t, alpha, beta));
   }
   return { xs, ys };
 }
@@ -44,13 +44,14 @@ export function renderDistributionChart() {
 
   const alpha = state.betaAlpha;
   const beta  = state.betaBeta;
+  const N = state.numSegments;
 
   if (!alpha || !beta || alpha <= 0 || beta <= 0) {
     container.innerHTML = '<p class="hint">Invalid distribution parameters.</p>';
     return;
   }
 
-  const { xs, ys } = buildCurve(alpha, beta);
+  const { xs, ys } = buildCurve(alpha, beta, N);
 
   // Cap the y-axis at the 98th percentile to handle U-shape spikes
   const sorted = [...ys].sort((a, b) => a - b);
@@ -68,13 +69,37 @@ export function renderDistributionChart() {
     name: `Beta(α=${alpha}, β=${beta})`,
   };
 
+  let xaxisConfig;
+  if (N > 1) {
+    // Build tick marks at the centre of each group segment.
+    // Group i (1-indexed) occupies [i-1, i] in [0, N] space → centre at i-0.5.
+    const tickStep = Math.max(1, Math.ceil(N / 10));
+    const tickvals = [];
+    const ticktext = [];
+    for (let i = 1; i <= N; i += tickStep) {
+      tickvals.push(i - 0.5);
+      ticktext.push(String(i));
+    }
+    xaxisConfig = {
+      title: `Group Index (1 = low cost-sensitivity, ${N} = high)`,
+      range: [0, N],
+      tickvals,
+      ticktext,
+    };
+  } else {
+    xaxisConfig = {
+      title: "Preference position (low cost-sensitivity → high)",
+      range: [0, 1],
+    };
+  }
+
   const layout = {
     margin: { t: 32, r: 16, b: 40, l: 44 },
     title: {
       text: `Segment Density Distribution  ·  Beta(α=${alpha}, β=${beta})`,
       font: { size: 13 },
     },
-    xaxis: { title: "Preference position (low cost-sensitivity → high)", range: [0, 1] },
+    xaxis: xaxisConfig,
     yaxis: { title: "Density", range: [0, cap] },
     showlegend: false,
     plot_bgcolor: "#ffffff",

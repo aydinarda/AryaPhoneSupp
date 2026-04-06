@@ -97,14 +97,11 @@ export function renderMatchingResult(payload) {
 function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
-  let changed = false;
-  if (Number.isFinite(a) && a > 0 && a !== state.betaAlpha) { state.betaAlpha = a; changed = true; }
-  if (Number.isFinite(b) && b > 0 && b !== state.betaBeta) { state.betaBeta = b; changed = true; }
-  if (changed) {
-    if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
-    if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
-    renderDistributionChart();
-  }
+  if (Number.isFinite(a) && a > 0) state.betaAlpha = a;
+  if (Number.isFinite(b) && b > 0) state.betaBeta = b;
+  if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
+  if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
+  renderDistributionChart();
 }
 
 export async function loadCurrentRound() {

@@ -112,8 +112,8 @@ async function init() {
   setupEvents();
   showLobbyScreen();
   renderRoundSummary();
-  renderDistributionChart();
   await loadConfigAndSuppliers();
+  renderDistributionChart();
   await runManual();
   await loadLeaderboard();
 }
