@@ -8,6 +8,7 @@ import {
   startRoundSync,
   loadCurrentRound,
   loadLatestMatch,
+  resetBetaInputsInitialized,
 } from "./round.js";
 import { loadBenchmarkSummary } from "./benchmark.js";
 import { renderDistributionChart } from "./distribution.js";
@@ -99,6 +100,7 @@ export async function enterAsAdmin() {
       }),
     });
 
+    resetBetaInputsInitialized();
     state.role = "admin";
     state.gameName = session.game_name;
     state.gameCode = session.code;
@@ -135,6 +137,7 @@ export async function enterAsPlayer() {
       method: "POST",
       body: JSON.stringify({ team_name: teamName }),
     });
+    resetBetaInputsInitialized();
     state.role = "player";
     state.gameCode = session.code;
     state.gameName = session.game_name;

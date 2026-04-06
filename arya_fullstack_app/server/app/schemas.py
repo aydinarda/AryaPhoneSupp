@@ -12,6 +12,8 @@ class EvalRequest(BaseModel):
     objective: Objective
     picks: list[str] = Field(default_factory=list)
     price_per_user: Optional[float] = None
+    beta_alpha: float = Field(default=3.0, gt=0)
+    beta_beta: float = Field(default=3.0, gt=0)
 
 
 class BenchmarkRequest(BaseModel):

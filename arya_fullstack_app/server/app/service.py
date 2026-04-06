@@ -155,10 +155,21 @@ def build_density_weights(users_df: Any) -> dict[str, float]:
     }
 
 
-def evaluate_manual(objective: str, picks: list[str], price_per_user: float | None = None) -> dict[str, Any]:
+def evaluate_manual(
+    objective: str,
+    picks: list[str],
+    price_per_user: float | None = None,
+    beta_alpha: float = 3.0,
+    beta_beta: float = 3.0,
+) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
     cfg = _build_cfg(objective, price_per_user=price_per_user)
-    return manual_metrics(suppliers_df, users_df, FIXED_POLICY, cfg, [str(x) for x in picks])
+    return manual_metrics(
+        suppliers_df, users_df, FIXED_POLICY, cfg,
+        [str(x) for x in picks],
+        beta_alpha=beta_alpha,
+        beta_beta=beta_beta,
+    )
 
 
 def run_benchmark(objective: str, density_weights: dict[str, float] | None = None) -> dict[str, Any]:

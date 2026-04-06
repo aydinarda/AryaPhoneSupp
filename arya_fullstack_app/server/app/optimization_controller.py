@@ -348,7 +348,13 @@ def manual_metrics(
     policy: Policy,
     cfg: MaxProfitConfig | MaxUtilConfig,
     picks: List[str],
+    beta_alpha: float = 3.0,
+    beta_beta: float = 3.0,
 ) -> Dict[str, Any]:
+    from .beta_density import BetaDensity
+    from .mnl_market import BuyerProfile, run_mnl_market
+    from .customer_segment import CustomerSegment
+
     pol = policy.clamp_nonnegative()
     a = _avg_of_selected(suppliers_df, picks)
 
@@ -360,27 +366,71 @@ def manual_metrics(
     if a["avg_social"] > float(cfg.social_cap) + 1e-12:
         feasible = False
 
-    served = min(int(cfg.served_users), int(len(users_df)))
+    N = len(users_df)
+    _empty_metrics: Dict[str, Any] = {
+        "k": float(a["k"]),
+        "avg_env": float(a["avg_env"]),
+        "avg_social": float(a["avg_social"]),
+        "avg_cost": float(a["avg_cost"]),
+        "avg_strategic": float(a["avg_strategic"]),
+        "avg_improvement": float(a["avg_improvement"]),
+        "avg_low_quality": float(a["avg_low_quality"]),
+        "profit_total": 0.0,
+        "utility_total": 0.0,
+    }
+    if N == 0:
+        return {"feasible": bool(feasible), "metrics": _empty_metrics}
 
-    profit_per_user = float(cfg.price_per_user) - float(cfg.cost_scale) * a["avg_cost"]
-    profit_total = served * profit_per_user
+    # --- Build density-weighted CustomerSegments ---
+    # Users are sorted by w_cost so that group index i maps to preference position (i+0.5)/N.
+    # The Beta distribution density at that position gives the relative size of each group.
+    users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
+    bd = BetaDensity(alpha=max(0.01, float(beta_alpha)), beta=max(0.01, float(beta_beta)))
 
-    u = _select_last_n_users(users_df, served)
-    if len(u):
-        ut_env = 5.0 - a["avg_env"]
-        ut_social = 5.0 - a["avg_social"]
-        ut_strategic = a["avg_strategic"] - 1.0
-        ut_improvement = a["avg_improvement"] - 1.0
-        ut_lq = 5.0 - a["avg_low_quality"]
-        utility_per_user = (
-            u["w_env"] * (pol.env_mult * ut_env)
-            + u["w_social"] * (pol.social_mult * ut_social)
-            + u["w_strategic"] * (pol.strategic_mult * ut_strategic)
-            + u["w_improvement"] * (pol.improvement_mult * ut_improvement)
-            + u["w_low_quality"] * (pol.low_quality_mult * ut_lq)
-        )
-        utility_total = float(utility_per_user.sum())
+    segments: List[CustomerSegment] = []
+    for i, (_, row) in enumerate(users_sorted.iterrows()):
+        pos = (i + 0.5) / N
+        density = float(bd.density_at(pos))
+        segments.append(CustomerSegment(
+            segment_id=str(row.get("user_id", str(i))),
+            density=max(density, 1e-12),
+            w_env=float(row.get("w_env", 0.0)),
+            w_social=float(row.get("w_social", 0.0)),
+            w_cost=float(row.get("w_cost", 1.0)),
+            w_strategic=float(row.get("w_strategic", 0.0)),
+            w_improvement=float(row.get("w_improvement", 0.0)),
+            w_low_quality=float(row.get("w_low_quality", 0.0)),
+        ))
+
+    # --- Single BuyerProfile for this team's product ---
+    price = float(cfg.price_per_user)
+    profile = BuyerProfile(
+        team_name="team",
+        price_per_user=price,
+        avg_env=float(a["avg_env"]),
+        avg_social=float(a["avg_social"]),
+        avg_strategic=float(a["avg_strategic"]),
+        avg_improvement=float(a["avg_improvement"]),
+        avg_low_quality=float(a["avg_low_quality"]),
+    )
+
+    # delta normalises the price term into the same scale as quality utility (O(1-5)).
+    # delta = cost_scale / price means: reducing price by 1 unit raises MNL utility
+    # by delta * w_cost, which is proportional to the cost saving that affects profit.
+    delta = float(cfg.cost_scale) / max(price, 1.0)
+
+    # Run MNL with outside option at u=0 ("no purchase" baseline).
+    # total_demand in [0,1] is the density-weighted fraction of users who buy.
+    mnl_result = run_mnl_market([profile], segments, delta=delta, u_outside=None)
+    br = mnl_result.buyer_results.get("team")
+
+    if br and br.total_demand > 0:
+        effective_users = br.total_demand * N
+        profit_per_unit = price - float(cfg.cost_scale) * float(a["avg_cost"])
+        profit_total = effective_users * profit_per_unit
+        utility_total = br.realized_utility * N
     else:
+        profit_total = 0.0
         utility_total = 0.0
 
     return {

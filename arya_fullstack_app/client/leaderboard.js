@@ -1,6 +1,8 @@
 import { state, el, PLOT_COLUMNS } from "./state.js";
 import { api, fmt } from "./api.js";
 
+const PALETTE = ["#2563eb", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2", "#be123c", "#65a30d", "#c026d3", "#ea580c"];
+
 export function ensureLeaderboardPlotUI() {
   const panel = document.getElementById("panel-leaderboard");
   if (!panel) return;
@@ -136,6 +138,56 @@ export function renderLeaderboardScatter(rows) {
   `;
 }
 
+export async function loadRoundHistory() {
+  if (!state.gameCode) return;
+
+  let container = document.getElementById("roundHistoryChart");
+  if (!container) {
+    const panel = document.getElementById("panel-leaderboard");
+    if (!panel) return;
+    container = document.createElement("div");
+    container.id = "roundHistoryChart";
+    container.style.cssText = "height:280px;margin-bottom:12px;";
+    const tableWrap = panel.querySelector(".table-wrap");
+    if (tableWrap) panel.insertBefore(container, tableWrap);
+    else panel.appendChild(container);
+  }
+
+  if (!window.Plotly) return;
+
+  try {
+    const data = await api(`/api/sessions/${state.gameCode}/rounds/history`);
+    const { series = [], rounds = [] } = data;
+
+    if (!series.length || !rounds.length) {
+      container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
+      return;
+    }
+
+    const metric = state.historyMetric || "profit";
+    const traces = series.map((s, i) => ({
+      x: s.data.map((d) => d.round_no),
+      y: s.data.map((d) => d[metric] ?? 0),
+      mode: "lines+markers",
+      name: s.team,
+      line: { color: PALETTE[i % PALETTE.length], width: 2 },
+      marker: { size: 6 },
+    }));
+
+    window.Plotly.react(container, traces, {
+      margin: { t: 36, r: 16, b: 40, l: 56 },
+      title: { text: `Round History — ${metric === "profit" ? "Realized Profit" : "Utility"} per Team`, font: { size: 13 } },
+      xaxis: { title: "Round", dtick: 1, tickmode: "linear" },
+      yaxis: { title: metric === "profit" ? "Profit" : "Utility" },
+      legend: { orientation: "h", y: -0.25 },
+      plot_bgcolor: "#ffffff",
+      paper_bgcolor: "#ffffff",
+    }, { responsive: true, displayModeBar: false });
+  } catch (_e) {
+    container.innerHTML = '<p class="hint">Could not load round history.</p>';
+  }
+}
+
 export async function loadLeaderboard() {
   try {
     const params = new URLSearchParams({
@@ -154,8 +206,9 @@ export async function loadLeaderboard() {
         const createdAt = r.created_at ? new Date(r.created_at).toLocaleString() : "-";
         const feasibleIcon = r.feasible ? "✓" : "✗";
         const feasibleClass = r.feasible ? "feasible" : "infeasible";
-        const suppliers = r.selected_suppliers ? r.selected_suppliers.split(",").slice(0, 5).join(", ") : "-";
-        const supplierCount = r.num_suppliers || 0;
+        const supplierIds = r.selected_suppliers ? r.selected_suppliers.split(",").filter(Boolean) : [];
+        const supplierCount = supplierIds.length;
+        const suppliers = supplierIds.slice(0, 5).join(", ");
         return `<tr class="${feasibleClass}">
           <td>${idx + 1}</td>
           <td>${r.team ?? "-"}</td>

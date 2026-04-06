@@ -13,6 +13,7 @@ from ..db import (
     fetch_latest_round,
     fetch_round_by_number,
     fetch_submissions_for_round,
+    fetch_submissions_for_session,
     insert_game_round,
     insert_matching_result,
 )
@@ -151,7 +152,10 @@ def _build_team_product_profiles(
         profiles[team] = {
             "team": team,
             "created_at": str(row.get("created_at") or ""),
-            "price_per_user": _safe_float(row.get("price_per_user"), float(GAME_SETTINGS.price_per_user)),
+            "price_per_user": _safe_float(
+                row.get("price") if row.get("price") is not None else row.get("price_per_user"),
+                float(GAME_SETTINGS.price_per_user),
+            ),
             "picked_suppliers": valid,
             "avg_env": avg_env,
             "avg_social": avg_social,
@@ -341,172 +345,120 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     suppliers_df = suppliers_df.copy()
     suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
     suppliers_by_id = {
-        str(row["supplier_id"]): {
-            "env_risk": row.get("env_risk"),
-            "social_risk": row.get("social_risk"),
-            "cost_score": row.get("cost_score"),
-            "strategic": row.get("strategic"),
-            "improvement": row.get("improvement"),
-            "low_quality": row.get("low_quality"),
-            "child_labor": row.get("child_labor"),
-            "banned_chem": row.get("banned_chem"),
-        }
+        str(row["supplier_id"]): {k: row.get(k) for k in ("env_risk", "social_risk", "cost_score", "strategic", "improvement", "low_quality", "child_labor", "banned_chem")}
         for _, row in suppliers_df.iterrows()
     }
 
     team_profiles, profile_excluded = _build_team_product_profiles(eligible_rows, suppliers_by_id)
     if profile_excluded:
         excluded_infeasible_teams = sorted(set(excluded_infeasible_teams + profile_excluded))
-
     if not team_profiles:
         raise HTTPException(status_code=400, detail="No feasible team product found for matching")
 
-    if len(users_df) <= 0:
+    N = len(users_df)
+    if N <= 0:
         raise HTTPException(status_code=400, detail="No users available in dataset for matching")
 
-    served_df = users_df.copy()
+    # --- MNL demand model ---
+    from ..beta_density import BetaDensity
+    from ..mnl_market import BuyerProfile, run_mnl_market
+    from ..customer_segment import CustomerSegment
+
+    normalized_code = (code or "").strip().upper()
+    beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+    bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
+    users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
+    segments = [
+        CustomerSegment(
+            segment_id=str(row["user_id"]),
+            density=float(bd.density_at((i + 0.5) / N)),
+            w_env=_safe_float(row.get("w_env")),
+            w_social=_safe_float(row.get("w_social")),
+            w_cost=_safe_float(row.get("w_cost"), 1.0),
+            w_strategic=_safe_float(row.get("w_strategic")),
+            w_improvement=_safe_float(row.get("w_improvement")),
+            w_low_quality=_safe_float(row.get("w_low_quality")),
+        )
+        for i, (_, row) in enumerate(users_sorted.iterrows())
+    ]
+
     team_ids_sorted = sorted(team_profiles.keys())
-
-    user_score_map: dict[str, dict[str, float]] = {}
-    users_payload: list[dict[str, Any]] = []
-
-    for _, user_row in served_df.iterrows():
-        user_id = str(user_row.get("user_id", "")).strip()
-        if not user_id:
-            continue
-
-        w_env = _safe_float(user_row.get("w_env"))
-        w_social = _safe_float(user_row.get("w_social"))
-        w_cost = _safe_float(user_row.get("w_cost"), 1.0)
-        w_str = _safe_float(user_row.get("w_strategic"))
-        w_imp = _safe_float(user_row.get("w_improvement"))
-        w_lq = _safe_float(user_row.get("w_low_quality"))
-
-        utilities: dict[str, float] = {}
-        for team_id in team_ids_sorted:
-            profile = team_profiles[team_id]
-            score = (
-                w_env * (float(FIXED_POLICY.env_mult) * (5.0 - float(profile["avg_env"])))
-                + w_social * (float(FIXED_POLICY.social_mult) * (5.0 - float(profile["avg_social"])))
-                + w_str * (float(FIXED_POLICY.strategic_mult) * (float(profile["avg_strategic"]) - 1.0))
-                + w_imp * (float(FIXED_POLICY.improvement_mult) * (float(profile["avg_improvement"]) - 1.0))
-                + w_lq * (float(FIXED_POLICY.low_quality_mult) * (5.0 - float(profile["avg_low_quality"])))
-            )
-            utilities[team_id] = float(score)
-
-        ordered = sorted(team_ids_sorted, key=lambda tid: (-utilities[tid], tid))
-        users_payload.append(
-            {
-                "user_id": user_id,
-                "choices": ordered,
-                "utilities": utilities,
-                "price_sensitivity": w_cost,
-                "sustainability_sensitivity": (w_env + w_social + w_lq) / 3.0,
-            }
+    profiles = [
+        BuyerProfile(
+            team_name=tid,
+            price_per_user=_safe_float(team_profiles[tid]["price_per_user"], GAME_SETTINGS.price_per_user),
+            avg_env=_safe_float(team_profiles[tid]["avg_env"]),
+            avg_social=_safe_float(team_profiles[tid]["avg_social"]),
+            avg_strategic=_safe_float(team_profiles[tid]["avg_strategic"]),
+            avg_improvement=_safe_float(team_profiles[tid]["avg_improvement"]),
+            avg_low_quality=_safe_float(team_profiles[tid]["avg_low_quality"]),
         )
-        user_score_map[user_id] = utilities
+        for tid in team_ids_sorted
+    ]
 
-    if not users_payload:
-        raise HTTPException(status_code=400, detail="No valid users available for matching")
+    avg_price = sum(p.price_per_user for p in profiles) / max(len(profiles), 1)
+    delta = float(GAME_SETTINGS.cost_scale) / max(avg_price, 1.0)
+    mnl_result = run_mnl_market(profiles, segments, delta=delta, u_outside=None)
 
-    market_options = []
-    for team_id in team_ids_sorted:
-        profile = team_profiles[team_id]
-        ranked_users = sorted(
-            [str(u.get("user_id", "")) for u in users_payload],
-            key=lambda uid: (-user_score_map.get(uid, {}).get(team_id, 0.0), uid),
-        )
-
-        avg_env = float(profile.get("avg_env", 5.0))
-        avg_social = float(profile.get("avg_social", 5.0))
-        avg_low_quality = float(profile.get("avg_low_quality", 5.0))
-        avg_strategic = float(profile.get("avg_strategic", 1.0))
-        avg_improvement = float(profile.get("avg_improvement", 1.0))
-        avg_cost = float(profile.get("avg_cost", 0.0))
-        avg_child_labor = float(profile.get("avg_child_labor", 0.0))
-        avg_banned_chem = float(profile.get("avg_banned_chem", 0.0))
-
-        sustainability = (
-            (5.0 - avg_env)
-            + (5.0 - avg_social)
-            + (5.0 - avg_low_quality)
-            + (avg_strategic - 1.0)
-            + (avg_improvement - 1.0)
-        ) / 5.0
-
-        market_price = float(profile.get("price_per_user", GAME_SETTINGS.price_per_user))
-
-        market_options.append(
-            {
-                "option_id": team_id,
-                "capacity": market_capacity,
-                "priority": ranked_users,
-                "request_time": profile.get("created_at") or target_round.get("created_at"),
-                "price": market_price,
-                "sustainability": sustainability,
-            }
-        )
-
-    result = run_market_matching(users=users_payload, market_options=market_options)
-    result["excluded_infeasible_users"] = excluded_infeasible_teams
-    result["excluded_infeasible_teams"] = excluded_infeasible_teams
-    result["matching_target"] = "team_product"
-    result_meta = result.setdefault("meta", {})
-    result_meta["submitted_team_count"] = len(by_team)
-    result_meta["eligible_team_count"] = len(team_profiles)
-    result_meta["user_pool_count"] = len(users_payload)
-    result_meta["infeasible_excluded_count"] = len(excluded_infeasible_teams)
-
-    # Realized round profit is computed from actual matched users per team,
-    # not from leaderboard position.
-    market_to_users = result.get("market_to_users") or {}
+    market_to_users: dict[str, Any] = {}
+    market_loads: dict[str, Any] = {}
     team_round_financials: list[dict[str, Any]] = []
     round_profit_total = 0.0
 
-    for team_id in team_ids_sorted:
-        profile = team_profiles[team_id]
-        matched_users = [str(uid) for uid in (market_to_users.get(team_id) or [])]
-        matched_count = len(matched_users)
-
-        sale_price_per_user = float(profile.get("price_per_user", GAME_SETTINGS.price_per_user))
-        avg_cost_score = float(profile.get("avg_cost", 0.0))
-        cost_component_per_user = float(GAME_SETTINGS.cost_scale) * avg_cost_score
-        avg_child_labor = float(profile.get("avg_child_labor", 0.0))
-        avg_banned_chem = float(profile.get("avg_banned_chem", 0.0))
-
-        penalty_per_user = (
-            float(FIXED_POLICY.child_labor_penalty) * avg_child_labor
-            + float(FIXED_POLICY.banned_chem_penalty) * avg_banned_chem
-        )
-
-        unit_margin = sale_price_per_user - cost_component_per_user - penalty_per_user
-        realized_profit = unit_margin * float(matched_count)
+    for tid in team_ids_sorted:
+        profile = team_profiles[tid]
+        br = mnl_result.buyer_results.get(tid)
+        demand_share = br.total_demand if br else 0.0
+        effective_users = round(demand_share * N, 3)
+        price = _safe_float(profile["price_per_user"], GAME_SETTINGS.price_per_user)
+        avg_cost = _safe_float(profile["avg_cost"])
+        unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost
+        realized_profit = effective_users * unit_margin
+        realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
         round_profit_total += realized_profit
 
-        team_round_financials.append(
-            {
-                "team": team_id,
-                "matched_user_count": matched_count,
-                "matched_users": matched_users,
-                "sale_price_per_user": sale_price_per_user,
-                "avg_cost_score": avg_cost_score,
-                "cost_component_per_user": cost_component_per_user,
-                "penalty_per_user": penalty_per_user,
-                "unit_margin": unit_margin,
-                "realized_profit": realized_profit,
-                "avg_child_labor": avg_child_labor,
-                "avg_banned_chem": avg_banned_chem,
-            }
-        )
+        market_to_users[tid] = effective_users
+        market_loads[tid] = {
+            "demand_share": round(demand_share, 4),
+            "effective_users": effective_users,
+            "capacity": N,
+            "assigned_count": effective_users,
+        }
+        team_round_financials.append({
+            "team": tid,
+            "demand_share": round(demand_share, 4),
+            "effective_users": effective_users,
+            "realized_profit": round(realized_profit, 2),
+            "realized_utility": realized_utility,
+            "price_per_user": price,
+            "avg_cost_score": avg_cost,
+            "unit_margin": round(unit_margin, 2),
+        })
 
-    result["round_financials"] = {
-        "formula": "realized_profit = matched_user_count * (sale_price_per_user - cost_scale*avg_cost_score - penalty_per_user)",
-        "price_per_user": "team_submitted_price_per_user",
-        "cost_scale": float(GAME_SETTINGS.cost_scale),
-        "team_financials": team_round_financials,
-        "round_profit_total": float(round_profit_total),
+    result = {
+        "meta": {
+            "solver": "mnl_v1",
+            "user_pool_count": N,
+            "eligible_team_count": len(profiles),
+            "matched_count": N,
+            "submitted_team_count": len(by_team),
+            "infeasible_excluded_count": len(excluded_infeasible_teams),
+            "round_profit_total": round(round_profit_total, 2),
+        },
+        "market_to_users": market_to_users,
+        "market_loads": market_loads,
+        "excluded_infeasible_users": excluded_infeasible_teams,
+        "excluded_infeasible_teams": excluded_infeasible_teams,
+        "round_financials": {
+            "formula": "realized_profit = effective_users(MNL) x unit_margin",
+            "delta": round(delta, 4),
+            "beta_alpha": beta_alpha,
+            "beta_beta": beta_beta,
+            "cost_scale": float(GAME_SETTINGS.cost_scale),
+            "team_financials": team_round_financials,
+            "round_profit_total": round(round_profit_total, 2),
+        },
     }
-    result_meta["round_profit_total"] = float(round_profit_total)
 
     insert_matching_result(
         {
@@ -549,3 +501,45 @@ def get_latest_match(code: str) -> dict[str, Any]:
             "result": row.get("result"),
         }
     }
+
+
+@router.get("/{code}/rounds/history")
+def get_round_history(code: str) -> dict[str, Any]:
+    """Return per-round profit/utility for every team in this session."""
+    session_row = _get_session_row_or_404(code)
+    session_code = str(session_row.get("session_code", "")).strip().upper()
+
+    rows = _extract_rows(fetch_submissions_for_session(session_code))
+    if not rows:
+        return {"teams": [], "rounds": []}
+
+    # Latest submission per (team, round_no)
+    latest: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        team = str(row.get("team") or "(anonymous)").strip()
+        rno = int(row.get("round_no") or 0)
+        key = (team, rno)
+        existing = latest.get(key)
+        if existing is None or str(existing.get("created_at") or "") <= str(row.get("created_at") or ""):
+            latest[key] = row
+
+    teams: list[str] = sorted({k[0] for k in latest})
+    rounds: list[int] = sorted({k[1] for k in latest if k[1] > 0})
+
+    series: list[dict[str, Any]] = [
+        {
+            "team": team,
+            "data": [
+                {
+                    "round_no": rno,
+                    "profit": float(latest[(team, rno)].get("profit") or 0),
+                    "utility": float(latest[(team, rno)].get("utility") or 0),
+                }
+                for rno in rounds
+                if (team, rno) in latest
+            ],
+        }
+        for team in teams
+    ]
+
+    return {"teams": teams, "rounds": rounds, "series": series}

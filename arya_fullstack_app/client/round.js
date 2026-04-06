@@ -78,30 +78,79 @@ export function renderMatchingResult(payload) {
   }
 
   const meta = payload.meta || {};
-  const excluded = payload.excluded_infeasible_users || [];
-  const eligibleTeams = meta.eligible_team_count ?? 0;
-  const usersInPool = meta.user_pool_count ?? meta.user_count ?? 0;
-  el.matchingResultText.textContent = `Solver: ${meta.solver || "-"} | Team products: ${eligibleTeams} | Users in pool: ${usersInPool} | Matched users: ${meta.matched_count ?? 0} | Excluded infeasible teams: ${meta.infeasible_excluded_count ?? excluded.length}`;
+  const excluded = payload.excluded_infeasible_teams || [];
+  const financials = payload.round_financials || {};
+  const teamFinancials = financials.team_financials || [];
 
-  const entries = Object.entries(payload.market_to_users);
-  const loads = payload.market_loads || {};
-  el.matchingTableBody.innerHTML = entries
-    .map(([marketId, users]) => {
-      const load = loads[marketId] || {};
-      const countLabel = `${load.assigned_count ?? (users || []).length}/${load.capacity ?? "-"}`;
-      return `<tr><td>${marketId} (${countLabel})</td><td>${(users || []).join(", ") || "-"}</td></tr>`;
-    })
-    .join("");
+  el.matchingResultText.textContent = [
+    `Solver: ${meta.solver || "-"}`,
+    `Teams: ${meta.eligible_team_count ?? 0}`,
+    `Users: ${meta.user_pool_count ?? 0}`,
+    `δ: ${financials.delta ?? "-"}`,
+    excluded.length ? `Excluded: ${excluded.join(", ")}` : null,
+  ].filter(Boolean).join("  |  ");
+
+  // Update table header for MNL
+  const thead = el.matchingTableBody.closest("table")?.querySelector("thead tr");
+  if (thead) {
+    thead.innerHTML = "<th>Team</th><th>Demand Share</th><th>Eff. Users</th><th>Unit Margin</th><th>Realized Profit</th><th>Utility</th>";
+  }
+
+  if (teamFinancials.length) {
+    el.matchingTableBody.innerHTML = teamFinancials
+      .map((tf) => {
+        const share = ((tf.demand_share ?? 0) * 100).toFixed(1);
+        return `<tr>
+          <td><strong>${tf.team}</strong></td>
+          <td>${share}%</td>
+          <td>${(tf.effective_users ?? 0).toFixed(1)}</td>
+          <td>${(tf.unit_margin ?? 0).toFixed(1)}</td>
+          <td><strong>${(tf.realized_profit ?? 0).toFixed(1)}</strong></td>
+          <td>${(tf.realized_utility ?? 0).toFixed(1)}</td>
+        </tr>`;
+      })
+      .join("");
+  } else {
+    // Fallback for old discrete-matching cached results (array of user IDs)
+    if (thead) {
+      thead.innerHTML = "<th>Team Product</th><th>Assigned Users</th>";
+    }
+    const loads = payload.market_loads || {};
+    el.matchingTableBody.innerHTML = Object.entries(payload.market_to_users)
+      .map(([teamId, users]) => {
+        const load = loads[teamId] || {};
+        const countLabel = `${load.assigned_count ?? (Array.isArray(users) ? users.length : users)}/${load.capacity ?? "-"}`;
+        const userList = Array.isArray(users) ? (users.join(", ") || "-") : String(users);
+        return `<tr><td>${teamId} (${countLabel})</td><td>${userList}</td></tr>`;
+      })
+      .join("");
+  }
+}
+
+// Flag: have we initialised the admin inputs from the server at least once this session?
+let _betaInputsInitialized = false;
+
+export function resetBetaInputsInitialized() {
+  _betaInputsInitialized = false;
 }
 
 function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
-  if (Number.isFinite(a) && a > 0) state.betaAlpha = a;
-  if (Number.isFinite(b) && b > 0) state.betaBeta = b;
-  if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
-  if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
-  renderDistributionChart();
+  const aOk = Number.isFinite(a) && a > 0;
+  const bOk = Number.isFinite(b) && b > 0;
+  const changed = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta);
+  if (aOk) state.betaAlpha = a;
+  if (bOk) state.betaBeta = b;
+  if (changed) {
+    // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
+    if (!_betaInputsInitialized) {
+      if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
+      if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
+      _betaInputsInitialized = true;
+    }
+    renderDistributionChart();
+  }
 }
 
 export async function loadCurrentRound() {
@@ -149,20 +198,18 @@ export function startRoundSync() {
   clearRoundSync();
   if (!state.gameCode) return;
 
-  state.roundSyncId = setInterval(async () => {
-    if (!state.gameCode || el.gameScreen.classList.contains("hidden")) {
-      return;
-    }
-
+  async function tick() {
+    if (!state.gameCode || el.gameScreen.classList.contains("hidden")) return;
     try {
       await loadCurrentRound();
-      if (state.role === "admin") {
-        await loadLatestMatch();
-      }
+      if (state.role === "admin") await loadLatestMatch();
     } catch (_err) {
       // Ignore transient polling failures; explicit user actions still show errors.
     }
-  }, ROUND_SYNC_INTERVAL_MS);
+  }
+
+  tick(); // run immediately on start, don't wait for first interval
+  state.roundSyncId = setInterval(tick, ROUND_SYNC_INTERVAL_MS);
 }
 
 export async function startRound() {

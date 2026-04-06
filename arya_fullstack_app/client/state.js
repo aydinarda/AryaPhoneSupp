@@ -19,10 +19,11 @@ export const state = {
   betaAlpha: 3.0,
   betaBeta: 3.0,
   numSegments: 0,
+  historyMetric: "profit",
 };
 
 export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
-export const ROUND_SYNC_INTERVAL_MS = 3000;
+export const ROUND_SYNC_INTERVAL_MS = 2000;
 
 export const PLOT_COLUMNS = {
   profit: "Profit",
@@ -72,10 +73,12 @@ export const el = {
   betaBeta: document.getElementById("betaBeta"),
   btnStartRound: document.getElementById("btnStartRound"),
   btnRunMatch: document.getElementById("btnRunMatch"),
+  btnApplyDistribution: document.getElementById("btnApplyDistribution"),
   adminRoundHint: document.getElementById("adminRoundHint"),
   matchingResultCard: document.getElementById("matchingResultCard"),
   matchingResultText: document.getElementById("matchingResultText"),
   matchingTableBody: document.querySelector("#matchingTable tbody"),
   distributionChart: document.getElementById("distributionChart"),
   btnBackToSelection: document.getElementById("btnBackToSelection"),
+  historyMetricSelect: document.getElementById("historyMetricSelect"),
 };

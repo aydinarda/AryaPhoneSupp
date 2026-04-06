@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260405-1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260406-1" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -64,8 +64,9 @@
                   <input id="betaBeta" type="number" min="0.1" step="0.1" value="3.0" />
                 </div>
               </div>
+              <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution</button>
 
-              <div class="actions-row compact">
+              <div class="actions-row compact" style="margin-top:10px;">
                 <button id="btnStartRound">Start Round</button>
                 <button id="btnRunMatch" class="primary">Match</button>
               </div>
@@ -76,7 +77,7 @@
             <input id="teamName" type="text" placeholder="Enter team name" />
             <label for="playerName">Player Name</label>
             <input id="playerName" type="text" placeholder="Enter your name" />
-            <label for="pricePerUser">Price Per User</label>
+            <label for="pricePerUser">Price</label>
             <input id="pricePerUser" type="number" min="0" step="1" placeholder="Ex: 100" />
             <button id="btnBackLobby">Role Screen</button>
           </div>
@@ -111,7 +112,7 @@
         <section class="card" id="distributionCard">
           <h3 style="margin:0 0 8px;">Segment Density Distribution</h3>
           <p class="hint" style="margin:0 0 8px;">Shows how customer segments are weighted across the market. Admin can adjust the shape via α and β parameters.</p>
-          <div id="distributionChart" style="min-height:220px;"></div>
+          <div id="distributionChart" style="height:300px;"></div>
         </section>
 
         <section class="card">
@@ -142,6 +143,10 @@
             <div class="actions-row">
               <button id="btnBackToSelection">← Back to Selection</button>
               <button id="btnRefreshLeaderboard">Refresh</button>
+              <select id="historyMetricSelect">
+                <option value="profit">History: Profit</option>
+                <option value="utility">History: Utility</option>
+              </select>
               <select id="sortSelect">
                 <option value="profit">Sort by Profit</option>
                 <option value="utility">Sort by Utility</option>
@@ -181,6 +186,6 @@
       </section>
     </div>
 
-    <script type="module" src="/assets/app.js?v=20260405-1"></script>
+    <script type="module" src="/assets/app.js?v=20260406-1"></script>
   </body>
 </html>

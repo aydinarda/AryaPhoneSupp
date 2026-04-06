@@ -52,7 +52,12 @@ def suppliers() -> list[dict[str, Any]]:
 @app.post("/api/manual-eval")
 def manual_eval(req: EvalRequest) -> dict[str, Any]:
     try:
-        return evaluate_manual(req.objective, req.picks, price_per_user=req.price_per_user)
+        return evaluate_manual(
+            req.objective, req.picks,
+            price_per_user=req.price_per_user,
+            beta_alpha=req.beta_alpha,
+            beta_beta=req.beta_beta,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -82,7 +87,6 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "comment": req.comment,
             "session_code": ((req.session_code or "").strip().upper() or None),
             "round_no": int(req.round_no) if req.round_no is not None else None,
-            "price_per_user": float(req.price_per_user) if req.price_per_user is not None else None,
             "profit": float(metrics.get("profit_total", 0.0)),
             "utility": float(metrics.get("utility_total", 0.0)),
             "env_avg": float(metrics.get("avg_env", 0.0)),

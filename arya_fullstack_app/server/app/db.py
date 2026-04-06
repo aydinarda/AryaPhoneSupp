@@ -132,6 +132,17 @@ def fetch_round_by_number(session_token: str, round_no: int):
     )
 
 
+def fetch_submissions_for_session(session_code: str):
+    return (
+        get_client()
+        .table("submissions")
+        .select("team, round_no, profit, utility, env_avg, social_avg, cost_avg, created_at")
+        .eq("session_code", session_code)
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+
 def fetch_submissions_for_round(session_code: str, round_no: int):
     return (
         get_client()

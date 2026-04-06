@@ -1,8 +1,9 @@
 import { state, el } from "./state.js";
+import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
 import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js";
-import { loadLeaderboard, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
+import { loadLeaderboard, loadRoundHistory, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
 
 function showSelectionPanel() {
@@ -34,24 +35,33 @@ function setupTabs() {
         panelLeaderboard.classList.remove("hidden");
         tab.classList.add("active");
         await loadLeaderboard();
+        await loadRoundHistory();
         return;
       }
     });
   });
 }
 
-function syncBetaFromInputs() {
+async function applyBetaDistribution() {
   const a = parseFloat(el.betaAlpha?.value);
   const b = parseFloat(el.betaBeta?.value);
-  if (Number.isFinite(a) && a > 0) state.betaAlpha = a;
-  if (Number.isFinite(b) && b > 0) state.betaBeta = b;
+  if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) {
+    if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid α/β values.";
+    return;
+  }
+  state.betaAlpha = a;
+  state.betaBeta = b;
   renderDistributionChart();
 
-  if (state.gameCode) {
-    api(`/api/sessions/${state.gameCode}/config`, {
+  if (!state.gameCode) return;
+  try {
+    await api(`/api/sessions/${state.gameCode}/config`, {
       method: "PATCH",
-      body: JSON.stringify({ beta_alpha: state.betaAlpha, beta_beta: state.betaBeta }),
-    }).catch(() => {});
+      body: JSON.stringify({ beta_alpha: a, beta_beta: b }),
+    });
+    if (el.adminRoundHint) el.adminRoundHint.textContent = "Distribution applied.";
+  } catch (e) {
+    if (el.adminRoundHint) el.adminRoundHint.textContent = `Failed to apply: ${e.message}`;
   }
 }
 
@@ -66,9 +76,15 @@ function setupEvents() {
     el.btnBackToSelection.addEventListener("click", showSelectionPanel);
   }
 
-  // Beta distribution controls (admin only, but chart is visible to all)
-  if (el.betaAlpha) el.betaAlpha.addEventListener("input", syncBetaFromInputs);
-  if (el.betaBeta)  el.betaBeta.addEventListener("input", syncBetaFromInputs);
+  if (el.historyMetricSelect) {
+    el.historyMetricSelect.addEventListener("change", (e) => {
+      state.historyMetric = e.target.value;
+      loadRoundHistory();
+    });
+  }
+
+  // Beta distribution: applied explicitly via button, not on every keystroke
+  if (el.btnApplyDistribution) el.btnApplyDistribution.addEventListener("click", applyBetaDistribution);
 
   el.teamName.addEventListener("change", saveLobbyState);
   el.playerName.addEventListener("change", saveLobbyState);

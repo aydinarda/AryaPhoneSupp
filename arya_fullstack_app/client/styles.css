@@ -202,6 +202,10 @@ input, select {
   margin-bottom: 14px;
 }
 
+#panel-game > .actions-row {
+  justify-content: center;
+}
+
 button {
   border: 1px solid var(--line);
   border-radius: 8px;
