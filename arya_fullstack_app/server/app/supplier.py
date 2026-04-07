@@ -40,6 +40,7 @@ class Supplier:
     low_quality: float = 0.0
     child_labor: float = 0.0   # binary flag
     banned_chem: float = 0.0   # binary flag
+    category: str = ""         # e.g. "camera", "keyboard", "cable"
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Supplier":
@@ -47,6 +48,10 @@ class Supplier:
         supplier_id = str(
             row.get("supplier_id", row.get("id", row.get("supplier", "")))
         ).strip()
+        raw_cat = row.get("category", "")
+        category = "" if raw_cat is None else str(raw_cat).strip()
+        if category.lower() == "nan":
+            category = ""
         return cls(
             supplier_id=supplier_id,
             env_risk=_safe_float(row.get("env_risk")),
@@ -57,6 +62,7 @@ class Supplier:
             low_quality=_safe_float(row.get("low_quality")),
             child_labor=_safe_float(row.get("child_labor")),
             banned_chem=_safe_float(row.get("banned_chem")),
+            category=category,
         )
 
 

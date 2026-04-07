@@ -89,6 +89,12 @@ def solve_best_over_k(
     # kept for backward compatibility — ignored, use density_weights instead
     served_users: int = 0,
 ) -> Optional[Dict[str, Any]]:
+    """Solve the supplier selection problem.
+
+    If suppliers_df contains a 'category' column, enforces exactly one supplier
+    per category (categorical mode).  Otherwise falls back to the original
+    k-enumeration over all possible portfolio sizes.
+    """
     if not GUROBI_AVAILABLE:
         raise RuntimeError("gurobipy is not available")
 
@@ -127,6 +133,96 @@ def solve_best_over_k(
         for sid in supplier_ids
     }
 
+    # ------------------------------------------------------------------
+    # Categorical mode: exactly one supplier per category
+    # ------------------------------------------------------------------
+    has_categories = (
+        "category" in df.columns
+        and df["category"].notna().any()
+    )
+
+    if has_categories:
+        category_groups: Dict[str, List[str]] = {}
+        for _, row in df.iterrows():
+            cat = str(row["category"]).strip()
+            if cat and cat.lower() != "nan":
+                category_groups.setdefault(cat, []).append(str(row["supplier_id"]))
+
+        if not category_groups:
+            has_categories = False
+
+    if has_categories:
+        k = len(category_groups)
+
+        model = gp.Model(f"avg_game_{objective_mode}_categorical")
+        model.Params.OutputFlag = int(output_flag)
+
+        y = model.addVars(supplier_ids, vtype=GRB.BINARY, name="y")
+
+        # Exactly one supplier from each category
+        for cat, ids in category_groups.items():
+            model.addConstr(
+                gp.quicksum(y[sid] for sid in ids) == 1,
+                name=f"cat_{cat}",
+            )
+
+        apply_policy_bans(model, y, df, pol)
+
+        model.addConstr(
+            gp.quicksum(env[sid] * y[sid] for sid in supplier_ids) <= float(env_cap) * k,
+            name="env_cap",
+        )
+        model.addConstr(
+            gp.quicksum(soc[sid] * y[sid] for sid in supplier_ids) <= float(social_cap) * k,
+            name="soc_cap",
+        )
+
+        if objective_mode == "profit":
+            model.setObjective(
+                -gp.quicksum(cost[sid] * y[sid] for sid in supplier_ids),
+                GRB.MAXIMIZE,
+            )
+        elif objective_mode == "utility":
+            model.setObjective(
+                gp.quicksum(util_num_coeff[sid] * y[sid] for sid in supplier_ids),
+                GRB.MAXIMIZE,
+            )
+        else:
+            raise ValueError("objective_mode must be 'profit' or 'utility'")
+
+        model.optimize()
+
+        if model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            return None
+
+        chosen = [sid for sid in supplier_ids if y[sid].X > 0.5]
+        if not chosen:
+            return None
+
+        n = len(chosen)
+        avg_env  = sum(env[sid]  for sid in chosen) / n
+        avg_soc  = sum(soc[sid]  for sid in chosen) / n
+        avg_cost = sum(cost[sid] for sid in chosen) / n
+        avg_str  = sum(strat[sid] for sid in chosen) / n
+        avg_imp  = sum(imp[sid]  for sid in chosen) / n
+        avg_lq   = sum(lq[sid]   for sid in chosen) / n
+        util_over_k = sum(util_num_coeff[sid] for sid in chosen) / n
+
+        return {
+            "k": float(n),
+            "avg_env": float(avg_env),
+            "avg_social": float(avg_soc),
+            "avg_cost": float(avg_cost),
+            "avg_strategic": float(avg_str),
+            "avg_improvement": float(avg_imp),
+            "avg_low_quality": float(avg_lq),
+            "utility_num_over_k": float(util_over_k),
+            "chosen": chosen,
+        }
+
+    # ------------------------------------------------------------------
+    # Legacy mode: enumerate k = 1 … N
+    # ------------------------------------------------------------------
     best: Optional[Dict[str, Any]] = None
 
     for k in range(1, supplier_count + 1):
@@ -157,12 +253,12 @@ def solve_best_over_k(
         if not chosen:
             continue
 
-        avg_env = sum(env[sid] for sid in chosen) / len(chosen)
-        avg_soc = sum(soc[sid] for sid in chosen) / len(chosen)
+        avg_env  = sum(env[sid]  for sid in chosen) / len(chosen)
+        avg_soc  = sum(soc[sid]  for sid in chosen) / len(chosen)
         avg_cost = sum(cost[sid] for sid in chosen) / len(chosen)
-        avg_str = sum(strat[sid] for sid in chosen) / len(chosen)
-        avg_imp = sum(imp[sid] for sid in chosen) / len(chosen)
-        avg_lq = sum(lq[sid] for sid in chosen) / len(chosen)
+        avg_str  = sum(strat[sid] for sid in chosen) / len(chosen)
+        avg_imp  = sum(imp[sid]  for sid in chosen) / len(chosen)
+        avg_lq   = sum(lq[sid]   for sid in chosen) / len(chosen)
 
         utility_total = (sum(util_num_coeff[sid] for sid in chosen) / len(chosen)) if len(chosen) else 0.0
 

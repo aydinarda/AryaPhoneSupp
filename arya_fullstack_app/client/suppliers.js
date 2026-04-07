@@ -22,37 +22,94 @@ export function renderMetrics(target, title, payload) {
   ].join("");
 }
 
-export function renderSuppliers() {
-  el.supplierList.innerHTML = state.suppliers
-    .map((s) => {
-      const id = String(s.supplier_id);
-      const checked = state.selected.has(id) ? "checked" : "";
-      const childLabor = Number(s.child_labor || 0) >= 0.5 ? "Yes" : "No";
-      const bannedChem = Number(s.banned_chem || 0) >= 0.5 ? "Yes" : "No";
-      return `
-      <label class="supplier-item">
-        <input type="checkbox" data-id="${id}" ${checked} />
-        <div>
-          <div><strong>${id}</strong></div>
-          <div class="supplier-meta">
-            Env: ${fmt(s.env_risk)} (${fmt(s.env_bad_pct)}% bad) | Social: ${fmt(s.social_risk)} (${fmt(s.social_bad_pct)}% bad) | Cost: ${fmt(s.cost_score)} (${fmt(s.cost_bad_pct)}% bad)
-          </div>
-          <div class="supplier-meta">
-            Strategic: ${fmt(s.strategic)} (${fmt(s.strategic_good_pct)}% good) | Improvement: ${fmt(s.improvement)} (${fmt(s.improvement_good_pct)}% good) | Low Quality: ${fmt(s.low_quality)} (${fmt(s.low_quality_bad_pct)}% bad)
-          </div>
-          <div class="supplier-meta">
-            Child labor: ${childLabor} | Banned chemicals: ${bannedChem}
-          </div>
+const CATEGORY_LABELS = {
+  camera: "Select a Camera",
+  keyboard: "Select a Keyboard",
+  cable: "Select a Cable",
+};
+const CATEGORY_ORDER = ["camera", "keyboard", "cable"];
+
+function supplierCard(s, inputType, nameAttr, checked) {
+  const id = String(s.supplier_id);
+  const childLabor = Number(s.child_labor || 0) >= 0.5 ? "Yes" : "No";
+  const bannedChem = Number(s.banned_chem || 0) >= 0.5 ? "Yes" : "No";
+  const cat = s.category || "";
+  return `
+    <label class="supplier-item">
+      <input type="${inputType}" ${nameAttr} data-id="${id}" data-cat="${cat}" ${checked} />
+      <div>
+        <div><strong>${id}</strong></div>
+        <div class="supplier-meta">
+          Env: ${fmt(s.env_risk)} (${fmt(s.env_bad_pct)}% bad) | Social: ${fmt(s.social_risk)} (${fmt(s.social_bad_pct)}% bad) | Cost: ${fmt(s.cost_score)} (${fmt(s.cost_bad_pct)}% bad)
         </div>
-      </label>`;
+        <div class="supplier-meta">
+          Strategic: ${fmt(s.strategic)} (${fmt(s.strategic_good_pct)}% good) | Improvement: ${fmt(s.improvement)} (${fmt(s.improvement_good_pct)}% good) | Low Quality: ${fmt(s.low_quality)} (${fmt(s.low_quality_bad_pct)}% bad)
+        </div>
+        <div class="supplier-meta">
+          Child labor: ${childLabor} | Banned chemicals: ${bannedChem}
+        </div>
+      </div>
+    </label>`;
+}
+
+export function renderSuppliers() {
+  const hasCategories = state.suppliers.some((s) => s.category);
+
+  if (!hasCategories) {
+    // Fallback: flat checkbox list (no category column in Excel)
+    el.supplierList.innerHTML = state.suppliers
+      .map((s) => {
+        const id = String(s.supplier_id);
+        const checked = state.selected instanceof Set && state.selected.has(id) ? "checked" : "";
+        return supplierCard(s, "checkbox", ``, checked);
+      })
+      .join("");
+    el.supplierList.querySelectorAll("input[type=checkbox]").forEach((input) => {
+      input.addEventListener("change", (ev) => {
+        const id = ev.target.dataset.id;
+        if (!(state.selected instanceof Set)) state.selected = new Set();
+        if (ev.target.checked) state.selected.add(id);
+        else state.selected.delete(id);
+      });
+    });
+    return;
+  }
+
+  // Group by category
+  const grouped = {};
+  for (const s of state.suppliers) {
+    const cat = (s.category || "other").toLowerCase().trim();
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(s);
+  }
+
+  const orderedCats = [
+    ...CATEGORY_ORDER.filter((c) => grouped[c]),
+    ...Object.keys(grouped).filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+
+  el.supplierList.innerHTML = orderedCats
+    .map((cat) => {
+      const label = CATEGORY_LABELS[cat] || `Select a ${cat.charAt(0).toUpperCase() + cat.slice(1)}`;
+      const selectedId = state.selected[cat] || null;
+      const options = grouped[cat]
+        .map((s) => {
+          const checked = selectedId === String(s.supplier_id) ? "checked" : "";
+          return supplierCard(s, "radio", `name="supplier-${cat}"`, checked);
+        })
+        .join("");
+      return `
+        <div class="supplier-category-section">
+          <div class="supplier-category-label">${label}</div>
+          ${options}
+        </div>`;
     })
     .join("");
 
-  el.supplierList.querySelectorAll("input[type=checkbox]").forEach((input) => {
+  el.supplierList.querySelectorAll("input[type=radio]").forEach((input) => {
     input.addEventListener("change", (ev) => {
-      const id = ev.target.dataset.id;
-      if (ev.target.checked) state.selected.add(id);
-      else state.selected.delete(id);
+      if (!ev.target.checked) return;
+      state.selected[ev.target.dataset.cat] = ev.target.dataset.id;
     });
   });
 }
@@ -76,9 +133,14 @@ export function currentPayload() {
   const defaultPrice = Number(state.config?.price_per_user ?? 100);
   const pricePerUser = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : defaultPrice;
 
+  const picks =
+    state.selected instanceof Set
+      ? [...state.selected]
+      : Object.values(state.selected).filter(Boolean);
+
   return {
     objective: state.objective,
-    picks: [...state.selected],
+    picks,
     price_per_user: pricePerUser,
     beta_alpha: state.betaAlpha ?? 3.0,
     beta_beta: state.betaBeta ?? 3.0,

@@ -4,7 +4,7 @@ export const state = {
   gameCode: "",
   gameName: "",
   suppliers: [],
-  selected: new Set(),
+  selected: {}, // { [category]: supplier_id } — one entry per category
   config: null,
   sortBy: "profit",
   feasibleOnly: false,

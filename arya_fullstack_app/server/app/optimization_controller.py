@@ -367,6 +367,23 @@ def manual_metrics(
     if a["avg_social"] > float(cfg.social_cap) + 1e-12:
         feasible = False
 
+    # Category constraint: when suppliers have categories, picks must contain
+    # exactly one supplier from each category.
+    if "category" in suppliers_df.columns and suppliers_df["category"].notna().any():
+        cat_df = suppliers_df[["supplier_id", "category"]].copy()
+        cat_df["supplier_id"] = cat_df["supplier_id"].astype(str)
+        pick_set = {str(p) for p in picks}
+        all_cats = [
+            c for c in cat_df["category"].dropna().unique()
+            if str(c).strip().lower() != "nan"
+        ]
+        for cat in all_cats:
+            cat_ids = set(cat_df[cat_df["category"] == cat]["supplier_id"])
+            n_picked = len(pick_set & cat_ids)
+            if n_picked != 1:
+                feasible = False
+                break
+
     N = len(users_df)
     _empty_metrics: Dict[str, Any] = {
         "k": float(a["k"]),

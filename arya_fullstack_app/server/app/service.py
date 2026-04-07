@@ -114,6 +114,8 @@ def get_supplier_overview() -> list[dict[str, Any]]:
         "child_labor",
         "banned_chem",
     ]
+    if "category" in df.columns:
+        cols.append("category")
     out = df[cols].copy()
     out["supplier_id"] = out["supplier_id"].astype(str)
     return out.to_dict(orient="records")

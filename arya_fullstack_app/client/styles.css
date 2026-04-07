@@ -263,6 +263,34 @@ button.primary {
   color: var(--muted);
 }
 
+.supplier-category-section {
+  margin-bottom: 10px;
+}
+
+.supplier-category-section:last-child {
+  margin-bottom: 0;
+}
+
+.supplier-category-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+  background: var(--primary-weak);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin-bottom: 4px;
+}
+
+.supplier-category-section .supplier-item:last-child {
+  border-bottom: 1px solid #f2f2f2;
+}
+
+.supplier-category-section:last-child .supplier-item:last-child {
+  border-bottom: none;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
