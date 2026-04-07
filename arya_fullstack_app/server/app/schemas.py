@@ -14,6 +14,7 @@ class EvalRequest(BaseModel):
     price_per_user: Optional[float] = None
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
+    delta: Optional[float] = Field(default=None, gt=0)
 
 
 class BenchmarkRequest(BaseModel):
@@ -38,6 +39,7 @@ class RoundStartRequest(BaseModel):
 class SessionConfigRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
+    delta: Optional[float] = Field(default=None, gt=0)
 
 
 class MatchRunRequest(BaseModel):
@@ -49,6 +51,7 @@ class SubmitRequest(BaseModel):
     objective: Objective
     picks: list[str] = Field(default_factory=list)
     price_per_user: Optional[float] = None
+    delta: Optional[float] = Field(default=None, gt=0)
     comment: Optional[str] = None
     player_name: Optional[str] = None
     session_code: Optional[str] = None

@@ -13,6 +13,9 @@ class GameSettings:
     social_cap: float = 3.0
     cost_scale: float = 10.0
     price_per_user: float = 100.0
+    # delta: price sensitivity in MNL utility  U = quality - delta * w_cost * price
+    # delta=0.1 means a $10 price increase (at w_cost=1) shifts utility by -1.0 (≈ one quality unit)
+    price_sensitivity_delta: float = 0.1
 
 
 GAME_SETTINGS = GameSettings()

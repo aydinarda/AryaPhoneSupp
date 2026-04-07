@@ -82,6 +82,7 @@ export function currentPayload() {
     price_per_user: pricePerUser,
     beta_alpha: state.betaAlpha ?? 3.0,
     beta_beta: state.betaBeta ?? 3.0,
+    delta: state.delta ?? 0.1,
   };
 }
 

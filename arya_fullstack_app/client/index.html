@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260406-1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260407-2" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -64,7 +64,14 @@
                   <input id="betaBeta" type="number" min="0.1" step="0.1" value="3.0" />
                 </div>
               </div>
-              <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution</button>
+              <label class="section-label" style="margin-top:8px;">Price Sensitivity (δ)</label>
+              <div class="beta-params-row">
+                <div class="beta-param">
+                  <label for="deltaInput">δ = 0.1 means $10 price ↑ → −1 utility (at w_cost=1)</label>
+                  <input id="deltaInput" type="number" min="0.001" max="2" step="0.01" value="0.1" />
+                </div>
+              </div>
+              <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution &amp; δ</button>
 
               <div class="actions-row compact" style="margin-top:10px;">
                 <button id="btnStartRound">Start Round</button>
@@ -97,6 +104,15 @@
               <tbody></tbody>
             </table>
           </div>
+          <details id="segmentSharesDetails" style="margin-top:12px;">
+            <summary style="cursor:pointer;font-size:0.88rem;color:var(--muted);user-select:none;">Per-Segment Market Shares ▾</summary>
+            <div class="table-wrap" style="margin-top:8px;">
+              <table id="segmentSharesTable" style="font-size:0.8rem;">
+                <thead><tr id="segmentSharesHead"></tr></thead>
+                <tbody id="segmentSharesBody"></tbody>
+              </table>
+            </div>
+          </details>
         </section>
 
         <section class="card info" id="configInfo">Loading...</section>
@@ -186,6 +202,6 @@
       </section>
     </div>
 
-    <script type="module" src="/assets/app.js?v=20260406-1"></script>
+    <script type="module" src="/assets/app.js?v=20260407-2"></script>
   </body>
 </html>

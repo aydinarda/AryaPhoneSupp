@@ -137,6 +137,17 @@ body {
   gap: 10px;
 }
 
+#segmentSharesTable th,
+#segmentSharesTable td {
+  padding: 2px 6px;
+  white-space: nowrap;
+  text-align: right;
+}
+#segmentSharesTable th:first-child,
+#segmentSharesTable td:first-child {
+  text-align: left;
+}
+
 .beta-param {
   display: flex;
   flex-direction: column;

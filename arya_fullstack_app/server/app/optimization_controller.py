@@ -350,6 +350,7 @@ def manual_metrics(
     picks: List[str],
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
+    delta: float | None = None,
 ) -> Dict[str, Any]:
     from .beta_density import BetaDensity
     from .mnl_market import BuyerProfile, run_mnl_market
@@ -414,14 +415,13 @@ def manual_metrics(
         avg_low_quality=float(a["avg_low_quality"]),
     )
 
-    # delta normalises the price term into the same scale as quality utility (O(1-5)).
-    # delta = cost_scale / price means: reducing price by 1 unit raises MNL utility
-    # by delta * w_cost, which is proportional to the cost saving that affects profit.
-    delta = float(cfg.cost_scale) / max(price, 1.0)
-
-    # Run MNL with outside option at u=0 ("no purchase" baseline).
-    # total_demand in [0,1] is the density-weighted fraction of users who buy.
-    mnl_result = run_mnl_market([profile], segments, delta=delta, u_outside=None)
+    # delta: price sensitivity in MNL utility  U = quality - delta * w_cost * price
+    # Caller may pass an explicit delta (e.g. admin-configured session delta).
+    # Default 0.1 = cost_scale(10) / reference_price(100), meaning a $10 price
+    # increase shifts utility by -1 for a segment with w_cost=1.
+    # u_outside=-3 gives a "no-purchase" baseline so monopolist captures ~75% at price=100.
+    _delta = float(delta) if delta is not None else 0.1
+    mnl_result = run_mnl_market([profile], segments, delta=_delta, u_outside=-3.0)
     br = mnl_result.buyer_results.get("team")
 
     if br and br.total_demand > 0:

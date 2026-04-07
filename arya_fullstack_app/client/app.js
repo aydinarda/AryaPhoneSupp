@@ -45,21 +45,28 @@ function setupTabs() {
 async function applyBetaDistribution() {
   const a = parseFloat(el.betaAlpha?.value);
   const b = parseFloat(el.betaBeta?.value);
+  const d = parseFloat(el.deltaInput?.value);
   if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid α/β values.";
     return;
   }
   state.betaAlpha = a;
   state.betaBeta = b;
+  if (Number.isFinite(d) && d > 0) state.delta = d;
   renderDistributionChart();
 
   if (!state.gameCode) return;
   try {
+    const body = { beta_alpha: a, beta_beta: b };
+    if (Number.isFinite(d) && d > 0) body.delta = d;
     await api(`/api/sessions/${state.gameCode}/config`, {
       method: "PATCH",
-      body: JSON.stringify({ beta_alpha: a, beta_beta: b }),
+      body: JSON.stringify(body),
     });
-    if (el.adminRoundHint) el.adminRoundHint.textContent = "Distribution applied.";
+    if (el.adminRoundHint) {
+      const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";
+      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}).`;
+    }
   } catch (e) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = `Failed to apply: ${e.message}`;
   }

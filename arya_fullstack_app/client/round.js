@@ -125,6 +125,34 @@ export function renderMatchingResult(payload) {
       })
       .join("");
   }
+
+  // Per-segment breakdown
+  _renderSegmentShares(payload.segment_shares || [], teamFinancials.map((tf) => tf.team));
+}
+
+function _renderSegmentShares(segmentShares, teams) {
+  if (!el.segmentSharesHead || !el.segmentSharesBody) return;
+  if (!segmentShares.length || !teams.length) {
+    if (el.segmentSharesDetails) el.segmentSharesDetails.style.display = "none";
+    return;
+  }
+  if (el.segmentSharesDetails) el.segmentSharesDetails.style.display = "";
+
+  // Header: Segment | density | Team1 | Team2 | ...
+  el.segmentSharesHead.innerHTML =
+    `<th>#</th><th>Density</th>` + teams.map((t) => `<th>${t}</th>`).join("");
+
+  el.segmentSharesBody.innerHTML = segmentShares
+    .map((s) => {
+      const cells = teams
+        .map((t) => {
+          const pct = s.shares?.[t] ?? 0;
+          return `<td>${pct.toFixed(1)}%</td>`;
+        })
+        .join("");
+      return `<tr><td>${s.segment_index}</td><td>${(s.density ?? 0).toFixed(3)}</td>${cells}</tr>`;
+    })
+    .join("");
 }
 
 // Flag: have we initialised the admin inputs from the server at least once this session?
@@ -137,16 +165,20 @@ export function resetBetaInputsInitialized() {
 function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
+  const d = Number(data.delta);
   const aOk = Number.isFinite(a) && a > 0;
   const bOk = Number.isFinite(b) && b > 0;
-  const changed = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta);
+  const dOk = Number.isFinite(d) && d > 0;
+  const changed = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta) || (dOk && d !== state.delta);
   if (aOk) state.betaAlpha = a;
   if (bOk) state.betaBeta = b;
+  if (dOk) state.delta = d;
   if (changed) {
     // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
     if (!_betaInputsInitialized) {
-      if (el.betaAlpha) el.betaAlpha.value = state.betaAlpha;
-      if (el.betaBeta)  el.betaBeta.value  = state.betaBeta;
+      if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
+      if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
+      if (el.deltaInput) el.deltaInput.value = state.delta;
       _betaInputsInitialized = true;
     }
     renderDistributionChart();

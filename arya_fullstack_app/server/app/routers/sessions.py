@@ -25,9 +25,10 @@ from ..settings import FIXED_POLICY, GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-# In-memory beta distribution config per session code.
+# In-memory session config per session code (beta distribution + delta).
 # Resets on server restart (acceptable for a classroom game).
 _session_beta: dict[str, tuple[float, float]] = {}
+_session_delta: dict[str, float] = {}
 
 _DEFAULT_ALPHA = 3.0
 _DEFAULT_BETA = 3.0
@@ -267,9 +268,10 @@ def get_current_round(code: str) -> dict[str, Any]:
     rows = _extract_rows(fetch_active_round(session_token))
     normalized = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+    delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
 
     if not rows:
-        return {"round": None, "total_rounds": total_rounds, "beta_alpha": beta_alpha, "beta_beta": beta_beta}
+        return {"round": None, "total_rounds": total_rounds, "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta}
 
     row = rows[0]
     return {
@@ -284,6 +286,7 @@ def get_current_round(code: str) -> dict[str, Any]:
         "total_rounds": total_rounds,
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
+        "delta": delta,
     }
 
 
@@ -291,7 +294,10 @@ def get_current_round(code: str) -> dict[str, Any]:
 def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any]:
     normalized = (code or "").strip().upper()
     _session_beta[normalized] = (float(req.beta_alpha), float(req.beta_beta))
-    return {"ok": True, "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta}
+    if req.delta is not None:
+        _session_delta[normalized] = float(req.delta)
+    current_delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
+    return {"ok": True, "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta, "delta": current_delta}
 
 
 @router.post("/{code}/match")
@@ -366,6 +372,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
     normalized_code = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+    delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
     bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     segments = [
@@ -396,8 +403,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         for tid in team_ids_sorted
     ]
 
-    avg_price = sum(p.price_per_user for p in profiles) / max(len(profiles), 1)
-    delta = float(GAME_SETTINGS.cost_scale) / max(avg_price, 1.0)
     mnl_result = run_mnl_market(profiles, segments, delta=delta, u_outside=None)
 
     market_to_users: dict[str, Any] = {}
@@ -435,6 +440,18 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "unit_margin": round(unit_margin, 2),
         })
 
+    # Build per-segment share breakdown (sorted by segment index = w_cost order)
+    segment_shares: list[dict[str, Any]] = []
+    for idx, alloc in enumerate(mnl_result.segment_allocations):
+        entry: dict[str, Any] = {
+            "segment_index": idx + 1,
+            "segment_id": alloc.segment_id,
+            "density": round(alloc.density, 4),
+            "shares": {t: round(s * 100, 2) for t, s in alloc.shares.items()},
+        }
+        segment_shares.append(entry)
+    segment_shares.sort(key=lambda x: x["segment_index"])
+
     result = {
         "meta": {
             "solver": "mnl_v1",
@@ -449,6 +466,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "market_loads": market_loads,
         "excluded_infeasible_users": excluded_infeasible_teams,
         "excluded_infeasible_teams": excluded_infeasible_teams,
+        "segment_shares": segment_shares,
         "round_financials": {
             "formula": "realized_profit = effective_users(MNL) x unit_margin",
             "delta": round(delta, 4),
