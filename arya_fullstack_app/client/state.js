@@ -19,6 +19,8 @@ export const state = {
   betaAlpha: 3.0,
   betaBeta: 3.0,
   delta: 0.1,
+  childLaborPenalty: 0.0,
+  bannedChemPenalty: 0.0,
   numSegments: 0,
   historyMetric: "profit",
 };
@@ -73,6 +75,8 @@ export const el = {
   betaAlpha: document.getElementById("betaAlpha"),
   betaBeta: document.getElementById("betaBeta"),
   deltaInput: document.getElementById("deltaInput"),
+  childLaborPenaltyInput: document.getElementById("childLaborPenaltyInput"),
+  bannedChemPenaltyInput: document.getElementById("bannedChemPenaltyInput"),
   btnStartRound: document.getElementById("btnStartRound"),
   btnRunMatch: document.getElementById("btnRunMatch"),
   btnApplyDistribution: document.getElementById("btnApplyDistribution"),

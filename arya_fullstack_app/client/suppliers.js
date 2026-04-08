@@ -14,6 +14,8 @@ export function renderMetrics(target, title, payload) {
   target.innerHTML = [
     metricCard(`${title}`, feasibleBadge),
     metricCard("Profit", fmt(m.profit_total)),
+    metricCard("Cost / Unit", fmt(m.cost_per_unit)),
+    metricCard("Penalty / Unit", fmt(m.penalty_per_unit)),
     metricCard("Utility", fmt(m.utility_total)),
     metricCard("Avg Env", fmt(m.avg_env)),
     metricCard("Avg Social", fmt(m.avg_social)),
@@ -88,7 +90,7 @@ export function renderSuppliers() {
     ...Object.keys(grouped).filter((c) => !CATEGORY_ORDER.includes(c)),
   ];
 
-  el.supplierList.innerHTML = orderedCats
+  const sectionsHtml = orderedCats
     .map((cat) => {
       const label = CATEGORY_LABELS[cat] || `Select a ${cat.charAt(0).toUpperCase() + cat.slice(1)}`;
       const selectedId = state.selected[cat] || null;
@@ -105,6 +107,8 @@ export function renderSuppliers() {
         </div>`;
     })
     .join("");
+
+  el.supplierList.innerHTML = `<div class="supplier-list-grid">${sectionsHtml}</div>`;
 
   el.supplierList.querySelectorAll("input[type=radio]").forEach((input) => {
     input.addEventListener("change", (ev) => {
@@ -128,6 +132,17 @@ export async function loadConfigAndSuppliers() {
   renderSuppliers();
 }
 
+function getMissingCategories() {
+  const allCats = [
+    ...new Set(
+      state.suppliers
+        .map((s) => (s.category || "").toLowerCase().trim())
+        .filter(Boolean)
+    ),
+  ];
+  return allCats.filter((cat) => !state.selected[cat]);
+}
+
 export function currentPayload() {
   const rawPrice = Number(el.pricePerUser?.value);
   const defaultPrice = Number(state.config?.price_per_user ?? 100);
@@ -145,10 +160,17 @@ export function currentPayload() {
     beta_alpha: state.betaAlpha ?? 3.0,
     beta_beta: state.betaBeta ?? 3.0,
     delta: state.delta ?? 0.1,
+    child_labor_penalty: state.childLaborPenalty ?? 0.0,
+    banned_chem_penalty: state.bannedChemPenalty ?? 0.0,
   };
 }
 
 export async function runManual() {
+  const missing = getMissingCategories();
+  if (missing.length > 0) {
+    el.statusText.textContent = `You haven't selected from: ${missing.join(", ")}.`;
+    return;
+  }
   try {
     const res = await api("/api/manual-eval", {
       method: "POST",
@@ -164,6 +186,11 @@ export async function runManual() {
 }
 
 export async function submit() {
+  const missing = getMissingCategories();
+  if (missing.length > 0) {
+    el.statusText.textContent = `You haven't selected from: ${missing.join(", ")}.`;
+    return;
+  }
   try {
     const sessionMeta = [
       state.role ? `role:${state.role}` : null,

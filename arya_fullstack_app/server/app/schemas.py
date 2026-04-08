@@ -15,6 +15,8 @@ class EvalRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
     delta: Optional[float] = Field(default=None, gt=0)
+    child_labor_penalty: Optional[float] = Field(default=None, ge=0)
+    banned_chem_penalty: Optional[float] = Field(default=None, ge=0)
 
 
 class BenchmarkRequest(BaseModel):
@@ -40,6 +42,8 @@ class SessionConfigRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
     delta: Optional[float] = Field(default=None, gt=0)
+    child_labor_penalty: Optional[float] = Field(default=None, ge=0)
+    banned_chem_penalty: Optional[float] = Field(default=None, ge=0)
 
 
 class MatchRunRequest(BaseModel):
@@ -52,6 +56,8 @@ class SubmitRequest(BaseModel):
     picks: list[str] = Field(default_factory=list)
     price_per_user: Optional[float] = None
     delta: Optional[float] = Field(default=None, gt=0)
+    child_labor_penalty: Optional[float] = Field(default=None, ge=0)
+    banned_chem_penalty: Optional[float] = Field(default=None, ge=0)
     comment: Optional[str] = None
     player_name: Optional[str] = None
     session_code: Optional[str] = None

@@ -46,6 +46,8 @@ async function applyBetaDistribution() {
   const a = parseFloat(el.betaAlpha?.value);
   const b = parseFloat(el.betaBeta?.value);
   const d = parseFloat(el.deltaInput?.value);
+  const cl = parseFloat(el.childLaborPenaltyInput?.value ?? "0");
+  const bc = parseFloat(el.bannedChemPenaltyInput?.value ?? "0");
   if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid α/β values.";
     return;
@@ -53,19 +55,24 @@ async function applyBetaDistribution() {
   state.betaAlpha = a;
   state.betaBeta = b;
   if (Number.isFinite(d) && d > 0) state.delta = d;
+  if (Number.isFinite(cl) && cl >= 0) state.childLaborPenalty = cl;
+  if (Number.isFinite(bc) && bc >= 0) state.bannedChemPenalty = bc;
   renderDistributionChart();
 
   if (!state.gameCode) return;
   try {
     const body = { beta_alpha: a, beta_beta: b };
     if (Number.isFinite(d) && d > 0) body.delta = d;
+    if (Number.isFinite(cl) && cl >= 0) body.child_labor_penalty = cl;
+    if (Number.isFinite(bc) && bc >= 0) body.banned_chem_penalty = bc;
     await api(`/api/sessions/${state.gameCode}/config`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
     if (el.adminRoundHint) {
       const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";
-      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}).`;
+      const penStr = (cl > 0 || bc > 0) ? ` penalties: CL=${cl} BC=${bc}` : "";
+      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}${penStr}).`;
     }
   } catch (e) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = `Failed to apply: ${e.message}`;

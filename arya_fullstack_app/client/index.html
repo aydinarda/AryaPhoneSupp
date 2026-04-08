@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260407-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260408-1" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -69,6 +69,17 @@
                 <div class="beta-param">
                   <label for="deltaInput">δ = 0.1 means $10 price ↑ → −1 utility (at w_cost=1)</label>
                   <input id="deltaInput" type="number" min="0.001" max="2" step="0.01" value="0.1" />
+                </div>
+              </div>
+              <label class="section-label" style="margin-top:8px;">Penalty Costs</label>
+              <div class="beta-params-row">
+                <div class="beta-param">
+                  <label for="childLaborPenaltyInput">Child Labor Penalty / unit</label>
+                  <input id="childLaborPenaltyInput" type="number" min="0" step="1" value="0" />
+                </div>
+                <div class="beta-param">
+                  <label for="bannedChemPenaltyInput">Banned Chem Penalty / unit</label>
+                  <input id="bannedChemPenaltyInput" type="number" min="0" step="1" value="0" />
                 </div>
               </div>
               <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution &amp; δ</button>
@@ -142,7 +153,7 @@
               <button id="btnSubmit" class="primary">Submit</button>
             </div>
 
-            <div class="layout-2">
+            <div class="layout-suppliers">
               <div>
                 <h3>Suppliers</h3>
                 <div id="supplierList" class="supplier-list"></div>
@@ -202,6 +213,6 @@
       </section>
     </div>
 
-    <script type="module" src="/assets/app.js?v=20260407-2"></script>
+    <script type="module" src="/assets/app.js?v=20260408-1"></script>
   </body>
 </html>

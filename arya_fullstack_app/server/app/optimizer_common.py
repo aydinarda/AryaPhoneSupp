@@ -88,6 +88,8 @@ def solve_best_over_k(
     density_weights: Optional[Dict[str, float]] = None,
     # kept for backward compatibility — ignored, use density_weights instead
     served_users: int = 0,
+    child_labor_penalty: float = 0.0,
+    banned_chem_penalty: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """Solve the supplier selection problem.
 
@@ -115,6 +117,16 @@ def solve_best_over_k(
     strat = dict(zip(df["supplier_id"], df["strategic"].astype(float)))
     imp = dict(zip(df["supplier_id"], df["improvement"].astype(float)))
     lq = dict(zip(df["supplier_id"], df["low_quality"].astype(float)))
+
+    cl = {sid: float(df.loc[df["supplier_id"] == sid, "child_labor"].iloc[0]) if "child_labor" in df.columns else 0.0 for sid in supplier_ids}
+    bc = {sid: float(df.loc[df["supplier_id"] == sid, "banned_chem"].iloc[0]) if "banned_chem" in df.columns else 0.0 for sid in supplier_ids}
+
+    # Effective cost coefficient per supplier including ethical penalties
+    # penalty is per-unit, binary flags (0/1) so penalty applies fully if flag=1
+    eff_cost = {
+        sid: cost[sid] + float(child_labor_penalty) * cl[sid] + float(banned_chem_penalty) * bc[sid]
+        for sid in supplier_ids
+    }
 
     env_ut = {sid: 5.0 - env[sid] for sid in supplier_ids}
     soc_ut = {sid: 5.0 - soc[sid] for sid in supplier_ids}
@@ -179,7 +191,7 @@ def solve_best_over_k(
 
         if objective_mode == "profit":
             model.setObjective(
-                -gp.quicksum(cost[sid] * y[sid] for sid in supplier_ids),
+                -gp.quicksum(eff_cost[sid] * y[sid] for sid in supplier_ids),
                 GRB.MAXIMIZE,
             )
         elif objective_mode == "utility":
@@ -238,7 +250,7 @@ def solve_best_over_k(
         model.addConstr(gp.quicksum(soc[sid] * y[sid] for sid in supplier_ids) <= float(social_cap) * k, name="soc_cap")
 
         if objective_mode == "profit":
-            model.setObjective(-3.0 * gp.quicksum(cost[sid] * y[sid] for sid in supplier_ids), GRB.MAXIMIZE)
+            model.setObjective(-gp.quicksum(eff_cost[sid] * y[sid] for sid in supplier_ids), GRB.MAXIMIZE)
         elif objective_mode == "utility":
             model.setObjective(gp.quicksum(util_num_coeff[sid] * y[sid] for sid in supplier_ids), GRB.MAXIMIZE)
         else:

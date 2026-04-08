@@ -58,6 +58,8 @@ def manual_eval(req: EvalRequest) -> dict[str, Any]:
             beta_alpha=req.beta_alpha,
             beta_beta=req.beta_beta,
             delta=req.delta,
+            child_labor_penalty=req.child_labor_penalty,
+            banned_chem_penalty=req.banned_chem_penalty,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -76,7 +78,13 @@ def benchmark(req: BenchmarkRequest) -> dict[str, Any]:
 @app.post("/api/submit")
 def submit(req: SubmitRequest) -> dict[str, Any]:
     try:
-        result = evaluate_manual(req.objective, req.picks, price_per_user=req.price_per_user, delta=req.delta)
+        result = evaluate_manual(
+            req.objective, req.picks,
+            price_per_user=req.price_per_user,
+            delta=req.delta,
+            child_labor_penalty=req.child_labor_penalty,
+            banned_chem_penalty=req.banned_chem_penalty,
+        )
         metrics = result["metrics"]
         feasible = result.get("feasible", False)
 

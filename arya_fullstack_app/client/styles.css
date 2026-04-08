@@ -237,12 +237,32 @@ button.primary {
   gap: 18px;
 }
 
+.layout-suppliers {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 18px;
+}
+
 .supplier-list {
-  max-height: 520px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px;
+}
+
+.supplier-list-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.supplier-list-grid .supplier-category-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  overflow-y: auto;
+  max-height: 480px;
+  margin-bottom: 0;
 }
 
 .supplier-item {

@@ -1,6 +1,5 @@
 """OptimizationController.py
 
-This project uses a **supplier-set averaging game**:
 
 - Students pick any non-empty set of suppliers.
 - The delivered product is the **average** of the chosen suppliers' attributes.
@@ -27,14 +26,7 @@ Objectives:
         + w_improvement*u * improvement_mult * (avg(improvement) - 1)
         + w_low_quality*u * low_quality_mult * (5 - avg(low_quality)) ]
 
-Benchmarks:
-- The optimizer is allowed to choose **any number of suppliers** (no fixed K).
-- Because objectives depend on the average (division by k), we solve by enumerating k=1..N
-  and solving a MILP with the constraint sum(y)=k for each k.
 
-UI requirements supported:
-- Manual evaluation never calls the solver (so students never see solver infeasibility messages).
-- Benchmark hides the chosen supplier IDs (UI does not display them).
 """
 
 from __future__ import annotations
@@ -288,37 +280,31 @@ def _select_last_n_users(users_df: pd.DataFrame, n: int) -> pd.DataFrame:
 
 
 def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, float]:
+    _zero = {
+        "k": 0.0, "avg_env": 0.0, "avg_social": 0.0, "avg_cost": 0.0,
+        "avg_strategic": 0.0, "avg_improvement": 0.0, "avg_low_quality": 0.0,
+        "avg_child_labor": 0.0, "avg_banned_chem": 0.0,
+    }
     if not picks:
-        return {
-            "k": 0.0,
-            "avg_env": 0.0,
-            "avg_social": 0.0,
-            "avg_cost": 0.0,
-            "avg_strategic": 0.0,
-            "avg_improvement": 0.0,
-            "avg_low_quality": 0.0,
-        }
+        return _zero
 
     sel = suppliers_df[suppliers_df["supplier_id"].astype(str).isin([str(x) for x in picks])].copy()
     if sel.empty:
-        return {
-            "k": 0.0,
-            "avg_env": 0.0,
-            "avg_social": 0.0,
-            "avg_cost": 0.0,
-            "avg_strategic": 0.0,
-            "avg_improvement": 0.0,
-            "avg_low_quality": 0.0,
-        }
+        return _zero
+
+    def _col_mean(col: str) -> float:
+        return float(sel[col].mean()) if col in sel.columns else 0.0
 
     return {
         "k": float(len(sel)),
-        "avg_env": float(sel["env_risk"].mean()),
-        "avg_social": float(sel["social_risk"].mean()),
-        "avg_cost": float(sel["cost_score"].mean()),
-        "avg_strategic": float(sel["strategic"].mean()),
-        "avg_improvement": float(sel["improvement"].mean()),
-        "avg_low_quality": float(sel["low_quality"].mean()),
+        "avg_env": _col_mean("env_risk"),
+        "avg_social": _col_mean("social_risk"),
+        "avg_cost": _col_mean("cost_score"),
+        "avg_strategic": _col_mean("strategic"),
+        "avg_improvement": _col_mean("improvement"),
+        "avg_low_quality": _col_mean("low_quality"),
+        "avg_child_labor": _col_mean("child_labor"),
+        "avg_banned_chem": _col_mean("banned_chem"),
     }
 
 
@@ -351,6 +337,8 @@ def manual_metrics(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
+    child_labor_penalty: float | None = None,
+    banned_chem_penalty: float | None = None,
 ) -> Dict[str, Any]:
     from .beta_density import BetaDensity
     from .mnl_market import BuyerProfile, run_mnl_market
@@ -384,6 +372,16 @@ def manual_metrics(
                 feasible = False
                 break
 
+    # Resolve penalty costs (caller overrides > session defaults > 0)
+    _cl_penalty = float(child_labor_penalty) if child_labor_penalty is not None else 0.0
+    _bc_penalty = float(banned_chem_penalty) if banned_chem_penalty is not None else 0.0
+    penalty_per_unit = (
+        _cl_penalty * float(a["avg_child_labor"])
+        + _bc_penalty * float(a["avg_banned_chem"])
+    )
+
+    cost_per_unit = float(cfg.cost_scale) * float(a["avg_cost"]) + penalty_per_unit
+
     N = len(users_df)
     _empty_metrics: Dict[str, Any] = {
         "k": float(a["k"]),
@@ -393,6 +391,10 @@ def manual_metrics(
         "avg_strategic": float(a["avg_strategic"]),
         "avg_improvement": float(a["avg_improvement"]),
         "avg_low_quality": float(a["avg_low_quality"]),
+        "avg_child_labor": float(a["avg_child_labor"]),
+        "avg_banned_chem": float(a["avg_banned_chem"]),
+        "penalty_per_unit": float(penalty_per_unit),
+        "cost_per_unit": float(cost_per_unit),
         "profit_total": 0.0,
         "utility_total": 0.0,
     }
@@ -400,8 +402,6 @@ def manual_metrics(
         return {"feasible": bool(feasible), "metrics": _empty_metrics}
 
     # --- Build density-weighted CustomerSegments ---
-    # Users are sorted by w_cost so that group index i maps to preference position (i+0.5)/N.
-    # The Beta distribution density at that position gives the relative size of each group.
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     bd = BetaDensity(alpha=max(0.01, float(beta_alpha)), beta=max(0.01, float(beta_beta)))
 
@@ -432,19 +432,13 @@ def manual_metrics(
         avg_low_quality=float(a["avg_low_quality"]),
     )
 
-    # delta: price sensitivity in MNL utility  U = quality - delta * w_cost * price
-    # Caller may pass an explicit delta (e.g. admin-configured session delta).
-    # Default 0.1 = cost_scale(10) / reference_price(100), meaning a $10 price
-    # increase shifts utility by -1 for a segment with w_cost=1.
-    # u_outside=-3 gives a "no-purchase" baseline so monopolist captures ~75% at price=100.
     _delta = float(delta) if delta is not None else 0.1
     mnl_result = run_mnl_market([profile], segments, delta=_delta, u_outside=-3.0)
     br = mnl_result.buyer_results.get("team")
 
     if br and br.total_demand > 0:
         effective_users = br.total_demand * N
-        profit_per_unit = price - float(cfg.cost_scale) * float(a["avg_cost"])
-        profit_total = effective_users * profit_per_unit
+        profit_total = effective_users * (price - cost_per_unit)
         utility_total = br.realized_utility * N
     else:
         profit_total = 0.0
@@ -460,6 +454,10 @@ def manual_metrics(
             "avg_strategic": float(a["avg_strategic"]),
             "avg_improvement": float(a["avg_improvement"]),
             "avg_low_quality": float(a["avg_low_quality"]),
+            "avg_child_labor": float(a["avg_child_labor"]),
+            "avg_banned_chem": float(a["avg_banned_chem"]),
+            "penalty_per_unit": float(penalty_per_unit),
+            "cost_per_unit": float(cost_per_unit),
             "profit_total": float(profit_total),
             "utility_total": float(utility_total),
         },

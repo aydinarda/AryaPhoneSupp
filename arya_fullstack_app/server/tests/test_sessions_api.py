@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -127,180 +128,174 @@ def test_join_requires_team_name() -> None:
     assert response.json()["detail"] == "Team name is required"
 
 
-def test_round_matching_excludes_infeasible_submissions(monkeypatch) -> None:
-    stored_result: dict[str, object] = {}
+def _mock_session_round(monkeypatch, submissions: list, suppliers_df, users_df) -> dict:
+    """Shared fixture: patch all DB calls and return a dict that insert_matching_result fills."""
+    stored: dict = {}
 
     monkeypatch.setattr(
         sessions_router,
         "fetch_game_session_by_code",
         lambda code: SimpleNamespace(
-            data=[
-                {
-                    "session_code": code,
-                    "session_token": "token-1",
-                    "is_active": True,
-                }
-            ]
+            data=[{"session_code": code, "session_token": "tok-1", "is_active": True}]
         ),
     )
     monkeypatch.setattr(
         sessions_router,
         "fetch_active_round",
         lambda session_token: SimpleNamespace(
-            data=[
-                {
-                    "round_no": 1,
-                    "market_capacity": GAME_SETTINGS.default_market_capacity,
-                    "created_at": "2026-03-12T10:00:00+00:00",
-                    "is_active": True,
-                }
-            ]
+            data=[{
+                "round_no": 1,
+                "market_capacity": GAME_SETTINGS.default_market_capacity,
+                "created_at": "2026-04-01T10:00:00+00:00",
+                "is_active": True,
+            }]
         ),
     )
-    monkeypatch.setattr(sessions_router, "fetch_latest_round", lambda session_token: SimpleNamespace(data=[]))
-    monkeypatch.setattr(sessions_router, "fetch_round_by_number", lambda session_token, round_no: SimpleNamespace(data=[]))
+    monkeypatch.setattr(sessions_router, "fetch_latest_round", lambda t: SimpleNamespace(data=[]))
+    monkeypatch.setattr(sessions_router, "fetch_round_by_number", lambda t, n: SimpleNamespace(data=[]))
     monkeypatch.setattr(
         sessions_router,
         "fetch_submissions_for_round",
-        lambda session_code, round_no: SimpleNamespace(
-            data=[
-                {
-                    "team": "FeasibleA",
-                    "selected_suppliers": "S1,S2",
-                    "created_at": "2026-03-12T10:00:01+00:00",
-                    "env_avg": 0.10,
-                    "social_avg": 0.10,
-                },
-                {
-                    "team": "InfeasibleB",
-                    "selected_suppliers": "S1,S3",
-                    "created_at": "2026-03-12T10:00:02+00:00",
-                    "env_avg": None,
-                    "social_avg": None,
-                    "feasible": "false",
-                },
-                {
-                    "team": "FeasibleC",
-                    "selected_suppliers": "S1",
-                    "created_at": "2026-03-12T10:00:03+00:00",
-                    "env_avg": 0.10,
-                    "social_avg": 0.10,
-                },
-            ]
-        ),
+        lambda sc, rno: SimpleNamespace(data=submissions),
     )
+    monkeypatch.setattr(sessions_router, "get_tables", lambda: (suppliers_df, users_df))
+    monkeypatch.setattr(sessions_router, "insert_matching_result", lambda payload: stored.update(payload))
 
-    # 10 users to verify many-to-one matching with capacity=8
-    mock_users = pd.DataFrame(
-        [
-            {"user_id": f"U{i}", "w_env": round(0.1 * i, 2), "w_social": round(0.2 * (11 - i), 2),
-             "w_cost": 1.0, "w_strategic": 1.0, "w_improvement": 1.0, "w_low_quality": 0.5}
-            for i in range(1, 11)
-        ]
-    )
+    return stored
 
-    monkeypatch.setattr(
-        sessions_router,
-        "get_tables",
-        lambda: (
-            pd.DataFrame(
-                [
-                    {
-                        "supplier_id": "S1",
-                        "env_risk": 0.1,
-                        "social_risk": 0.1,
-                        "cost_score": 1.0,
-                        "strategic": 1.0,
-                        "improvement": 1.0,
-                        "low_quality": 1.0,
-                    },
-                    {
-                        "supplier_id": "S2",
-                        "env_risk": 0.2,
-                        "social_risk": 0.2,
-                        "cost_score": 1.2,
-                        "strategic": 1.1,
-                        "improvement": 1.1,
-                        "low_quality": 1.1,
-                    },
-                    {
-                        "supplier_id": "S3",
-                        "env_risk": 5.0,
-                        "social_risk": 5.0,
-                        "cost_score": 4.0,
-                        "strategic": 0.5,
-                        "improvement": 0.5,
-                        "low_quality": 4.0,
-                    },
-                ]
-            ),
-            mock_users,
-        ),
+
+def _make_mock_suppliers() -> pd.DataFrame:
+    """3-category supplier catalogue: 2 cameras, 1 keyboard, 1 cable."""
+    return pd.DataFrame([
+        {"supplier_id": "CAM1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 1.0,
+         "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+         "child_labor": 0.0, "banned_chem": 0.0, "category": "camera"},
+        {"supplier_id": "CAM2", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 2.0,
+         "strategic": 2.0, "improvement": 2.0, "low_quality": 2.0,
+         "child_labor": 0.0, "banned_chem": 0.0, "category": "camera"},
+        {"supplier_id": "KEY1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 1.0,
+         "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+         "child_labor": 0.0, "banned_chem": 0.0, "category": "keyboard"},
+        {"supplier_id": "CBL1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 1.0,
+         "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+         "child_labor": 0.0, "banned_chem": 0.0, "category": "cable"},
+    ])
+
+
+def _make_mock_users(n: int = 5) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"user_id": f"U{i}", "w_env": 1.0, "w_social": 1.0, "w_cost": 1.0,
+         "w_strategic": 1.0, "w_improvement": 1.0, "w_low_quality": 1.0}
+        for i in range(1, n + 1)
+    ])
+
+
+def test_round_matching_excludes_risk_infeasible_submissions(monkeypatch) -> None:
+    """Teams flagged infeasible in the DB (risk caps) are excluded from MNL matching."""
+    stored = _mock_session_round(
+        monkeypatch,
+        submissions=[
+            {
+                "team": "FeasibleA",
+                "selected_suppliers": "CAM1,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:01+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,
+            },
+            {
+                "team": "InfeasibleB",
+                "selected_suppliers": "CAM1,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:02+00:00",
+                "env_avg": None, "social_avg": None, "feasible": "false",
+            },
+            {
+                "team": "FeasibleC",
+                "selected_suppliers": "CAM2,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:03+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,
+            },
+        ],
+        suppliers_df=_make_mock_suppliers(),
+        users_df=_make_mock_users(5),
     )
-    monkeypatch.setattr(sessions_router, "insert_matching_result", lambda payload: stored_result.update(payload))
 
     response = client.post("/api/sessions/ABC123/match", json={})
 
     assert response.status_code == 200
     payload = response.json()
+
     assert payload["eligible_team_count"] == 2
     assert payload["excluded_infeasible_teams"] == ["InfeasibleB"]
-    assert payload["matching"]["excluded_infeasible_users"] == ["InfeasibleB"]
-    assert payload["matching"]["meta"]["eligible_team_count"] == 2
-    assert payload["matching"]["meta"]["infeasible_excluded_count"] == 1
-    assert payload["matching"]["matching_target"] == "team_product"
-    assert "InfeasibleB" not in payload["matching"]["market_to_users"]
 
-    # Verify many-to-one: 10 users across 2 feasible teams, each with capacity=8
-    # Total capacity = 16 >= 10 users, so all users should be matched
     matching = payload["matching"]
-    assert matching["meta"]["user_pool_count"] == 10
-    assert matching["meta"]["matched_count"] == 10
-    assert len(matching["unmatched_users"]) == 0
+    assert matching["meta"]["solver"] == "mnl_v1"
+    assert matching["meta"]["user_pool_count"] == 5
+    assert matching["meta"]["eligible_team_count"] == 2
+    assert matching["meta"]["infeasible_excluded_count"] == 1
+    assert set(matching["market_to_users"].keys()) == {"FeasibleA", "FeasibleC"}
+    assert "InfeasibleB" not in matching["market_to_users"]
+    assert "InfeasibleB" in matching["excluded_infeasible_teams"]
 
-    # Each team can have at most default_market_capacity users
-    for team_id, users in matching["market_to_users"].items():
-        assert len(users) <= GAME_SETTINGS.default_market_capacity, (
-            f"{team_id} has {len(users)} users, exceeds capacity {GAME_SETTINGS.default_market_capacity}"
-        )
+    # Round financials: both feasible teams have entries
+    tf = {row["team"]: row for row in matching["round_financials"]["team_financials"]}
+    assert set(tf.keys()) == {"FeasibleA", "FeasibleC"}
+    for row in tf.values():
+        assert row["demand_share"] >= 0.0
+        assert "realized_profit" in row
 
-    # All 10 users are distributed across the 2 feasible teams
-    total_matched = sum(len(u) for u in matching["market_to_users"].values())
-    assert total_matched == 10
-    assert set(payload["matching"]["market_to_users"].keys()) == {"FeasibleA", "FeasibleC"}
-    expected_user_ids = {f"U{i}" for i in range(1, 11)}
-    assert set(payload["matching"]["user_to_market"].keys()) == expected_user_ids
-    assert payload["matching"]["market_loads"]["FeasibleA"]["capacity"] == GAME_SETTINGS.default_market_capacity
-    assert stored_result["matched_count"] == payload["matching"]["meta"]["matched_count"]
-    # Solver must always be reported regardless of which path was taken
-    assert payload["matching"]["meta"]["solver"] in {
-        "stable_gale_shapley",
-        "gurobi_stable_lexicographic",
-        "market_demand_v1",
-    }
+    # Stored result round_no matches
+    assert stored["round_no"] == 1
+    assert stored["matched_count"] == matching["meta"]["matched_count"]
+    assert stored["result"]["round_financials"]["round_profit_total"] == pytest.approx(
+        matching["round_financials"]["round_profit_total"], abs=1e-6
+    )
 
-    # Round financials: realized profit must be based on actual matched users.
-    round_financials = payload["matching"].get("round_financials") or {}
-    team_financials = round_financials.get("team_financials") or []
-    assert len(team_financials) == 2
 
-    by_team = {row["team"]: row for row in team_financials}
-    assert set(by_team.keys()) == {"FeasibleA", "FeasibleC"}
+def test_round_matching_excludes_category_invalid_submissions(monkeypatch) -> None:
+    """Teams whose picks violate category constraints (not 1-per-category) are excluded."""
+    _mock_session_round(
+        monkeypatch,
+        submissions=[
+            {
+                "team": "GoodTeam",
+                "selected_suppliers": "CAM1,KEY1,CBL1",   # 1 per category ✓
+                "created_at": "2026-04-01T10:00:01+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,
+            },
+            {
+                "team": "TwoCameras",
+                "selected_suppliers": "CAM1,CAM2,CBL1",   # 2 cameras, no keyboard ✗
+                "created_at": "2026-04-01T10:00:02+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,  # passes risk check
+            },
+            {
+                "team": "MissingCable",
+                "selected_suppliers": "CAM1,KEY1",         # no cable ✗
+                "created_at": "2026-04-01T10:00:03+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,
+            },
+        ],
+        suppliers_df=_make_mock_suppliers(),
+        users_df=_make_mock_users(3),
+    )
 
-    for team_id, row in by_team.items():
-        matched_users = payload["matching"]["market_to_users"].get(team_id, [])
-        assert row["matched_user_count"] == len(matched_users)
-        assert row["matched_users"] == matched_users
+    response = client.post("/api/sessions/ABC123/match", json={})
 
-        expected_realized = row["matched_user_count"] * (
-            row["sale_price_per_user"] - row["cost_component_per_user"] - row["penalty_per_user"]
-        )
-        assert abs(row["realized_profit"] - expected_realized) < 1e-9
+    assert response.status_code == 200
+    payload = response.json()
 
-    expected_round_total = sum(float(row["realized_profit"]) for row in team_financials)
-    assert abs(float(round_financials["round_profit_total"]) - expected_round_total) < 1e-9
-    assert abs(float(payload["matching"]["meta"]["round_profit_total"]) - expected_round_total) < 1e-9
-    assert abs(float(stored_result["result"]["round_financials"]["round_profit_total"]) - expected_round_total) < 1e-9
+    assert payload["eligible_team_count"] == 1
+    excluded = set(payload["excluded_infeasible_teams"])
+    assert "TwoCameras" in excluded
+    assert "MissingCable" in excluded
+    assert "GoodTeam" not in excluded
+
+    matching = payload["matching"]
+    assert set(matching["market_to_users"].keys()) == {"GoodTeam"}
+    assert "TwoCameras" not in matching["market_to_users"]
+    assert "MissingCable" not in matching["market_to_users"]
+
+    tf_teams = {row["team"] for row in matching["round_financials"]["team_financials"]}
+    assert tf_teams == {"GoodTeam"}
 
 
 def test_start_round_respects_configured_round_limit(monkeypatch) -> None:

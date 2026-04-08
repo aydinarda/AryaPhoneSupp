@@ -166,19 +166,27 @@ function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
   const d = Number(data.delta);
+  const cl = Number(data.child_labor_penalty ?? 0);
+  const bc = Number(data.banned_chem_penalty ?? 0);
   const aOk = Number.isFinite(a) && a > 0;
   const bOk = Number.isFinite(b) && b > 0;
   const dOk = Number.isFinite(d) && d > 0;
+  const clOk = Number.isFinite(cl) && cl >= 0;
+  const bcOk = Number.isFinite(bc) && bc >= 0;
   const changed = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta) || (dOk && d !== state.delta);
   if (aOk) state.betaAlpha = a;
   if (bOk) state.betaBeta = b;
   if (dOk) state.delta = d;
+  if (clOk) state.childLaborPenalty = cl;
+  if (bcOk) state.bannedChemPenalty = bc;
   if (changed) {
     // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
     if (!_betaInputsInitialized) {
       if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
       if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
       if (el.deltaInput) el.deltaInput.value = state.delta;
+      if (el.childLaborPenaltyInput) el.childLaborPenaltyInput.value = state.childLaborPenalty;
+      if (el.bannedChemPenaltyInput) el.bannedChemPenaltyInput.value = state.bannedChemPenalty;
       _betaInputsInitialized = true;
     }
     renderDistributionChart();

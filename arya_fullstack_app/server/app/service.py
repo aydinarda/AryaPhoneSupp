@@ -164,6 +164,8 @@ def evaluate_manual(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
+    child_labor_penalty: float | None = None,
+    banned_chem_penalty: float | None = None,
 ) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
     cfg = _build_cfg(objective, price_per_user=price_per_user)
@@ -173,6 +175,8 @@ def evaluate_manual(
         beta_alpha=beta_alpha,
         beta_beta=beta_beta,
         delta=delta,
+        child_labor_penalty=child_labor_penalty,
+        banned_chem_penalty=banned_chem_penalty,
     )
 
 

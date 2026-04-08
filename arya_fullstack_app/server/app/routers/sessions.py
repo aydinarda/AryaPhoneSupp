@@ -25,10 +25,11 @@ from ..settings import FIXED_POLICY, GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-# In-memory session config per session code (beta distribution + delta).
+# In-memory session config per session code (beta distribution + delta + penalties).
 # Resets on server restart (acceptable for a classroom game).
 _session_beta: dict[str, tuple[float, float]] = {}
 _session_delta: dict[str, float] = {}
+_session_penalty: dict[str, tuple[float, float]] = {}  # (child_labor_penalty, banned_chem_penalty)
 
 _DEFAULT_ALPHA = 3.0
 _DEFAULT_BETA = 3.0
@@ -141,6 +142,22 @@ def _build_team_product_profiles(
         avg_low_quality = sum(_safe_float(r.get("low_quality")) for r in selected_rows) / count
         avg_child_labor = sum(_safe_float(r.get("child_labor")) for r in selected_rows) / count
         avg_banned_chem = sum(_safe_float(r.get("banned_chem")) for r in selected_rows) / count
+
+        # Category constraint: require exactly 1 supplier from each category
+        all_cats_in_catalog = {
+            (v.get("category") or "").strip()
+            for v in suppliers_by_id.values()
+            if (v.get("category") or "").strip()
+        }
+        if all_cats_in_catalog:
+            cat_counts: dict[str, int] = {}
+            for pid in valid:
+                cat = (suppliers_by_id[pid].get("category") or "").strip()
+                if cat:
+                    cat_counts[cat] = cat_counts.get(cat, 0) + 1
+            if any(cat_counts.get(cat, 0) != 1 for cat in all_cats_in_catalog):
+                excluded.append(team)
+                continue
 
         profile_feasible = (
             avg_env <= float(GAME_SETTINGS.env_cap) + 1e-12
@@ -270,8 +287,14 @@ def get_current_round(code: str) -> dict[str, Any]:
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
 
+    child_labor_penalty, banned_chem_penalty = _session_penalty.get(normalized, (0.0, 0.0))
+
     if not rows:
-        return {"round": None, "total_rounds": total_rounds, "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta}
+        return {
+            "round": None, "total_rounds": total_rounds,
+            "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta,
+            "child_labor_penalty": child_labor_penalty, "banned_chem_penalty": banned_chem_penalty,
+        }
 
     row = rows[0]
     return {
@@ -287,6 +310,8 @@ def get_current_round(code: str) -> dict[str, Any]:
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "delta": delta,
+        "child_labor_penalty": child_labor_penalty,
+        "banned_chem_penalty": banned_chem_penalty,
     }
 
 
@@ -296,8 +321,18 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
     _session_beta[normalized] = (float(req.beta_alpha), float(req.beta_beta))
     if req.delta is not None:
         _session_delta[normalized] = float(req.delta)
+    if req.child_labor_penalty is not None or req.banned_chem_penalty is not None:
+        old_cl, old_bc = _session_penalty.get(normalized, (0.0, 0.0))
+        new_cl = float(req.child_labor_penalty) if req.child_labor_penalty is not None else old_cl
+        new_bc = float(req.banned_chem_penalty) if req.banned_chem_penalty is not None else old_bc
+        _session_penalty[normalized] = (new_cl, new_bc)
     current_delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
-    return {"ok": True, "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta, "delta": current_delta}
+    child_labor_penalty, banned_chem_penalty = _session_penalty.get(normalized, (0.0, 0.0))
+    return {
+        "ok": True,
+        "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta, "delta": current_delta,
+        "child_labor_penalty": child_labor_penalty, "banned_chem_penalty": banned_chem_penalty,
+    }
 
 
 @router.post("/{code}/match")
@@ -351,7 +386,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     suppliers_df = suppliers_df.copy()
     suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
     suppliers_by_id = {
-        str(row["supplier_id"]): {k: row.get(k) for k in ("env_risk", "social_risk", "cost_score", "strategic", "improvement", "low_quality", "child_labor", "banned_chem")}
+        str(row["supplier_id"]): {k: row.get(k) for k in ("env_risk", "social_risk", "cost_score", "strategic", "improvement", "low_quality", "child_labor", "banned_chem", "category")}
         for _, row in suppliers_df.iterrows()
     }
 
@@ -373,6 +408,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     normalized_code = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    session_cl_penalty, session_bc_penalty = _session_penalty.get(normalized_code, (0.0, 0.0))
     bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     segments = [
@@ -417,7 +453,10 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         effective_users = round(demand_share * N, 3)
         price = _safe_float(profile["price_per_user"], GAME_SETTINGS.price_per_user)
         avg_cost = _safe_float(profile["avg_cost"])
-        unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost
+        avg_child_labor = _safe_float(profile.get("avg_child_labor"))
+        avg_banned_chem = _safe_float(profile.get("avg_banned_chem"))
+        penalty_per_unit = session_cl_penalty * avg_child_labor + session_bc_penalty * avg_banned_chem
+        unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost - penalty_per_unit
         realized_profit = effective_users * unit_margin
         realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
         round_profit_total += realized_profit
@@ -437,6 +476,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "realized_utility": realized_utility,
             "price_per_user": price,
             "avg_cost_score": avg_cost,
+            "penalty_per_unit": round(penalty_per_unit, 4),
             "unit_margin": round(unit_margin, 2),
         })
 
