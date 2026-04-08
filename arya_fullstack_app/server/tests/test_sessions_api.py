@@ -298,6 +298,104 @@ def test_round_matching_excludes_category_invalid_submissions(monkeypatch) -> No
     assert tf_teams == {"GoodTeam"}
 
 
+def test_session_config_patch_stores_and_returns_penalties(monkeypatch) -> None:
+    """PATCH /config with penalties stores them and returns them in the response."""
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{"session_code": code, "session_token": "tok-1",
+                   "is_active": True, "number_of_rounds": 5}]
+        ),
+    )
+    monkeypatch.setattr(sessions_router, "fetch_active_round",
+                        lambda t: SimpleNamespace(data=[]))
+
+    # Set penalties via PATCH
+    patch_resp = client.patch(
+        "/api/sessions/PENTEST/config",
+        json={"beta_alpha": 3.0, "beta_beta": 3.0, "delta": 0.1,
+              "child_labor_penalty": 25.0, "banned_chem_penalty": 50.0},
+    )
+    assert patch_resp.status_code == 200
+    body = patch_resp.json()
+    assert body["child_labor_penalty"] == pytest.approx(25.0)
+    assert body["banned_chem_penalty"] == pytest.approx(50.0)
+
+    # Verify they come back from GET /rounds/current
+    current_resp = client.get("/api/sessions/PENTEST/rounds/current")
+    assert current_resp.status_code == 200
+    data = current_resp.json()
+    assert data["child_labor_penalty"] == pytest.approx(25.0)
+    assert data["banned_chem_penalty"] == pytest.approx(50.0)
+
+
+def test_session_config_without_penalties_defaults_to_zero(monkeypatch) -> None:
+    """A freshly configured session with no penalties should return 0.0 for both."""
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{"session_code": code, "session_token": "tok-2",
+                   "is_active": True, "number_of_rounds": 5}]
+        ),
+    )
+    monkeypatch.setattr(sessions_router, "fetch_active_round",
+                        lambda t: SimpleNamespace(data=[]))
+
+    client.patch(
+        "/api/sessions/NOPEN/config",
+        json={"beta_alpha": 2.0, "beta_beta": 2.0},
+    )
+
+    resp = client.get("/api/sessions/NOPEN/rounds/current")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["child_labor_penalty"] == pytest.approx(0.0)
+    assert data["banned_chem_penalty"] == pytest.approx(0.0)
+
+
+def test_round_matching_penalty_reduces_unit_margin(monkeypatch) -> None:
+    """When a session has child_labor_penalty set and a team's supplier has
+    child_labor=1.0, the unit_margin in round_financials must be lower than
+    without a penalty."""
+
+    # Build a supplier set where CAM1 carries child_labor=1
+    suppliers = _make_mock_suppliers().copy()
+    suppliers.loc[suppliers["supplier_id"] == "CAM1", "child_labor"] = 1.0
+
+    _mock_session_round(
+        monkeypatch,
+        submissions=[
+            {
+                "team": "TeamCL",
+                "selected_suppliers": "CAM1,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:01+00:00",
+                "env_avg": 1.0, "social_avg": 1.0, "price": 100,
+            },
+        ],
+        suppliers_df=suppliers,
+        users_df=_make_mock_users(3),
+    )
+
+    # Run without penalty first
+    sessions_router._session_penalty.pop("ABC123", None)
+    resp_no_pen = client.post("/api/sessions/ABC123/match", json={})
+    assert resp_no_pen.status_code == 200
+    tf_no_pen = resp_no_pen.json()["matching"]["round_financials"]["team_financials"][0]
+
+    # Set penalty and re-run
+    sessions_router._session_penalty["ABC123"] = (30.0, 0.0)
+    resp_pen = client.post("/api/sessions/ABC123/match", json={})
+    assert resp_pen.status_code == 200
+    tf_pen = resp_pen.json()["matching"]["round_financials"]["team_financials"][0]
+
+    # unit_margin should be lower when penalty is active (avg_child_labor = 1/3 → -10)
+    assert tf_pen["unit_margin"] < tf_no_pen["unit_margin"]
+    # penalty_per_unit should appear and be positive
+    assert tf_pen.get("penalty_per_unit", 0.0) > 0.0
+
+
 def test_start_round_respects_configured_round_limit(monkeypatch) -> None:
     monkeypatch.setattr(
         sessions_router,

@@ -218,6 +218,112 @@ class TestBuildTeamProductProfiles:
 
 
 # ---------------------------------------------------------------------------
+# Penalty costs in manual_metrics
+# ---------------------------------------------------------------------------
+
+class TestPenaltyCosts:
+    """Tests that child_labor_penalty and banned_chem_penalty are correctly
+    applied to cost_per_unit, profit_total, and penalty_per_unit."""
+
+    def _df_with_flags(self) -> pd.DataFrame:
+        """2-category catalogue (camera+keyboard+cable), one supplier has CL+BC flags."""
+        return pd.DataFrame([
+            {"supplier_id": "CAM1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 10.0,
+             "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+             "child_labor": 1.0, "banned_chem": 1.0, "category": "camera"},
+            {"supplier_id": "KEY1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 10.0,
+             "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+             "child_labor": 0.0, "banned_chem": 0.0, "category": "keyboard"},
+            {"supplier_id": "CBL1", "env_risk": 1.0, "social_risk": 1.0, "cost_score": 10.0,
+             "strategic": 3.0, "improvement": 3.0, "low_quality": 2.0,
+             "child_labor": 0.0, "banned_chem": 0.0, "category": "cable"},
+        ])
+
+    def test_zero_penalty_gives_zero_penalty_per_unit(self):
+        result = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=0.0, banned_chem_penalty=0.0,
+        )
+        assert result["feasible"] is True
+        assert result["metrics"]["penalty_per_unit"] == pytest.approx(0.0)
+
+    def test_child_labor_penalty_adds_proportionally(self):
+        # CAM1 has child_labor=1.0, KEY1+CBL1 have 0.0 → avg_child_labor = 1/3
+        result = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=30.0, banned_chem_penalty=0.0,
+        )
+        assert result["feasible"] is True
+        m = result["metrics"]
+        assert m["avg_child_labor"] == pytest.approx(1.0 / 3.0)
+        assert m["penalty_per_unit"] == pytest.approx(30.0 * (1.0 / 3.0))
+
+    def test_banned_chem_penalty_adds_proportionally(self):
+        # CAM1 has banned_chem=1.0 → avg_banned_chem = 1/3
+        result = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=0.0, banned_chem_penalty=60.0,
+        )
+        m = result["metrics"]
+        assert m["avg_banned_chem"] == pytest.approx(1.0 / 3.0)
+        assert m["penalty_per_unit"] == pytest.approx(60.0 * (1.0 / 3.0))
+
+    def test_both_penalties_sum_correctly(self):
+        result = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=30.0, banned_chem_penalty=60.0,
+        )
+        m = result["metrics"]
+        expected = 30.0 * (1.0 / 3.0) + 60.0 * (1.0 / 3.0)
+        assert m["penalty_per_unit"] == pytest.approx(expected)
+
+    def test_penalty_reflected_in_cost_per_unit(self):
+        """cost_per_unit = cost_scale * avg_cost + penalty_per_unit."""
+        from app.settings import GAME_SETTINGS
+        result_no_pen = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=0.0, banned_chem_penalty=0.0,
+        )
+        result_pen = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=30.0, banned_chem_penalty=0.0,
+        )
+        diff = result_pen["metrics"]["cost_per_unit"] - result_no_pen["metrics"]["cost_per_unit"]
+        assert diff == pytest.approx(30.0 * (1.0 / 3.0))
+
+    def test_penalty_reduces_profit_total(self):
+        """Higher penalty → lower profit (same price, higher effective cost)."""
+        result_low = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=0.0, banned_chem_penalty=0.0,
+        )
+        result_high = manual_metrics(
+            self._df_with_flags(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=300.0, banned_chem_penalty=0.0,
+        )
+        assert result_high["metrics"]["profit_total"] < result_low["metrics"]["profit_total"]
+
+    def test_clean_combination_has_zero_penalty_even_with_nonzero_rates(self):
+        """If no supplier has CL/BC flags, penalty_per_unit is 0 regardless of rates."""
+        result = manual_metrics(
+            _suppliers_df(), _users_df(), _POLICY, _CFG,
+            ["CAM1", "KEY1", "CBL1"],
+            child_labor_penalty=500.0, banned_chem_penalty=500.0,
+        )
+        assert result["metrics"]["penalty_per_unit"] == pytest.approx(0.0)
+        assert result["metrics"]["avg_child_labor"] == pytest.approx(0.0)
+        assert result["metrics"]["avg_banned_chem"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
 # solve_best_over_k — categorical mode
 # ---------------------------------------------------------------------------
 
@@ -265,3 +371,21 @@ class TestSolverCategoricalMode:
         assert result is not None
         # With CAM1+KEY1+CBL1 all having cost_score=1.0 → avg_cost=1.0
         assert result["avg_cost"] == pytest.approx(1.0)
+
+    def test_penalty_shifts_solver_away_from_flagged_supplier(self):
+        """With a large child_labor_penalty, the solver should prefer the
+        non-flagged camera supplier (CAM2) over the cheaper but flagged one."""
+        # Build a catalogue where CAM1 is cheaper but has child_labor=1
+        df = _suppliers_df().copy()
+        df.loc[df["supplier_id"] == "CAM1", "child_labor"] = 1.0  # flag CAM1
+        # CAM2 costs 2.0 vs CAM1 costs 1.0, but CAM1 carries a CL penalty
+
+        result = solve_best_over_k(
+            df, _users_df(), _POLICY,
+            env_cap=2.75, social_cap=3.0, output_flag=0,
+            objective_mode="profit",
+            child_labor_penalty=1000.0,  # large enough to make CAM1 undesirable
+        )
+        assert result is not None
+        assert "CAM1" not in result["chosen"], "Solver should avoid flagged supplier when penalty is large"
+        assert "CAM2" in result["chosen"]
