@@ -136,7 +136,7 @@ def fetch_submissions_for_session(session_code: str):
     return (
         get_client()
         .table("submissions")
-        .select("team, round_no, profit, utility, env_avg, social_avg, cost_avg, strategic_avg, created_at")
+        .select("*")
         .eq("session_code", session_code)
         .order("created_at", desc=False)
         .execute()

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260411-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260412-1" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -75,11 +75,11 @@
               <div class="beta-params-row">
                 <div class="beta-param">
                   <label for="auditProbabilityInput">Investigation Probability</label>
-                  <input id="auditProbabilityInput" type="text" inputmode="decimal" value="0" />
+                  <input id="auditProbabilityInput" type="number" min="0" max="1" step="0.01" value="0" />
                 </div>
                 <div class="beta-param">
                   <label for="catchProbabilityInput">Detection Probability</label>
-                  <input id="catchProbabilityInput" type="text" inputmode="decimal" value="1" />
+                  <input id="catchProbabilityInput" type="number" min="0" max="1" step="0.01" value="1" />
                 </div>
               </div>
               <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution &amp; δ &amp; Investigation</button>
@@ -220,6 +220,6 @@
       </section>
     </div>
 
-    <script type="module" src="/assets/app.js?v=20260411-5"></script>
+    <script type="module" src="/assets/app.js?v=20260412-1"></script>
   </body>
 </html>

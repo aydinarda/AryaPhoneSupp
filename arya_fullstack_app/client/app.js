@@ -2,7 +2,7 @@ import { state, el } from "./state.js";
 import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
-import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js?v=20260411-1";
+import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js";
 import { loadLeaderboard, loadRoundHistory, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
 

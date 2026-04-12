@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope, Receive, Send
 
 from .db import fetch_all_submissions, insert_submission
 from .matching_engine import run_market_matching
@@ -169,8 +171,23 @@ def matching(req: MatchingRequest) -> dict[str, Any]:
 
 CLIENT_DIR = Path(__file__).resolve().parents[2] / "client"
 
+class NoCacheJSFiles(StaticFiles):
+    """StaticFiles that disables browser caching for JS modules."""
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path", "").endswith(".js"):
+            async def send_no_cache(message: Any) -> None:
+                if message["type"] == "http.response.start":
+                    headers = dict(message.get("headers", []))
+                    headers[b"cache-control"] = b"no-store, no-cache, must-revalidate"
+                    message = {**message, "headers": list(headers.items())}
+                await send(message)
+            await super().__call__(scope, receive, send_no_cache)
+        else:
+            await super().__call__(scope, receive, send)
+
+
 if CLIENT_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=CLIENT_DIR), name="assets")
+    app.mount("/assets", NoCacheJSFiles(directory=CLIENT_DIR), name="assets")
 
 app.include_router(sessions_router)
 
