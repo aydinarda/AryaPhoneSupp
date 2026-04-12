@@ -3,6 +3,10 @@ import { api, fmt } from "./api.js";
 
 const PALETTE = ["#2563eb", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2", "#be123c", "#65a30d", "#c026d3", "#ea580c"];
 
+function asRows(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 export function ensureLeaderboardPlotUI() {
   const panel = document.getElementById("panel-leaderboard");
   if (!panel) return;
@@ -48,7 +52,7 @@ export function renderPlotSelectors(rows) {
     rows.some((r) => Number.isFinite(Number(r?.[key])))
   );
 
-  const withFallback = available.length ? available : ["profit", "utility"];
+  const withFallback = available.length ? available : ["supplier_utility", "market_share_pct"];
   if (!withFallback.includes(state.plotX)) state.plotX = withFallback[0];
   if (!withFallback.includes(state.plotY)) state.plotY = withFallback[Math.min(1, withFallback.length - 1)];
 
@@ -74,15 +78,15 @@ export function renderLeaderboardScatter(rows) {
   const yKey = state.plotY;
   const xLabel = PLOT_COLUMNS[xKey] ?? xKey;
   const yLabel = PLOT_COLUMNS[yKey] ?? yKey;
-
   const filtered = rows.filter((r) => Number.isFinite(Number(r?.[xKey])) && Number.isFinite(Number(r?.[yKey])));
+
   if (!filtered.length) {
     el.leaderboardScatter.innerHTML = '<p class="hint">Selected columns do not have numeric data.</p>';
     return;
   }
 
   const teams = [...new Set(filtered.map((r) => r.team ?? "(anonymous)"))];
-  const palette = ["#2563eb", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2", "#be123c", "#65a30d"];
+  const palette = PALETTE.slice(0, 8);
   const teamColors = new Map(teams.map((team, i) => [team, palette[i % palette.length]]));
 
   let minX = Math.min(...filtered.map((r) => Number(r[xKey])));
@@ -100,18 +104,16 @@ export function renderLeaderboardScatter(rows) {
     const team = r.team ?? "(anonymous)";
     const xVal = Number(r[xKey]);
     const yVal = Number(r[yKey]);
-    const left = px(xVal);
-    const top = py(yVal);
-    const color = teamColors.get(team) ?? "#1f2937";
     const title = [
       `Team: ${team}`,
+      r.round_no != null ? `Round: ${r.round_no}` : null,
       `${xLabel}: ${fmt(xVal)}`,
       `${yLabel}: ${fmt(yVal)}`,
-      `Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : "-"}`,
-      `Suppliers: ${r.selected_suppliers ?? "-"}`,
-    ].join("\n");
+      r.created_at ? `Created: ${new Date(r.created_at).toLocaleString()}` : null,
+      r.selected_suppliers ? `Suppliers: ${r.selected_suppliers}` : null,
+    ].filter(Boolean).join("\n");
 
-    return `<div class="plot-point circle" style="left:${left}%;top:${top}%;background:${color};" title="${title.replace(/"/g, '&quot;')}"></div>`;
+    return `<div class="plot-point circle" style="left:${px(xVal)}%;top:${py(yVal)}%;background:${teamColors.get(team) ?? "#1f2937"};" title="${title.replace(/"/g, '&quot;')}"></div>`;
   }).join("");
 
   const legend = teams
@@ -176,7 +178,7 @@ export async function loadRoundHistory() {
 
     window.Plotly.react(container, traces, {
       margin: { t: 36, r: 16, b: 40, l: 56 },
-      title: { text: `Round History — ${metric === "profit" ? "Realized Profit" : "Utility"} per Team`, font: { size: 13 } },
+      title: { text: `Round History - ${metric === "profit" ? "Realized Profit" : "Utility"} per Team`, font: { size: 13 } },
       xaxis: { title: "Round", dtick: 1, tickmode: "linear" },
       yaxis: { title: metric === "profit" ? "Profit" : "Utility" },
       legend: { orientation: "h", y: -0.25 },
@@ -189,46 +191,63 @@ export async function loadRoundHistory() {
 }
 
 export async function loadLeaderboard() {
+  if (!state.gameCode) {
+    state.latestRows = [];
+    renderPlotSelectors([]);
+    renderLeaderboardScatter([]);
+    if (el.leaderboardBody) {
+      el.leaderboardBody.innerHTML = '<tr><td colspan="8">Join or create a session to see the leaderboard.</td></tr>';
+    }
+    if (el.turnLeaderboardBody) {
+      el.turnLeaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the per-round leaderboard.</td></tr>';
+    }
+    return;
+  }
+
   try {
-    const params = new URLSearchParams({
-      sort_by: state.sortBy,
-      feasible_only: state.feasibleOnly.toString(),
-    });
-    const data = await api(`/api/leaderboard?${params}`);
-    const rows = (state.sortBy === "profit" ? data.top_profit : data.top_utility) || [];
-    state.latestRows = data.latest || [];
+    const data = await api(`/api/sessions/${state.gameCode}/leaderboard`);
+    const cumulativeRows = asRows(data.cumulative_leaderboard);
+    const turnRows = asRows(data.turn_leaderboard);
+    state.latestRows = turnRows;
 
     renderPlotSelectors(state.latestRows);
     renderLeaderboardScatter(state.latestRows);
 
-    el.leaderboardBody.innerHTML = rows
-      .map((r, idx) => {
-        const createdAt = r.created_at ? new Date(r.created_at).toLocaleString() : "-";
-        const feasibleIcon = r.feasible ? "✓" : "✗";
-        const feasibleClass = r.feasible ? "feasible" : "infeasible";
-        const supplierIds = r.selected_suppliers ? r.selected_suppliers.split(",").filter(Boolean) : [];
-        const supplierCount = supplierIds.length;
-        const suppliers = supplierIds.slice(0, 5).join(", ");
-        return `<tr class="${feasibleClass}">
+    el.leaderboardBody.innerHTML = cumulativeRows.length
+      ? cumulativeRows.map((r, idx) => `<tr>
           <td>${idx + 1}</td>
           <td>${r.team ?? "-"}</td>
-          <td>${r.player_name ?? "-"}</td>
-          <td>${r.objective ?? "-"}</td>
-          <td>${feasibleIcon}</td>
-          <td><strong>${fmt(r.profit)}</strong></td>
-          <td><strong>${fmt(r.utility)}</strong></td>
-          <td>${supplierCount}</td>
-          <td><small>${suppliers}${supplierCount > 5 ? "..." : ""}</small></td>
-          <td>${fmt(r.env_avg)}</td>
-          <td>${fmt(r.social_avg)}</td>
-          <td>${fmt(r.cost_avg)}</td>
-          <td><small>${createdAt}</small></td>
-        </tr>`;
-      })
-      .join("");
+          <td>${r.rounds_played ?? 0}</td>
+          <td><strong>${fmt(r.total_supplier_utility)}</strong></td>
+          <td>${fmt(r.total_market_share_pct)}</td>
+          <td>${fmt(r.total_supplier_quality)}</td>
+          <td>${fmt(r.total_realized_utility)}</td>
+          <td><strong>${fmt(r.total_profit)}</strong></td>
+        </tr>`).join("")
+      : '<tr><td colspan="8">No cumulative leaderboard yet.</td></tr>';
+
+    if (el.turnLeaderboardBody) {
+      el.turnLeaderboardBody.innerHTML = turnRows.length
+        ? turnRows.map((r, idx) => `<tr>
+            <td>${r.round_no ?? "-"}</td>
+            <td>${idx + 1}</td>
+            <td>${r.team ?? "-"}</td>
+            <td><strong>${fmt(r.supplier_utility)}</strong></td>
+            <td>${fmt(r.market_share_pct)}</td>
+            <td>${fmt(r.supplier_quality)}</td>
+            <td>${fmt(r.profit_cost_score)}</td>
+            <td>${fmt(r.realized_utility)}</td>
+            <td><strong>${fmt(r.realized_profit)}</strong></td>
+          </tr>`).join("")
+        : '<tr><td colspan="9">No per-round leaderboard yet.</td></tr>';
+    }
   } catch (e) {
     state.latestRows = [];
+    renderPlotSelectors([]);
     renderLeaderboardScatter([]);
-    el.leaderboardBody.innerHTML = `<tr><td colspan="13">${e.message}</td></tr>`;
+    el.leaderboardBody.innerHTML = `<tr><td colspan="8">${e.message}</td></tr>`;
+    if (el.turnLeaderboardBody) {
+      el.turnLeaderboardBody.innerHTML = `<tr><td colspan="9">${e.message}</td></tr>`;
+    }
   }
 }

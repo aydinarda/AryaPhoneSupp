@@ -81,12 +81,25 @@ export function renderMatchingResult(payload) {
   const excluded = payload.excluded_infeasible_teams || [];
   const financials = payload.round_financials || {};
   const teamFinancials = financials.team_financials || [];
+  const audit = payload.audit || {};
+  const caughtSuppliers = audit.caught_suppliers || [];
+  const auditExcludedTeams = audit.excluded_teams || [];
+  const auditedCount = Object.values(audit.audited_suppliers || {}).filter(Boolean).length;
+  const auditSummary = audit.audit_probability > 0
+    ? [
+        `Investigation: p=${audit.audit_probability ?? 0}, detection=${audit.catch_probability ?? 0}`,
+        `Investigated suppliers: ${auditedCount}`,
+        caughtSuppliers.length ? `Violations found: ${caughtSuppliers.join(", ")}` : "Violations found: none",
+        auditExcludedTeams.length ? `Investigation excluded: ${auditExcludedTeams.join(", ")}` : null,
+      ].filter(Boolean).join("  |  ")
+    : "Investigation: off";
 
   el.matchingResultText.textContent = [
     `Solver: ${meta.solver || "-"}`,
     `Teams: ${meta.eligible_team_count ?? 0}`,
     `Users: ${meta.user_pool_count ?? 0}`,
     `δ: ${financials.delta ?? "-"}`,
+    auditSummary,
     excluded.length ? `Excluded: ${excluded.join(", ")}` : null,
   ].filter(Boolean).join("  |  ");
 
@@ -166,29 +179,29 @@ function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
   const d = Number(data.delta);
-  const cl = Number(data.child_labor_penalty ?? 0);
-  const bc = Number(data.banned_chem_penalty ?? 0);
+  const auditProbability = Number(data.audit_probability ?? state.auditProbability);
+  const catchProbability = Number(data.catch_probability ?? state.catchProbability);
   const aOk = Number.isFinite(a) && a > 0;
   const bOk = Number.isFinite(b) && b > 0;
   const dOk = Number.isFinite(d) && d > 0;
-  const clOk = Number.isFinite(cl) && cl >= 0;
-  const bcOk = Number.isFinite(bc) && bc >= 0;
-  const changed = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta) || (dOk && d !== state.delta);
+  const auditOk = Number.isFinite(auditProbability) && auditProbability >= 0 && auditProbability <= 1;
+  const catchOk = Number.isFinite(catchProbability) && catchProbability >= 0 && catchProbability <= 1;
+  const chartChanged = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta) || (dOk && d !== state.delta);
   if (aOk) state.betaAlpha = a;
   if (bOk) state.betaBeta = b;
   if (dOk) state.delta = d;
-  if (clOk) state.childLaborPenalty = cl;
-  if (bcOk) state.bannedChemPenalty = bc;
-  if (changed) {
-    // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
-    if (!_betaInputsInitialized) {
-      if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
-      if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
-      if (el.deltaInput) el.deltaInput.value = state.delta;
-      if (el.childLaborPenaltyInput) el.childLaborPenaltyInput.value = state.childLaborPenalty;
-      if (el.bannedChemPenaltyInput) el.bannedChemPenaltyInput.value = state.bannedChemPenalty;
-      _betaInputsInitialized = true;
-    }
+  if (auditOk) state.auditProbability = auditProbability;
+  if (catchOk) state.catchProbability = catchProbability;
+  // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
+  if (!_betaInputsInitialized) {
+    if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
+    if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
+    if (el.deltaInput) el.deltaInput.value = state.delta;
+    if (el.auditProbabilityInput) el.auditProbabilityInput.value = state.auditProbability;
+    if (el.catchProbabilityInput) el.catchProbabilityInput.value = state.catchProbability;
+    _betaInputsInitialized = true;
+  }
+  if (chartChanged) {
     renderDistributionChart();
   }
 }

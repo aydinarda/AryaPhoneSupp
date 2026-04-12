@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from ..db import (
     close_active_rounds,
     fetch_active_round,
+    fetch_all_matching_results,
     fetch_game_session_by_code,
     fetch_latest_matching_result,
     fetch_latest_round,
@@ -25,11 +26,11 @@ from ..settings import FIXED_POLICY, GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-# In-memory session config per session code (beta distribution + delta + penalties).
+# In-memory session config per session code (beta distribution + delta + audit params).
 # Resets on server restart (acceptable for a classroom game).
 _session_beta: dict[str, tuple[float, float]] = {}
 _session_delta: dict[str, float] = {}
-_session_penalty: dict[str, tuple[float, float]] = {}  # (child_labor_penalty, banned_chem_penalty)
+_session_audit: dict[str, tuple[float, float]] = {}  # (audit_probability, catch_probability)
 
 _DEFAULT_ALPHA = 3.0
 _DEFAULT_BETA = 3.0
@@ -138,8 +139,6 @@ def _build_team_product_profiles(
         avg_social = sum(_safe_float(r.get("social_risk")) for r in selected_rows) / count
         avg_cost = sum(_safe_float(r.get("cost_score")) for r in selected_rows) / count
         avg_strategic = sum(_safe_float(r.get("strategic")) for r in selected_rows) / count
-        avg_improvement = sum(_safe_float(r.get("improvement")) for r in selected_rows) / count
-        avg_low_quality = sum(_safe_float(r.get("low_quality")) for r in selected_rows) / count
         avg_child_labor = sum(_safe_float(r.get("child_labor")) for r in selected_rows) / count
         avg_banned_chem = sum(_safe_float(r.get("banned_chem")) for r in selected_rows) / count
 
@@ -179,8 +178,6 @@ def _build_team_product_profiles(
             "avg_social": avg_social,
             "avg_cost": avg_cost,
             "avg_strategic": avg_strategic,
-            "avg_improvement": avg_improvement,
-            "avg_low_quality": avg_low_quality,
             "avg_child_labor": avg_child_labor,
             "avg_banned_chem": avg_banned_chem,
         }
@@ -286,14 +283,15 @@ def get_current_round(code: str) -> dict[str, Any]:
     normalized = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
-
-    child_labor_penalty, banned_chem_penalty = _session_penalty.get(normalized, (0.0, 0.0))
+    audit_probability, catch_probability = _session_audit.get(
+        normalized, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
+    )
 
     if not rows:
         return {
             "round": None, "total_rounds": total_rounds,
             "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta,
-            "child_labor_penalty": child_labor_penalty, "banned_chem_penalty": banned_chem_penalty,
+            "audit_probability": audit_probability, "catch_probability": catch_probability,
         }
 
     row = rows[0]
@@ -310,28 +308,42 @@ def get_current_round(code: str) -> dict[str, Any]:
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "delta": delta,
-        "child_labor_penalty": child_labor_penalty,
-        "banned_chem_penalty": banned_chem_penalty,
+        "audit_probability": audit_probability,
+        "catch_probability": catch_probability,
     }
 
 
 @router.patch("/{code}/config")
 def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any]:
-    normalized = (code or "").strip().upper()
-    _session_beta[normalized] = (float(req.beta_alpha), float(req.beta_beta))
+    session_row = _get_session_row_or_404(code)
+    session_code = str(session_row.get("session_code", "")).strip().upper()
+    if not session_code:
+        raise HTTPException(status_code=400, detail="Session code not found")
+
+    _session_beta[session_code] = (float(req.beta_alpha), float(req.beta_beta))
     if req.delta is not None:
-        _session_delta[normalized] = float(req.delta)
-    if req.child_labor_penalty is not None or req.banned_chem_penalty is not None:
-        old_cl, old_bc = _session_penalty.get(normalized, (0.0, 0.0))
-        new_cl = float(req.child_labor_penalty) if req.child_labor_penalty is not None else old_cl
-        new_bc = float(req.banned_chem_penalty) if req.banned_chem_penalty is not None else old_bc
-        _session_penalty[normalized] = (new_cl, new_bc)
-    current_delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
-    child_labor_penalty, banned_chem_penalty = _session_penalty.get(normalized, (0.0, 0.0))
+        _session_delta[session_code] = float(req.delta)
+    if req.audit_probability is not None or req.catch_probability is not None:
+        old_ap, old_cp = _session_audit.get(
+            session_code,
+            (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
+        )
+        new_ap = float(req.audit_probability) if req.audit_probability is not None else old_ap
+        new_cp = float(req.catch_probability) if req.catch_probability is not None else old_cp
+        _session_audit[session_code] = (new_ap, new_cp)
+    current_delta = _session_delta.get(session_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    current_ap, current_cp = _session_audit.get(
+        session_code,
+        (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
+    )
     return {
         "ok": True,
-        "beta_alpha": req.beta_alpha, "beta_beta": req.beta_beta, "delta": current_delta,
-        "child_labor_penalty": child_labor_penalty, "banned_chem_penalty": banned_chem_penalty,
+        "session_code": session_code,
+        "beta_alpha": req.beta_alpha,
+        "beta_beta": req.beta_beta,
+        "delta": current_delta,
+        "audit_probability": current_ap,
+        "catch_probability": current_cp,
     }
 
 
@@ -386,7 +398,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     suppliers_df = suppliers_df.copy()
     suppliers_df["supplier_id"] = suppliers_df["supplier_id"].astype(str)
     suppliers_by_id = {
-        str(row["supplier_id"]): {k: row.get(k) for k in ("env_risk", "social_risk", "cost_score", "strategic", "improvement", "low_quality", "child_labor", "banned_chem", "category")}
+        str(row["supplier_id"]): {k: row.get(k) for k in ("env_risk", "social_risk", "cost_score", "strategic", "child_labor", "banned_chem", "category")}
         for _, row in suppliers_df.iterrows()
     }
 
@@ -400,6 +412,26 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     if N <= 0:
         raise HTTPException(status_code=400, detail="No users available in dataset for matching")
 
+    # --- Audit phase (runs before MNL; caught teams are excluded from market) ---
+    from ..audit import run_audit
+
+    audit_ap, audit_cp = _session_audit.get(
+        session_code,
+        (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
+    )
+    audit_result = run_audit(
+        team_profiles=team_profiles,
+        suppliers_df=suppliers_df,
+        audit_probability=audit_ap,
+        catch_probability=audit_cp,
+    )
+    if audit_result.excluded_teams:
+        excluded_infeasible_teams = sorted(set(excluded_infeasible_teams + audit_result.excluded_teams))
+        for t in audit_result.excluded_teams:
+            team_profiles.pop(t, None)
+    if not team_profiles:
+        raise HTTPException(status_code=400, detail="No teams remain after audit phase")
+
     # --- MNL demand model ---
     from ..beta_density import BetaDensity
     from ..mnl_market import BuyerProfile, run_mnl_market
@@ -408,7 +440,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     normalized_code = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
-    session_cl_penalty, session_bc_penalty = _session_penalty.get(normalized_code, (0.0, 0.0))
     bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     segments = [
@@ -418,8 +449,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             w_env=_safe_float(row.get("w_env")),
             w_social=_safe_float(row.get("w_social")),
             w_cost=_safe_float(row.get("w_cost"), 1.0),
-            w_strategic=_safe_float(row.get("w_strategic")),
-            w_improvement=_safe_float(row.get("w_improvement")),
             w_low_quality=_safe_float(row.get("w_low_quality")),
         )
         for i, (_, row) in enumerate(users_sorted.iterrows())
@@ -432,9 +461,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             price_per_user=_safe_float(team_profiles[tid]["price_per_user"], GAME_SETTINGS.price_per_user),
             avg_env=_safe_float(team_profiles[tid]["avg_env"]),
             avg_social=_safe_float(team_profiles[tid]["avg_social"]),
-            avg_strategic=_safe_float(team_profiles[tid]["avg_strategic"]),
-            avg_improvement=_safe_float(team_profiles[tid]["avg_improvement"]),
-            avg_low_quality=_safe_float(team_profiles[tid]["avg_low_quality"]),
         )
         for tid in team_ids_sorted
     ]
@@ -453,10 +479,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         effective_users = round(demand_share * N, 3)
         price = _safe_float(profile["price_per_user"], GAME_SETTINGS.price_per_user)
         avg_cost = _safe_float(profile["avg_cost"])
-        avg_child_labor = _safe_float(profile.get("avg_child_labor"))
-        avg_banned_chem = _safe_float(profile.get("avg_banned_chem"))
-        penalty_per_unit = session_cl_penalty * avg_child_labor + session_bc_penalty * avg_banned_chem
-        unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost - penalty_per_unit
+        unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost
         realized_profit = effective_users * unit_margin
         realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
         round_profit_total += realized_profit
@@ -476,7 +499,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "realized_utility": realized_utility,
             "price_per_user": price,
             "avg_cost_score": avg_cost,
-            "penalty_per_unit": round(penalty_per_unit, 4),
             "unit_margin": round(unit_margin, 2),
         })
 
@@ -507,6 +529,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "excluded_infeasible_users": excluded_infeasible_teams,
         "excluded_infeasible_teams": excluded_infeasible_teams,
         "segment_shares": segment_shares,
+        "audit": audit_result.to_dict(),
         "round_financials": {
             "formula": "realized_profit = effective_users(MNL) x unit_margin",
             "delta": round(delta, 4),
@@ -601,3 +624,166 @@ def get_round_history(code: str) -> dict[str, Any]:
     ]
 
     return {"teams": teams, "rounds": rounds, "series": series}
+
+
+# ---------------------------------------------------------------------------
+# Helper: parse JSON result blob stored in matching_results table
+# ---------------------------------------------------------------------------
+
+def _parse_result_json(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        import json as _json
+        try:
+            return _json.loads(raw)
+        except Exception:
+            return {}
+    return {}
+
+
+@router.get("/{code}/leaderboard")
+def get_session_leaderboard(code: str) -> dict[str, Any]:
+    """
+    Full leaderboard for a session.
+
+    Metrics computed per team per round:
+      supplier_quality   — (5-avg_env) + (5-avg_social) + (avg_strategic-1)
+                           ∈ [0,12], higher = better sustainability/quality
+      profit_cost_score  — realized_profit min-max normalised within the round,
+                           inverted to [0,5]; LOWER = better (0 = highest profit)
+      supplier_utility   — supplier_quality + (1-profit_cost_score/5)*5
+                           = quality + profit contribution; higher = better
+      market_share_pct   — demand fraction (%) captured in MNL; proxy for
+                           user-side utility; higher = better
+
+    Returns:
+      turn_leaderboard    : list of per-(round, team) entries sorted by
+                            supplier_utility descending within each round
+      cumulative_leaderboard : per-team sums across all rounds, sorted by
+                               total_supplier_utility descending
+    """
+    session_row = _get_session_row_or_404(code)
+    session_token = str(session_row.get("session_token", "")).strip()
+    session_code = str(session_row.get("session_code", "")).strip().upper()
+    if not session_token or not session_code:
+        raise HTTPException(status_code=400, detail="Session metadata is incomplete")
+
+    # --- Load matching results (team financials per round) ---
+    match_rows = _extract_rows(fetch_all_matching_results(session_token))
+
+    # round_no → { team → {demand_share, realized_profit, realized_utility} }
+    round_financials: dict[int, dict[str, dict[str, float]]] = {}
+    for mr in match_rows:
+        rno = int(mr.get("round_no", 0) or 0)
+        result = _parse_result_json(mr.get("result"))
+        team_fins = (result.get("round_financials") or {}).get("team_financials") or []
+        round_financials[rno] = {}
+        for tf in team_fins:
+            team = str(tf.get("team") or "").strip()
+            if team:
+                round_financials[rno][team] = {
+                    "demand_share": float(tf.get("demand_share") or 0.0),
+                    "realized_profit": float(tf.get("realized_profit") or 0.0),
+                    "realized_utility": float(tf.get("realized_utility") or 0.0),
+                }
+
+    # --- Load submissions (supplier attribute averages per team per round) ---
+    sub_rows = _extract_rows(fetch_submissions_for_session(session_code))
+
+    # (team, round_no) → latest submission row
+    sub_map: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in sub_rows:
+        team = str(row.get("team") or "(anonymous)").strip()
+        rno = int(row.get("round_no") or 0)
+        key = (team, rno)
+        existing = sub_map.get(key)
+        if existing is None or str(existing.get("created_at") or "") <= str(row.get("created_at") or ""):
+            sub_map[key] = row
+
+    # --- Build per-round entries ---
+    all_rounds = sorted(round_financials.keys())
+    turn_leaderboard: list[dict[str, Any]] = []
+
+    for rno in all_rounds:
+        teams_fin = round_financials[rno]
+        if not teams_fin:
+            continue
+
+        # Compute supplier_quality per team
+        team_metrics: dict[str, dict[str, float]] = {}
+        for team, fin in teams_fin.items():
+            sub = sub_map.get((team, rno), {})
+            avg_env      = float(sub.get("env_avg")      or 0.0)
+            avg_social   = float(sub.get("social_avg")   or 0.0)
+            avg_strategic = float(sub.get("strategic_avg") or 0.0)
+            supplier_quality = (5.0 - avg_env) + (5.0 - avg_social) + (avg_strategic - 1.0)
+            team_metrics[team] = {
+                **fin,
+                "supplier_quality": supplier_quality,
+            }
+
+        # Min-max normalise profit within this round → profit_cost_score
+        profits = [m["realized_profit"] for m in team_metrics.values()]
+        min_p = min(profits)
+        max_p = max(profits)
+        p_range = max_p - min_p if max_p != min_p else 1.0
+
+        round_entries: list[dict[str, Any]] = []
+        for team, m in team_metrics.items():
+            norm_profit = (m["realized_profit"] - min_p) / p_range  # [0,1], 1=best
+            profit_cost_score = round(5.0 * (1.0 - norm_profit), 4)  # [0,5], LOWER=better
+            profit_contribution = norm_profit * 5.0                   # [0,5], higher=better
+            supplier_utility = m["supplier_quality"] + profit_contribution
+
+            round_entries.append({
+                "team": team,
+                "round_no": rno,
+                "realized_profit": round(m["realized_profit"], 2),
+                "market_share_pct": round(m["demand_share"] * 100.0, 2),
+                "realized_utility": round(m["realized_utility"], 4),
+                "supplier_quality": round(m["supplier_quality"], 4),
+                "profit_cost_score": profit_cost_score,
+                "supplier_utility": round(supplier_utility, 4),
+            })
+
+        round_entries.sort(key=lambda x: x["supplier_utility"], reverse=True)
+        turn_leaderboard.extend(round_entries)
+
+    # --- Build cumulative leaderboard (plain sum across rounds) ---
+    cumulative: dict[str, dict[str, Any]] = {}
+    for entry in turn_leaderboard:
+        team = entry["team"]
+        if team not in cumulative:
+            cumulative[team] = {
+                "team": team,
+                "rounds_played": 0,
+                "total_profit": 0.0,
+                "total_market_share_pct": 0.0,
+                "total_realized_utility": 0.0,
+                "total_supplier_quality": 0.0,
+                "total_supplier_utility": 0.0,
+            }
+        c = cumulative[team]
+        c["rounds_played"] += 1
+        c["total_profit"]            += entry["realized_profit"]
+        c["total_market_share_pct"]  += entry["market_share_pct"]
+        c["total_realized_utility"]  += entry["realized_utility"]
+        c["total_supplier_quality"]  += entry["supplier_quality"]
+        c["total_supplier_utility"]  += entry["supplier_utility"]
+
+    cumulative_list = list(cumulative.values())
+    for c in cumulative_list:
+        c["total_profit"]           = round(c["total_profit"], 2)
+        c["total_market_share_pct"] = round(c["total_market_share_pct"], 2)
+        c["total_realized_utility"] = round(c["total_realized_utility"], 4)
+        c["total_supplier_quality"] = round(c["total_supplier_quality"], 4)
+        c["total_supplier_utility"] = round(c["total_supplier_utility"], 4)
+
+    cumulative_list.sort(key=lambda x: x["total_supplier_utility"], reverse=True)
+
+    return {
+        "rounds": all_rounds,
+        "turn_leaderboard": turn_leaderboard,
+        "cumulative_leaderboard": cumulative_list,
+    }

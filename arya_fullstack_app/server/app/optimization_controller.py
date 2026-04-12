@@ -15,16 +15,12 @@ Objectives:
 
 - Max Utility:
     Attributes are transformed directionally before use (scale 1-5):
-            bad attrs  (env_risk, social_risk, low_quality): (5 - x)  ->  lower raw = higher utility
-      good attrs (strategic, improvement):                         (x - 1)  ->  higher raw = higher utility
+            bad attrs (env_risk, social_risk): (5 - x)  ->  lower raw = higher utility
             cost_score is intentionally excluded from utility to preserve Profit-vs-Utility trade-off.
     All terms are non-negative. Formula:
     utility_total = sum_{u in selected_users}
-        [ w_env*u   * env_mult        * (5 - avg(env_risk))
-        + w_social*u * social_mult    * (5 - avg(social_risk))
-        + w_strategic*u * strategic_mult * (avg(strategic) - 1)
-        + w_improvement*u * improvement_mult * (avg(improvement) - 1)
-        + w_low_quality*u * low_quality_mult * (5 - avg(low_quality)) ]
+        [ w_env*u   * env_mult    * (5 - avg(env_risk))
+        + w_social*u * social_mult * (5 - avg(social_risk)) ]
 
 
 """
@@ -58,11 +54,6 @@ class Policy:
     env_mult: float = 1.0
     social_mult: float = 1.0
     cost_mult: float = 1.0
-    strategic_mult: float = 1.0
-    improvement_mult: float = 1.0
-    low_quality_mult: float = 1.0
-    child_labor_penalty: float = 0.0  # if >=0.5 => ban suppliers with child_labor==1
-    banned_chem_penalty: float = 0.0  # if >=0.5 => ban suppliers with banned_chem==1
 
     def clamp_nonnegative(self) -> "Policy":
         for k, v in self.__dict__.items():
@@ -111,12 +102,6 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
         "cost_score": "cost_score",
         "strategic importance": "strategic",
         "strategic": "strategic",
-        "improvement potential": "improvement",
-        "improvement": "improvement",
-        "low quality": "low_quality",
-            "low product quality": "low_quality",
-            "product quality": "low_quality",
-        "low_quality": "low_quality",
         "child labor": "child_labor",
         "child_labor": "child_labor",
         "banned chem": "banned_chem",
@@ -136,8 +121,6 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
         "social_risk",
         "cost_score",
         "strategic",
-        "improvement",
-        "low_quality",
     ]
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -183,14 +166,6 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
         "price sensitivity": "w_cost",
         "price_sensitivity": "w_cost",
 
-        "strategic importance": "w_strategic",
-        "strategic": "w_strategic",
-        "w_strategic": "w_strategic",
-
-        "improvement potential": "w_improvement",
-        "improvement": "w_improvement",
-        "w_improvement": "w_improvement",
-
         "low product quality": "w_low_quality",
         "product quality": "w_low_quality",
         "low quality": "w_low_quality",
@@ -207,17 +182,11 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
         r"^(env|environment|environmental)( risk| score)?$": "w_env",
         r"^social( risk| score)?$": "w_social",
         r"^(cost|price)( risk| score| sensitivity)?$": "w_cost",
-        r"^strategic( importance)?( score)?$": "w_strategic",
-        r"^improvement( potential)?( score)?$": "w_improvement",
         r"^(low product quality|product quality|low quality|lowquality|quality)( risk| score)?$": "w_low_quality",
-    
-            r"^(banned|restricted) (chem|chemical|chemicals)$": "banned_chem",
-        
-            r"^child( labour| labor)?$": "child_labor",
-        }
+    }
     df = _fuzzy_rename(df, patterns_to_target)
 
-    required = ["user_id", "w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]
+    required = ["user_id", "w_env", "w_social", "w_cost", "w_low_quality"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         detected = list(df.columns)
@@ -225,7 +194,7 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
             "Users sheet missing required columns: "
             f"{missing}. Detected columns: {detected}. "
             "Expected: Users/User ID, plus weights for Environmental Risk, Social Risk, Cost Score, "
-            "Strategic Importance, Improvement Potential, Low Product Quality."
+            "Low Product Quality."
         )
 
     df["user_id"] = df["user_id"].astype(str)
@@ -282,7 +251,7 @@ def _select_last_n_users(users_df: pd.DataFrame, n: int) -> pd.DataFrame:
 def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, float]:
     _zero = {
         "k": 0.0, "avg_env": 0.0, "avg_social": 0.0, "avg_cost": 0.0,
-        "avg_strategic": 0.0, "avg_improvement": 0.0, "avg_low_quality": 0.0,
+        "avg_strategic": 0.0,
         "avg_child_labor": 0.0, "avg_banned_chem": 0.0,
     }
     if not picks:
@@ -301,8 +270,6 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
         "avg_social": _col_mean("social_risk"),
         "avg_cost": _col_mean("cost_score"),
         "avg_strategic": _col_mean("strategic"),
-        "avg_improvement": _col_mean("improvement"),
-        "avg_low_quality": _col_mean("low_quality"),
         "avg_child_labor": _col_mean("child_labor"),
         "avg_banned_chem": _col_mean("banned_chem"),
     }
@@ -337,8 +304,6 @@ def manual_metrics(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
-    child_labor_penalty: float | None = None,
-    banned_chem_penalty: float | None = None,
 ) -> Dict[str, Any]:
     from .beta_density import BetaDensity
     from .mnl_market import BuyerProfile, run_mnl_market
@@ -372,15 +337,7 @@ def manual_metrics(
                 feasible = False
                 break
 
-    # Resolve penalty costs (caller overrides > session defaults > 0)
-    _cl_penalty = float(child_labor_penalty) if child_labor_penalty is not None else 0.0
-    _bc_penalty = float(banned_chem_penalty) if banned_chem_penalty is not None else 0.0
-    penalty_per_unit = (
-        _cl_penalty * float(a["avg_child_labor"])
-        + _bc_penalty * float(a["avg_banned_chem"])
-    )
-
-    cost_per_unit = float(cfg.cost_scale) * float(a["avg_cost"]) + penalty_per_unit
+    cost_per_unit = float(cfg.cost_scale) * float(a["avg_cost"])
 
     N = len(users_df)
     _empty_metrics: Dict[str, Any] = {
@@ -389,11 +346,8 @@ def manual_metrics(
         "avg_social": float(a["avg_social"]),
         "avg_cost": float(a["avg_cost"]),
         "avg_strategic": float(a["avg_strategic"]),
-        "avg_improvement": float(a["avg_improvement"]),
-        "avg_low_quality": float(a["avg_low_quality"]),
         "avg_child_labor": float(a["avg_child_labor"]),
         "avg_banned_chem": float(a["avg_banned_chem"]),
-        "penalty_per_unit": float(penalty_per_unit),
         "cost_per_unit": float(cost_per_unit),
         "profit_total": 0.0,
         "utility_total": 0.0,
@@ -415,8 +369,6 @@ def manual_metrics(
             w_env=float(row.get("w_env", 0.0)),
             w_social=float(row.get("w_social", 0.0)),
             w_cost=float(row.get("w_cost", 1.0)),
-            w_strategic=float(row.get("w_strategic", 0.0)),
-            w_improvement=float(row.get("w_improvement", 0.0)),
             w_low_quality=float(row.get("w_low_quality", 0.0)),
         ))
 
@@ -427,9 +379,6 @@ def manual_metrics(
         price_per_user=price,
         avg_env=float(a["avg_env"]),
         avg_social=float(a["avg_social"]),
-        avg_strategic=float(a["avg_strategic"]),
-        avg_improvement=float(a["avg_improvement"]),
-        avg_low_quality=float(a["avg_low_quality"]),
     )
 
     _delta = float(delta) if delta is not None else 0.1
@@ -452,11 +401,8 @@ def manual_metrics(
             "avg_social": float(a["avg_social"]),
             "avg_cost": float(a["avg_cost"]),
             "avg_strategic": float(a["avg_strategic"]),
-            "avg_improvement": float(a["avg_improvement"]),
-            "avg_low_quality": float(a["avg_low_quality"]),
             "avg_child_labor": float(a["avg_child_labor"]),
             "avg_banned_chem": float(a["avg_banned_chem"]),
-            "penalty_per_unit": float(penalty_per_unit),
             "cost_per_unit": float(cost_per_unit),
             "profit_total": float(profit_total),
             "utility_total": float(utility_total),

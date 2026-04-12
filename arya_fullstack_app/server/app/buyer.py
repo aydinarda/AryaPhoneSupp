@@ -38,8 +38,6 @@ class Buyer:
     avg_social: float | None = None
     avg_cost: float | None = None
     avg_strategic: float | None = None
-    avg_improvement: float | None = None
-    avg_low_quality: float | None = None
     avg_child_labor: float | None = None
     avg_banned_chem: float | None = None
 
@@ -77,8 +75,6 @@ class Buyer:
             self.avg_social = _safe_float(supplier_averages.get("avg_social"))
             self.avg_cost = _safe_float(supplier_averages.get("avg_cost"))
             self.avg_strategic = _safe_float(supplier_averages.get("avg_strategic"))
-            self.avg_improvement = _safe_float(supplier_averages.get("avg_improvement"))
-            self.avg_low_quality = _safe_float(supplier_averages.get("avg_low_quality"))
             self.avg_child_labor = _safe_float(supplier_averages.get("avg_child_labor"))
             self.avg_banned_chem = _safe_float(supplier_averages.get("avg_banned_chem"))
 

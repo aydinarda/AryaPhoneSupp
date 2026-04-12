@@ -239,8 +239,13 @@ button.primary {
 
 .layout-suppliers {
   display: grid;
-  grid-template-columns: 3fr 1fr;
+  grid-template-columns: 1fr;
   gap: 18px;
+}
+
+.suppliers-panel,
+.metrics-panel {
+  min-width: 0;
 }
 
 .supplier-list {
@@ -261,7 +266,7 @@ button.primary {
   border-radius: 8px;
   padding: 8px;
   overflow-y: auto;
-  max-height: 480px;
+  max-height: 620px;
   margin-bottom: 0;
 }
 
@@ -269,9 +274,13 @@ button.primary {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px;
-  align-items: center;
+  align-items: start;
   padding: 8px;
   border-bottom: 1px solid #f2f2f2;
+}
+
+.supplier-item > input {
+  margin-top: 4px;
 }
 
 .supplier-item:last-child {
@@ -281,6 +290,92 @@ button.primary {
 .supplier-meta {
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+.supplier-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.supplier-title {
+  line-height: 1.2;
+}
+
+.supplier-bars {
+  display: grid;
+  gap: 7px;
+}
+
+.supplier-bar-row {
+  display: grid;
+  gap: 3px;
+}
+
+.supplier-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.supplier-bar-head span:last-child {
+  flex: 0 0 auto;
+  color: #374151;
+}
+
+.supplier-bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #eef2f7;
+  border: 1px solid #e2e8f0;
+}
+
+.supplier-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.supplier-bar-fill.risk {
+  background: #ef4444;
+}
+
+.supplier-bar-fill.cost {
+  background: #f59e0b;
+}
+
+.supplier-bar-fill.good {
+  background: #16a34a;
+}
+
+.supplier-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.supplier-flag {
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  border: 1px solid var(--line);
+}
+
+.supplier-flag.flag-ok {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.supplier-flag.flag-warn {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
 .supplier-category-section {
@@ -313,7 +408,7 @@ button.primary {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px;
 }
 

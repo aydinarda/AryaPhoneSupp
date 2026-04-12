@@ -2,7 +2,7 @@ import { state, el } from "./state.js";
 import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
-import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js";
+import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js?v=20260411-1";
 import { loadLeaderboard, loadRoundHistory, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
 
@@ -42,37 +42,71 @@ function setupTabs() {
   });
 }
 
+function readNumberInput(input, fallback) {
+  if (!input) return fallback;
+  if (Number.isFinite(input.valueAsNumber)) return input.valueAsNumber;
+
+  const raw = String(input.value ?? "").trim().replace(",", ".");
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatProbability(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "-";
+  const pct = Math.round(numeric * 1000) / 10;
+  return `${numeric} (${pct}%)`;
+}
+
 async function applyBetaDistribution() {
-  const a = parseFloat(el.betaAlpha?.value);
-  const b = parseFloat(el.betaBeta?.value);
-  const d = parseFloat(el.deltaInput?.value);
-  const cl = parseFloat(el.childLaborPenaltyInput?.value ?? "0");
-  const bc = parseFloat(el.bannedChemPenaltyInput?.value ?? "0");
+  const a = readNumberInput(el.betaAlpha, NaN);
+  const b = readNumberInput(el.betaBeta, NaN);
+  const d = readNumberInput(el.deltaInput, NaN);
+  const auditProbability = readNumberInput(el.auditProbabilityInput, NaN);
+  const catchProbability = readNumberInput(el.catchProbabilityInput, NaN);
   if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid α/β values.";
+    return;
+  }
+  if (
+    !Number.isFinite(auditProbability) ||
+    auditProbability < 0 ||
+    auditProbability > 1 ||
+    !Number.isFinite(catchProbability) ||
+    catchProbability < 0 ||
+    catchProbability > 1
+  ) {
+    if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid investigation values. Use numbers between 0 and 1.";
     return;
   }
   state.betaAlpha = a;
   state.betaBeta = b;
   if (Number.isFinite(d) && d > 0) state.delta = d;
-  if (Number.isFinite(cl) && cl >= 0) state.childLaborPenalty = cl;
-  if (Number.isFinite(bc) && bc >= 0) state.bannedChemPenalty = bc;
+  state.auditProbability = auditProbability;
+  state.catchProbability = catchProbability;
   renderDistributionChart();
 
   if (!state.gameCode) return;
   try {
-    const body = { beta_alpha: a, beta_beta: b };
+    const body = {
+      beta_alpha: a,
+      beta_beta: b,
+      audit_probability: auditProbability,
+      catch_probability: catchProbability,
+    };
     if (Number.isFinite(d) && d > 0) body.delta = d;
-    if (Number.isFinite(cl) && cl >= 0) body.child_labor_penalty = cl;
-    if (Number.isFinite(bc) && bc >= 0) body.banned_chem_penalty = bc;
-    await api(`/api/sessions/${state.gameCode}/config`, {
+    const saved = await api(`/api/sessions/${state.gameCode}/config`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
+    const savedAuditProbability = Number(saved.audit_probability ?? auditProbability);
+    const savedCatchProbability = Number(saved.catch_probability ?? catchProbability);
+    if (Number.isFinite(savedAuditProbability)) state.auditProbability = savedAuditProbability;
+    if (Number.isFinite(savedCatchProbability)) state.catchProbability = savedCatchProbability;
     if (el.adminRoundHint) {
       const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";
-      const penStr = (cl > 0 || bc > 0) ? ` penalties: CL=${cl} BC=${bc}` : "";
-      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}${penStr}).`;
+      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}; investigation=${formatProbability(savedAuditProbability)}, detection=${formatProbability(savedCatchProbability)}).`;
     }
   } catch (e) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = `Failed to apply: ${e.message}`;
@@ -109,16 +143,6 @@ function setupEvents() {
   document.getElementById("btnManual").addEventListener("click", runManual);
   document.getElementById("btnSubmit").addEventListener("click", submit);
   document.getElementById("btnRefreshLeaderboard").addEventListener("click", loadLeaderboard);
-
-  el.sortSelect.addEventListener("change", (e) => {
-    state.sortBy = e.target.value;
-    loadLeaderboard();
-  });
-
-  el.feasibleOnly.addEventListener("change", (e) => {
-    state.feasibleOnly = e.target.checked;
-    loadLeaderboard();
-  });
 
   ensureLeaderboardPlotUI();
   if (el.plotXSelect) {

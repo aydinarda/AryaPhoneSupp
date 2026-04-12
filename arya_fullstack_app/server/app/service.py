@@ -77,18 +77,13 @@ def get_supplier_overview() -> list[dict[str, Any]]:
     df["env_bad_pct"] = (_norm01(df["env_risk"]) * 100).round(1)
     df["social_bad_pct"] = (_norm01(df["social_risk"]) * 100).round(1)
     df["cost_bad_pct"] = (_norm01(df["cost_score"]) * 100).round(1)
-    df["low_quality_bad_pct"] = (_norm01(df["low_quality"]) * 100).round(1)
     df["strategic_good_pct"] = (_norm01(df["strategic"]) * 100).round(1)
-    df["improvement_good_pct"] = (_norm01(df["improvement"]) * 100).round(1)
 
     if len(users_df):
-        uavg = users_df[["w_env", "w_social", "w_cost", "w_strategic", "w_improvement", "w_low_quality"]].mean()
+        uavg = users_df[["w_env", "w_social", "w_cost"]].mean()
         df["expected_utility_avg_user"] = (
-            float(uavg["w_env"]) * (FIXED_POLICY.env_mult * (5.0 - df["env_risk"]))
+            float(uavg["w_env"])    * (FIXED_POLICY.env_mult    * (5.0 - df["env_risk"]))
             + float(uavg["w_social"]) * (FIXED_POLICY.social_mult * (5.0 - df["social_risk"]))
-            + float(uavg["w_strategic"]) * (FIXED_POLICY.strategic_mult * (df["strategic"] - 1.0))
-            + float(uavg["w_improvement"]) * (FIXED_POLICY.improvement_mult * (df["improvement"] - 1.0))
-            + float(uavg["w_low_quality"]) * (FIXED_POLICY.low_quality_mult * (5.0 - df["low_quality"]))
         ).astype(float)
     else:
         df["expected_utility_avg_user"] = 0.0
@@ -100,17 +95,13 @@ def get_supplier_overview() -> list[dict[str, Any]]:
         "env_bad_pct",
         "social_bad_pct",
         "cost_bad_pct",
-        "low_quality_bad_pct",
         "strategic_good_pct",
-        "improvement_good_pct",
         "expected_utility_avg_user",
         "profit_cost",
         "env_risk",
         "social_risk",
         "cost_score",
         "strategic",
-        "improvement",
-        "low_quality",
         "child_labor",
         "banned_chem",
     ]
@@ -164,8 +155,6 @@ def evaluate_manual(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
-    child_labor_penalty: float | None = None,
-    banned_chem_penalty: float | None = None,
 ) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
     cfg = _build_cfg(objective, price_per_user=price_per_user)
@@ -175,8 +164,6 @@ def evaluate_manual(
         beta_alpha=beta_alpha,
         beta_beta=beta_beta,
         delta=delta,
-        child_labor_penalty=child_labor_penalty,
-        banned_chem_penalty=banned_chem_penalty,
     )
 
 

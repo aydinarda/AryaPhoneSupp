@@ -15,7 +15,6 @@ export function renderMetrics(target, title, payload) {
     metricCard(`${title}`, feasibleBadge),
     metricCard("Profit", fmt(m.profit_total)),
     metricCard("Cost / Unit", fmt(m.cost_per_unit)),
-    metricCard("Penalty / Unit", fmt(m.penalty_per_unit)),
     metricCard("Utility", fmt(m.utility_total)),
     metricCard("Avg Env", fmt(m.avg_env)),
     metricCard("Avg Social", fmt(m.avg_social)),
@@ -31,24 +30,45 @@ const CATEGORY_LABELS = {
 };
 const CATEGORY_ORDER = ["camera", "keyboard", "cable"];
 
+function clampPct(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function supplierBar(label, score, pct, tone) {
+  const width = clampPct(pct);
+  return `
+    <div class="supplier-bar-row">
+      <div class="supplier-bar-head">
+        <span>${label}</span>
+        <span>${fmt(score)}</span>
+      </div>
+      <div class="supplier-bar-track" aria-hidden="true">
+        <div class="supplier-bar-fill ${tone}" style="width:${width}%;"></div>
+      </div>
+    </div>`;
+}
+
 function supplierCard(s, inputType, nameAttr, checked) {
   const id = String(s.supplier_id);
-  const childLabor = Number(s.child_labor || 0) >= 0.5 ? "Yes" : "No";
-  const bannedChem = Number(s.banned_chem || 0) >= 0.5 ? "Yes" : "No";
+  const hasChildLabor = Number(s.child_labor || 0) >= 0.5;
+  const hasBannedChem = Number(s.banned_chem || 0) >= 0.5;
   const cat = s.category || "";
   return `
     <label class="supplier-item">
       <input type="${inputType}" ${nameAttr} data-id="${id}" data-cat="${cat}" ${checked} />
-      <div>
-        <div><strong>${id}</strong></div>
-        <div class="supplier-meta">
-          Env: ${fmt(s.env_risk)} (${fmt(s.env_bad_pct)}% bad) | Social: ${fmt(s.social_risk)} (${fmt(s.social_bad_pct)}% bad) | Cost: ${fmt(s.cost_score)} (${fmt(s.cost_bad_pct)}% bad)
+      <div class="supplier-card-body">
+        <div class="supplier-title"><strong>${id}</strong></div>
+        <div class="supplier-bars">
+          ${supplierBar("Environmental risk", s.env_risk, s.env_bad_pct, "risk")}
+          ${supplierBar("Social risk", s.social_risk, s.social_bad_pct, "risk")}
+          ${supplierBar("Cost score", s.cost_score, s.cost_bad_pct, "cost")}
+          ${supplierBar("Strategic value", s.strategic, s.strategic_good_pct, "good")}
         </div>
-        <div class="supplier-meta">
-          Strategic: ${fmt(s.strategic)} (${fmt(s.strategic_good_pct)}% good) | Improvement: ${fmt(s.improvement)} (${fmt(s.improvement_good_pct)}% good) | Low Quality: ${fmt(s.low_quality)} (${fmt(s.low_quality_bad_pct)}% bad)
-        </div>
-        <div class="supplier-meta">
-          Child labor: ${childLabor} | Banned chemicals: ${bannedChem}
+        <div class="supplier-flags">
+          <span class="supplier-flag ${hasChildLabor ? "flag-warn" : "flag-ok"}">Child labor: ${hasChildLabor ? "Yes" : "No"}</span>
+          <span class="supplier-flag ${hasBannedChem ? "flag-warn" : "flag-ok"}">Banned chemicals: ${hasBannedChem ? "Yes" : "No"}</span>
         </div>
       </div>
     </label>`;
@@ -160,8 +180,6 @@ export function currentPayload() {
     beta_alpha: state.betaAlpha ?? 3.0,
     beta_beta: state.betaBeta ?? 3.0,
     delta: state.delta ?? 0.1,
-    child_labor_penalty: state.childLaborPenalty ?? 0.0,
-    banned_chem_penalty: state.bannedChemPenalty ?? 0.0,
   };
 }
 

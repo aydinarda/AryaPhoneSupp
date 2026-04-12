@@ -28,9 +28,6 @@ def compute_segment_utility(
     segment: "CustomerSegment",
     avg_env: float,
     avg_social: float,
-    avg_strategic: float,
-    avg_improvement: float,
-    avg_low_quality: float,
 ) -> SegmentUtility:
     """
     Utility a segment gets from a buyer's product — quality dimensions only.
@@ -39,9 +36,6 @@ def compute_segment_utility(
 
     f_i = w_env_i   * (5 - avg_env)
         + w_social_i * (5 - avg_social)
-        + w_strategic_i  * (avg_strategic  - 1)
-        + w_improvement_i * (avg_improvement - 1)
-        + w_low_quality_i * (5 - avg_low_quality)
 
     Price is intentionally excluded — it would make the benchmark unbounded.
     Profit is tracked separately via earnings fields.
@@ -49,11 +43,8 @@ def compute_segment_utility(
     return SegmentUtility(
         segment_id=segment.segment_id,
         utility=(
-            segment.w_env           * (5.0 - avg_env)
-            + segment.w_social      * (5.0 - avg_social)
-            + segment.w_strategic   * (avg_strategic - 1.0)
-            + segment.w_improvement * (avg_improvement - 1.0)
-            + segment.w_low_quality * (5.0 - avg_low_quality)
+            segment.w_env      * (5.0 - avg_env)
+            + segment.w_social * (5.0 - avg_social)
         ),
     )
 
@@ -77,13 +68,10 @@ def compute_potential(
     if not segments:
         return BuyerPotential(utility=0.0, earnings=0.0)
 
-    avg_env         = buyer.avg_env         or 0.0
-    avg_social      = buyer.avg_social      or 0.0
-    avg_cost        = buyer.avg_cost        or 0.0
-    avg_strategic   = buyer.avg_strategic   or 0.0
-    avg_improvement = buyer.avg_improvement or 0.0
-    avg_low_quality = buyer.avg_low_quality or 0.0
-    price           = buyer.price_per_user  or 0.0
+    avg_env  = buyer.avg_env  or 0.0
+    avg_social = buyer.avg_social or 0.0
+    avg_cost = buyer.avg_cost or 0.0
+    price    = buyer.price_per_user or 0.0
 
     total_density = sum(s.density for s in segments)
     if total_density <= 0.0:
@@ -91,7 +79,7 @@ def compute_potential(
 
     weighted_utility = sum(
         (s.density / total_density)
-        * compute_segment_utility(s, avg_env, avg_social, avg_strategic, avg_improvement, avg_low_quality).utility
+        * compute_segment_utility(s, avg_env, avg_social).utility
         for s in segments
     )
 

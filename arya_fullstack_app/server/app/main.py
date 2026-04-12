@@ -58,8 +58,6 @@ def manual_eval(req: EvalRequest) -> dict[str, Any]:
             beta_alpha=req.beta_alpha,
             beta_beta=req.beta_beta,
             delta=req.delta,
-            child_labor_penalty=req.child_labor_penalty,
-            banned_chem_penalty=req.banned_chem_penalty,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -82,8 +80,6 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             req.objective, req.picks,
             price_per_user=req.price_per_user,
             delta=req.delta,
-            child_labor_penalty=req.child_labor_penalty,
-            banned_chem_penalty=req.banned_chem_penalty,
         )
         metrics = result["metrics"]
         feasible = result.get("feasible", False)
@@ -103,8 +99,6 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "social_avg": float(metrics.get("avg_social", 0.0)),
             "cost_avg": float(metrics.get("avg_cost", 0.0)),
             "strategic_avg": float(metrics.get("avg_strategic", 0.0)),
-            "improvement_avg": float(metrics.get("avg_improvement", 0.0)),
-            "low_quality_avg": float(metrics.get("avg_low_quality", 0.0)),
         }
 
         insert_submission(payload)

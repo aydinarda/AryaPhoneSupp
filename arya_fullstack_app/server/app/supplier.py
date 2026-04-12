@@ -24,10 +24,10 @@ class Supplier:
     Frozen (immutable) — suppliers are fixed for the entire game session.
 
     Risk/quality attributes are on a 1-5 scale.  Directional conventions:
-      env_risk, social_risk, low_quality  →  lower raw value = better
-      strategic, improvement              →  lower raw value = better (no need to confuse)
-      cost_score                          →  lower raw value = cheaper (better for profit)
-      child_labor, banned_chem            →  binary flag (0 or 1); 1 = violation
+      env_risk, social_risk  →  lower raw value = better
+      strategic              →  display only; no utility contribution
+      cost_score             →  lower raw value = cheaper (better for profit)
+      child_labor, banned_chem → binary flag (0 or 1); stored in data, no cost/utility effect
     """
 
     supplier_id: str
@@ -36,10 +36,8 @@ class Supplier:
     social_risk: float = 0.0
     cost_score: float = 0.0
     strategic: float = 0.0
-    improvement: float = 0.0
-    low_quality: float = 0.0
-    child_labor: float = 0.0   # binary flag
-    banned_chem: float = 0.0   # binary flag
+    child_labor: float = 0.0   # binary flag (data only — no cost/utility effect)
+    banned_chem: float = 0.0   # binary flag (data only — no cost/utility effect)
     category: str = ""         # e.g. "camera", "keyboard", "cable"
 
     @classmethod
@@ -58,8 +56,6 @@ class Supplier:
             social_risk=_safe_float(row.get("social_risk")),
             cost_score=_safe_float(row.get("cost_score")),
             strategic=_safe_float(row.get("strategic")),
-            improvement=_safe_float(row.get("improvement")),
-            low_quality=_safe_float(row.get("low_quality")),
             child_labor=_safe_float(row.get("child_labor")),
             banned_chem=_safe_float(row.get("banned_chem")),
             category=category,

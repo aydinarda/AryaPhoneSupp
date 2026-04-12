@@ -31,8 +31,6 @@ class CustomerSegment:
     w_env: float = 0.0
     w_social: float = 0.0
     w_cost: float = 1.0
-    w_strategic: float = 0.0
-    w_improvement: float = 0.0
     w_low_quality: float = 0.0
 
     @classmethod
@@ -46,8 +44,6 @@ class CustomerSegment:
           w_env       : "w_env" | "env_weight"
           w_social    : "w_social" | "social_weight"
           w_cost      : "w_cost" | "price_sensitivity" | "cost_score" | "cost_weight"
-          w_strategic : "w_strategic" | "strategic_weight"
-          w_improvement: "w_improvement" | "improvement_weight"
           w_low_quality: "w_low_quality" | "quality_weight"
         """
         segment_id = str(
@@ -69,12 +65,6 @@ class CustomerSegment:
             w_social=_safe_float(row.get("w_social", row.get("social_weight")), 0.0),
             w_cost=_safe_float(
                 row.get("w_cost", row.get("price_sensitivity", row.get("cost_score", row.get("cost_weight")))), 1.0
-            ),
-            w_strategic=_safe_float(
-                row.get("w_strategic", row.get("strategic_weight")), 0.0
-            ),
-            w_improvement=_safe_float(
-                row.get("w_improvement", row.get("improvement_weight")), 0.0
             ),
             w_low_quality=_safe_float(
                 row.get("w_low_quality", row.get("quality_weight")), 0.0

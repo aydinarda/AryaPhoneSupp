@@ -136,7 +136,7 @@ def fetch_submissions_for_session(session_code: str):
     return (
         get_client()
         .table("submissions")
-        .select("team, round_no, profit, utility, env_avg, social_avg, cost_avg, created_at")
+        .select("team, round_no, profit, utility, env_avg, social_avg, cost_avg, strategic_avg, created_at")
         .eq("session_code", session_code)
         .order("created_at", desc=False)
         .execute()
@@ -167,5 +167,16 @@ def fetch_latest_matching_result(session_token: str):
         .eq("session_token", session_token)
         .order("created_at", desc=True)
         .limit(1)
+        .execute()
+    )
+
+
+def fetch_all_matching_results(session_token: str):
+    return (
+        get_client()
+        .table("matching_results")
+        .select("round_no, result, created_at")
+        .eq("session_token", session_token)
+        .order("round_no", desc=False)
         .execute()
     )

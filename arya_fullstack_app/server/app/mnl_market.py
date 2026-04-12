@@ -8,11 +8,8 @@ Full dot-product formulation
 The MNL logit for buyer i in segment s is the inner product of the buyer's
 attribute vector and the segment's weight vector, with price scaled by delta:
 
-    U_{i,s} = w_env_s      * (5 - avg_env_i)
-             + w_social_s   * (5 - avg_social_i)
-             + w_strategic_s  * (avg_strategic_i  - 1)
-             + w_improvement_s * (avg_improvement_i - 1)
-             + w_low_quality_s * (5 - avg_low_quality_i)
+    U_{i,s} = w_env_s    * (5 - avg_env_i)
+             + w_social_s * (5 - avg_social_i)
              - delta * w_cost_s * price_i
 
 delta (default 1.0) scales the price sensitivity globally.
@@ -57,9 +54,6 @@ class BuyerProfile:
     price_per_user: float
     avg_env: float
     avg_social: float
-    avg_strategic: float
-    avg_improvement: float
-    avg_low_quality: float
 
     @classmethod
     def from_buyer(cls, buyer: "Buyer") -> "BuyerProfile":
@@ -68,9 +62,6 @@ class BuyerProfile:
             price_per_user=buyer.price_per_user or 0.0,
             avg_env=buyer.avg_env or 0.0,
             avg_social=buyer.avg_social or 0.0,
-            avg_strategic=buyer.avg_strategic or 0.0,
-            avg_improvement=buyer.avg_improvement or 0.0,
-            avg_low_quality=buyer.avg_low_quality or 0.0,
         )
 
 
@@ -112,11 +103,8 @@ def _quality_score(profile: BuyerProfile, segment: "CustomerSegment") -> float:
     Used both in the MNL logit and in realized_utility (benchmark-comparable).
     """
     return (
-        segment.w_env           * (5.0 - profile.avg_env)
-        + segment.w_social      * (5.0 - profile.avg_social)
-        + segment.w_strategic   * (profile.avg_strategic - 1.0)
-        + segment.w_improvement * (profile.avg_improvement - 1.0)
-        + segment.w_low_quality * (5.0 - profile.avg_low_quality)
+        segment.w_env      * (5.0 - profile.avg_env)
+        + segment.w_social * (5.0 - profile.avg_social)
     )
 
 
