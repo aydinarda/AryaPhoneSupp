@@ -29,13 +29,14 @@ def _assert_metrics_payload(data: dict) -> None:
 
 
 def _assert_manual_eval_metrics(data: dict) -> None:
-    """Validate manual-eval response, which must include penalty-aware metrics."""
+    """Validate manual-eval response structure."""
     _assert_metrics_payload(data)
     metrics = data["metrics"]
-    for key in ("cost_per_unit", "penalty_per_unit", "avg_child_labor", "avg_banned_chem"):
+    for key in ("cost_per_unit", "avg_child_labor", "avg_banned_chem"):
         assert key in metrics, f"Missing manual-eval metric key: {key!r}"
-    assert metrics["penalty_per_unit"] >= 0.0
     assert metrics["cost_per_unit"] >= 0.0
+    assert metrics["avg_child_labor"] >= 0.0
+    assert metrics["avg_banned_chem"] >= 0.0
 
 
 def test_benchmark_max_utility_returns_200() -> None:
@@ -52,42 +53,45 @@ def test_benchmark_max_profit_returns_200() -> None:
         _assert_metrics_payload(response.json())
 
 
-def test_manual_eval_includes_penalty_metrics() -> None:
-    """Manual-eval with no picks returns infeasible but must still include penalty metrics."""
+def test_manual_eval_empty_picks_returns_infeasible() -> None:
+    """Manual-eval with no picks returns infeasible; response still has full metrics shape."""
     response = client.post(
         "/api/manual-eval",
-        json={
-            "objective": "max_profit",
-            "picks": [],
-            "price_per_user": 100,
-            "child_labor_penalty": 0.0,
-            "banned_chem_penalty": 0.0,
-        },
-    )
-    assert response.status_code == 200
-    _assert_manual_eval_metrics(response.json())
-    assert response.json()["feasible"] is False  # empty picks = infeasible
-
-
-def test_manual_eval_penalty_nonzero_returns_positive_penalty_per_unit() -> None:
-    """When penalty rates are set and at least one supplier has a flag,
-    penalty_per_unit must be >= 0 (positive if flagged supplier is in picks)."""
-    # Use all suppliers — at least one should have child_labor flag; if none do, still ≥ 0
-    from app.service import get_tables
-    suppliers_df, _ = get_tables()
-    all_ids = suppliers_df["supplier_id"].astype(str).tolist()[:3]  # first 3 for speed
-
-    response = client.post(
-        "/api/manual-eval",
-        json={
-            "objective": "max_profit",
-            "picks": all_ids,
-            "price_per_user": 100,
-            "child_labor_penalty": 50.0,
-            "banned_chem_penalty": 50.0,
-        },
+        json={"objective": "max_profit", "picks": [], "price_per_user": 100},
     )
     assert response.status_code == 200
     data = response.json()
     _assert_manual_eval_metrics(data)
-    assert data["metrics"]["penalty_per_unit"] >= 0.0
+    assert data["feasible"] is False
+
+
+def test_manual_eval_exposes_violation_averages() -> None:
+    """manual-eval response must include avg_child_labor and avg_banned_chem for
+    every valid submission so the audit system can track supplier violations."""
+    from app.service import get_tables
+    suppliers_df, _ = get_tables()
+    # Pick the first supplier from each category (one per category required)
+    cat_col = "category" if "category" in suppliers_df.columns else None
+    if cat_col:
+        picks = (
+            suppliers_df.dropna(subset=[cat_col])
+            .groupby(cat_col, as_index=False)
+            .first()["supplier_id"]
+            .astype(str)
+            .tolist()
+        )
+    else:
+        picks = suppliers_df["supplier_id"].astype(str).tolist()[:3]
+
+    response = client.post(
+        "/api/manual-eval",
+        json={"objective": "max_profit", "picks": picks, "price_per_user": 100},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    _assert_manual_eval_metrics(data)
+    m = data["metrics"]
+    assert "avg_child_labor" in m
+    assert "avg_banned_chem" in m
+    assert m["avg_child_labor"] >= 0.0
+    assert m["avg_banned_chem"] >= 0.0

@@ -117,6 +117,18 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Convert value to int safely, returning default for None/NaN/inf."""
+    try:
+        import math as _math
+        v = float(value)
+        if _math.isnan(v) or _math.isinf(v):
+            return default
+        return int(v)
+    except Exception:
+        return default
+
+
 def _build_team_product_profiles(
     team_rows: dict[str, dict[str, Any]],
     suppliers_by_id: dict[str, dict[str, Any]],
@@ -232,10 +244,10 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
     total_rounds = _resolve_total_rounds(session_row)
 
     duration_seconds = req.duration_seconds if req.duration_seconds and req.duration_seconds > 0 else None
-    market_capacity = max(1, int(req.market_capacity or 1))
+    market_capacity = max(1, _safe_int(req.market_capacity, 1))
 
     latest_rows = _extract_rows(fetch_latest_round(session_token))
-    next_round_no = int(latest_rows[0].get("round_no", 0) or 0) + 1 if latest_rows else 1
+    next_round_no = _safe_int(latest_rows[0].get("round_no"), 0) + 1 if latest_rows else 1
 
     if next_round_no > total_rounds:
         raise HTTPException(
@@ -297,9 +309,9 @@ def get_current_round(code: str) -> dict[str, Any]:
     row = rows[0]
     return {
         "round": {
-            "round_no": int(row.get("round_no", 0) or 0),
+            "round_no": _safe_int(row.get("round_no")),
             "duration_seconds": row.get("duration_seconds"),
-            "market_capacity": int(row.get("market_capacity", GAME_SETTINGS.default_market_capacity) or GAME_SETTINGS.default_market_capacity),
+            "market_capacity": max(1, _safe_int(row.get("market_capacity"), GAME_SETTINGS.default_market_capacity)),
             "started_at": row.get("created_at"),
             "ends_at": row.get("ends_at"),
             "is_active": bool(row.get("is_active", False)),
@@ -372,8 +384,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     if not target_round:
         raise HTTPException(status_code=400, detail="No round found for matching")
 
-    round_no = int(target_round.get("round_no", 0) or 0)
-    market_capacity = max(1, int(target_round.get("market_capacity", GAME_SETTINGS.default_market_capacity) or GAME_SETTINGS.default_market_capacity))
+    round_no = _safe_int(target_round.get("round_no"))
+    market_capacity = max(1, _safe_int(target_round.get("market_capacity"), GAME_SETTINGS.default_market_capacity))
     submission_rows = _extract_rows(fetch_submissions_for_round(session_code, round_no))
     if not submission_rows:
         raise HTTPException(status_code=400, detail="No submissions found for this round")
@@ -546,7 +558,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "session_token": session_token,
             "round_no": round_no,
             "solver": result.get("meta", {}).get("solver", "unknown"),
-            "matched_count": int(result.get("meta", {}).get("matched_count", 0) or 0),
+            "matched_count": _safe_int(result.get("meta", {}).get("matched_count")),
             "result": result,
         }
     )
@@ -575,9 +587,9 @@ def get_latest_match(code: str) -> dict[str, Any]:
     row = rows[0]
     return {
         "match": {
-            "round_no": int(row.get("round_no", 0) or 0),
+            "round_no": _safe_int(row.get("round_no")),
             "solver": row.get("solver"),
-            "matched_count": int(row.get("matched_count", 0) or 0),
+            "matched_count": _safe_int(row.get("matched_count")),
             "created_at": row.get("created_at"),
             "result": row.get("result"),
         }
@@ -598,7 +610,7 @@ def get_round_history(code: str) -> dict[str, Any]:
     latest: dict[tuple[str, int], dict[str, Any]] = {}
     for row in rows:
         team = str(row.get("team") or "(anonymous)").strip()
-        rno = int(row.get("round_no") or 0)
+        rno = _safe_int(row.get("round_no"))
         key = (team, rno)
         existing = latest.get(key)
         if existing is None or str(existing.get("created_at") or "") <= str(row.get("created_at") or ""):
@@ -675,7 +687,7 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
     # round_no → { team → {demand_share, realized_profit, realized_utility} }
     round_financials: dict[int, dict[str, dict[str, float]]] = {}
     for mr in match_rows:
-        rno = int(mr.get("round_no", 0) or 0)
+        rno = _safe_int(mr.get("round_no"))
         result = _parse_result_json(mr.get("result"))
         team_fins = (result.get("round_financials") or {}).get("team_financials") or []
         round_financials[rno] = {}
@@ -695,7 +707,7 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
     sub_map: dict[tuple[str, int], dict[str, Any]] = {}
     for row in sub_rows:
         team = str(row.get("team") or "(anonymous)").strip()
-        rno = int(row.get("round_no") or 0)
+        rno = _safe_int(row.get("round_no"))
         key = (team, rno)
         existing = sub_map.get(key)
         if existing is None or str(existing.get("created_at") or "") <= str(row.get("created_at") or ""):

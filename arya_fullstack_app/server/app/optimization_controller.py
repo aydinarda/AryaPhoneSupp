@@ -102,6 +102,11 @@ def _normalize_supplier_columns(df: pd.DataFrame) -> pd.DataFrame:
         "cost_score": "cost_score",
         "strategic importance": "strategic",
         "strategic": "strategic",
+        "improvement potential": "improvement",
+        "improvement": "improvement",
+        "low product quality": "low_quality",
+        "low quality": "low_quality",
+        "low_quality": "low_quality",
         "child labor": "child_labor",
         "child_labor": "child_labor",
         "banned chem": "banned_chem",
@@ -171,6 +176,14 @@ def _normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
         "low quality": "w_low_quality",
         "low_quality": "w_low_quality",
         "w_low_quality": "w_low_quality",
+
+        "strategic importance": "w_strategic",
+        "strategic": "w_strategic",
+        "w_strategic": "w_strategic",
+
+        "improvement potential": "w_improvement",
+        "improvement": "w_improvement",
+        "w_improvement": "w_improvement",
     }
 
     df.columns = [str(c).strip().lower() for c in df.columns]
