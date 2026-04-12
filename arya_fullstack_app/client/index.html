@@ -3,122 +3,159 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Arya Phones Supplier Game</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260412-1" />
+    <title>Arya Phones — Supplier Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260412-2" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
-    <div class="container">
-      <section id="lobbyScreen" class="lobby-screen">
-        <header class="lobby-header">
-          <h1>Arya Phones</h1>
-          <p>Step 1: choose your role and enter the game.</p>
-        </header>
 
-        <div class="lobby-grid">
-          <section class="card role-card">
-            <h2>Admin Screen</h2>
-            <p>Host the game and create a new session.</p>
+    <!-- ══════════════════════════════════════════
+         LOBBY SCREEN
+    ══════════════════════════════════════════ -->
+    <section id="lobbyScreen" class="lobby-screen">
+      <header class="lobby-header">
+        <h1>Arya Phones</h1>
+        <p>Choose your role to get started.</p>
+      </header>
+
+      <div class="lobby-grid">
+        <!-- Admin card -->
+        <section class="card role-card">
+          <h2>Admin</h2>
+          <p>Host a game session and control rounds.</p>
+          <div class="form-group">
             <label for="adminGameName">Game Name</label>
-            <input id="adminGameName" type="text" placeholder="Ex: Supply Chain Round 1" />
+            <input id="adminGameName" type="text" placeholder="e.g. Supply Chain Round 1" />
+          </div>
+          <div class="form-group">
             <label for="adminName">Admin Name</label>
-            <input id="adminName" type="text" placeholder="Ex: Instructor A" />
+            <input id="adminName" type="text" placeholder="e.g. Instructor A" />
+          </div>
+          <div class="form-group">
             <label for="adminNumberOfRounds">Number of Rounds</label>
             <input id="adminNumberOfRounds" type="number" min="1" step="1" value="5" />
-            <button id="btnEnterAdmin" class="primary">Continue as Admin</button>
-            <p class="hint" id="adminHint"></p>
-          </section>
-
-          <section class="card role-card">
-            <h2>Player Screen</h2>
-            <p>Join an existing game session as a player.</p>
-            <label for="playerJoinCode">Game Code</label>
-            <input id="playerJoinCode" type="text" maxlength="8" placeholder="Ex: AB12CD" />
-            <label for="playerTeamName">Team Name</label>
-            <input id="playerTeamName" type="text" placeholder="Ex: Team Blue" />
-            <button id="btnEnterPlayer" class="primary">Continue as Player</button>
-            <p class="hint" id="playerHint"></p>
-          </section>
-        </div>
-      </section>
-
-      <section id="gameScreen" class="hidden">
-        <header class="topbar">
-          <h1>Arya Phones - Supplier Selection</h1>
-          <div class="team-box">
-            <div class="session-pill" id="sessionSummary"></div>
-            <div class="session-pill" id="roundSummary">Round: -</div>
-
-            <div id="adminControls" class="admin-controls hidden">
-              <label for="roundTimerSeconds">Round Timer (seconds, optional)</label>
-              <input id="roundTimerSeconds" type="number" min="0" step="10" placeholder="Ex: 120" />
-
-              <label class="section-label">Segment Density Distribution</label>
-              <div class="beta-params-row">
-                <div class="beta-param">
-                  <label for="betaAlpha">Alpha (α)</label>
-                  <input id="betaAlpha" type="number" min="0.1" step="0.1" value="3.0" />
-                </div>
-                <div class="beta-param">
-                  <label for="betaBeta">Beta (β)</label>
-                  <input id="betaBeta" type="number" min="0.1" step="0.1" value="3.0" />
-                </div>
-              </div>
-              <label class="section-label" style="margin-top:8px;">Price Sensitivity (δ)</label>
-              <div class="beta-params-row">
-                <div class="beta-param">
-                  <label for="deltaInput">δ = 0.1 means $10 price ↑ → −1 utility (at w_cost=1)</label>
-                  <input id="deltaInput" type="number" min="0.001" max="2" step="0.01" value="0.1" />
-                </div>
-              </div>
-              <label class="section-label" style="margin-top:8px;">Investigation Settings</label>
-              <div class="beta-params-row">
-                <div class="beta-param">
-                  <label for="auditProbabilityInput">Investigation Probability</label>
-                  <input id="auditProbabilityInput" type="number" min="0" max="1" step="0.01" value="0" />
-                </div>
-                <div class="beta-param">
-                  <label for="catchProbabilityInput">Detection Probability</label>
-                  <input id="catchProbabilityInput" type="number" min="0" max="1" step="0.01" value="1" />
-                </div>
-              </div>
-              <button id="btnApplyDistribution" style="margin-top:6px;width:100%;">Apply Distribution &amp; δ &amp; Investigation</button>
-
-              <div class="actions-row compact" style="margin-top:10px;">
-                <button id="btnStartRound">Start Round</button>
-                <button id="btnRunMatch" class="primary">Match</button>
-              </div>
-              <p class="hint" id="adminRoundHint"></p>
-            </div>
-
-            <label for="teamName">Team Name</label>
-            <input id="teamName" type="text" placeholder="Enter team name" />
-            <label for="playerName">Player Name</label>
-            <input id="playerName" type="text" placeholder="Enter your name" />
-            <label for="pricePerUser">Price</label>
-            <input id="pricePerUser" type="number" min="0" step="1" placeholder="Ex: 100" />
-            <button id="btnBackLobby">Role Screen</button>
           </div>
-        </header>
+          <button id="btnEnterAdmin" class="primary">Continue as Admin →</button>
+          <p class="hint" id="adminHint"></p>
+        </section>
 
+        <!-- Player card -->
+        <section class="card role-card">
+          <h2>Player</h2>
+          <p>Join an existing session with a game code.</p>
+          <div class="form-group">
+            <label for="playerJoinCode">Game Code</label>
+            <input id="playerJoinCode" type="text" maxlength="8" placeholder="e.g. AB12CD" style="text-transform:uppercase;letter-spacing:.1em;" />
+          </div>
+          <div class="form-group">
+            <label for="playerTeamName">Team Name</label>
+            <input id="playerTeamName" type="text" placeholder="e.g. Team Blue" />
+          </div>
+          <button id="btnEnterPlayer" class="primary">Continue as Player →</button>
+          <p class="hint" id="playerHint"></p>
+        </section>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         GAME SCREEN
+    ══════════════════════════════════════════ -->
+    <section id="gameScreen" class="hidden">
+
+      <!-- NAVBAR -->
+      <nav class="game-nav">
+        <h1>Arya Phones</h1>
+        <div class="nav-pills">
+          <div class="session-pill" id="sessionSummary"></div>
+          <div class="session-pill" id="roundSummary">Round: —</div>
+        </div>
+        <div class="nav-actions">
+          <button id="btnBackLobby">← Role Screen</button>
+        </div>
+      </nav>
+
+      <!-- ADMIN CONTROLS PANEL -->
+      <div id="adminControls" class="admin-controls hidden">
+        <div class="admin-controls-inner">
+
+          <!-- Distribution -->
+          <div class="admin-section">
+            <span class="section-title">Segment Distribution</span>
+            <div class="admin-params-row">
+              <div class="admin-param">
+                <label for="betaAlpha">Alpha (α)</label>
+                <input id="betaAlpha" type="number" min="0.1" step="0.1" value="3.0" />
+              </div>
+              <div class="admin-param">
+                <label for="betaBeta">Beta (β)</label>
+                <input id="betaBeta" type="number" min="0.1" step="0.1" value="3.0" />
+              </div>
+              <div class="admin-param">
+                <label for="deltaInput">Price Sensitivity δ</label>
+                <input id="deltaInput" type="number" min="0.001" max="2" step="0.01" value="0.1" />
+              </div>
+            </div>
+          </div>
+
+          <div class="admin-divider"></div>
+
+          <!-- Investigation -->
+          <div class="admin-section">
+            <span class="section-title">Investigation</span>
+            <div class="admin-params-row">
+              <div class="admin-param">
+                <label for="auditProbabilityInput">Audit Prob.</label>
+                <input id="auditProbabilityInput" type="number" min="0" max="1" step="0.01" value="0" />
+              </div>
+              <div class="admin-param">
+                <label for="catchProbabilityInput">Detection Prob.</label>
+                <input id="catchProbabilityInput" type="number" min="0" max="1" step="0.01" value="1" />
+              </div>
+            </div>
+          </div>
+
+          <div class="admin-divider"></div>
+
+          <!-- Apply + Round controls -->
+          <div class="admin-section" style="flex:1;">
+            <span class="section-title">Round Controls</span>
+            <div class="admin-params-row" style="gap:8px;flex-wrap:wrap;">
+              <div class="admin-param" style="min-width:110px;">
+                <label for="roundTimerSeconds">Timer (sec)</label>
+                <input id="roundTimerSeconds" type="number" min="0" step="10" placeholder="Optional" />
+              </div>
+              <button id="btnApplyDistribution" style="align-self:flex-end;">Apply Settings</button>
+              <button id="btnStartRound" style="align-self:flex-end;">Start Round</button>
+              <button id="btnRunMatch" class="primary" style="align-self:flex-end;">Run Match</button>
+            </div>
+          </div>
+
+        </div>
+        <p class="hint" id="adminRoundHint" style="max-width:1400px;margin:6px auto 0;padding:0 0px;"></p>
+      </div>
+
+      <!-- MAIN CONTENT -->
+      <div class="game-content">
+
+        <!-- Config info strip -->
+        <section class="card info" id="configInfo">Loading…</section>
+
+        <!-- Matching result (hidden until match runs) -->
         <section id="matchingResultCard" class="card hidden">
-          <h3>Latest Matching Result</h3>
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:10px;">Latest Match Result</h3>
           <p class="hint" id="matchingResultText">No matching result yet.</p>
-          <div class="table-wrap">
+          <div class="table-wrap" style="margin-top:10px;">
             <table id="matchingTable">
-              <thead>
-                <tr>
-                  <th>Team Product</th>
-                  <th>Assigned Users</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Team</th><th>Assigned Users</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
           <details id="segmentSharesDetails" style="margin-top:12px;">
-            <summary style="cursor:pointer;font-size:0.88rem;color:var(--muted);user-select:none;">Per-Segment Market Shares ▾</summary>
+            <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none;">Per-Segment Market Shares ▾</summary>
             <div class="table-wrap" style="margin-top:8px;">
-              <table id="segmentSharesTable" style="font-size:0.8rem;">
+              <table id="segmentSharesTable" style="font-size:12px;">
                 <thead><tr id="segmentSharesHead"></tr></thead>
                 <tbody id="segmentSharesBody"></tbody>
               </table>
@@ -126,49 +163,81 @@
           </details>
         </section>
 
-        <section class="card info" id="configInfo">Loading...</section>
+        <!-- ── MAIN 2-COLUMN GRID ── -->
+        <div class="game-main-grid">
 
+          <!-- LEFT: Supplier selection -->
+          <div class="card suppliers-card">
+            <h3>Suppliers</h3>
+            <div id="supplierList" class="supplier-list"></div>
+          </div>
+
+          <!-- RIGHT: Team info + actions + metrics (sticky) -->
+          <div class="game-actions-stack">
+            <div class="card game-actions-card">
+              <h3>Your Submission</h3>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="teamName">Team Name</label>
+                  <input id="teamName" type="text" placeholder="Your team" />
+                </div>
+                <div class="form-group">
+                  <label for="playerName">Player Name</label>
+                  <input id="playerName" type="text" placeholder="Your name" />
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-top:4px;">
+                <label for="pricePerUser">Price per User ($)</label>
+                <input id="pricePerUser" type="number" min="0" step="1" placeholder="e.g. 100" />
+              </div>
+
+              <div class="actions-row" style="margin-top:8px;">
+                <button id="btnManual">Evaluate</button>
+                <button id="btnSubmit" class="primary">Submit</button>
+              </div>
+
+              <hr class="divider" />
+
+              <div id="manualMetrics" class="metrics-grid"></div>
+              <p class="hint" id="statusText"></p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Benchmark -->
         <section class="card" id="benchmarkSummary">
-          <h3 style="margin:0 0 12px;">Benchmark Results (Optimal Solutions)</h3>
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;">Benchmark — Optimal Solutions</h3>
           <div class="layout-2">
-            <div id="benchmarkProfitPanel"><em class="hint">Loading...</em></div>
+            <div id="benchmarkProfitPanel"><em class="hint">Loading…</em></div>
             <div id="benchmarkUtilPanel"></div>
           </div>
         </section>
 
+        <!-- Distribution chart -->
         <section class="card" id="distributionCard">
-          <h3 style="margin:0 0 8px;">Segment Density Distribution</h3>
-          <p class="hint" style="margin:0 0 8px;">Shows how customer segments are weighted across the market. Admin can adjust the shape via α and β parameters.</p>
-          <div id="distributionChart" style="height:300px;"></div>
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:6px;">Segment Density Distribution</h3>
+          <p class="hint" style="margin-bottom:10px;">Customer segment weights across the market. Admin can adjust shape via α and β.</p>
+          <div id="distributionChart" style="height:280px;"></div>
         </section>
 
+        <!-- Leaderboard tabs -->
         <section class="card">
           <div class="tabs">
             <button class="tab" data-tab="leaderboard">Leaderboard</button>
           </div>
 
+          <!-- Game selection panel (default) -->
           <div class="tab-panel" id="panel-game">
-            <div class="actions-row">
-              <button id="btnManual">Manual Evaluate</button>
-              <button id="btnSubmit" class="primary">Submit</button>
-            </div>
-
-            <div class="layout-suppliers">
-              <div class="suppliers-panel">
-                <h3>Suppliers</h3>
-                <div id="supplierList" class="supplier-list"></div>
-              </div>
-              <div class="metrics-panel">
-                <h3>Metrics</h3>
-                <div class="metrics-grid" id="manualMetrics"></div>
-                <p class="hint" id="statusText"></p>
-              </div>
-            </div>
+            <!-- empty: supplier list is now in the main grid above -->
           </div>
 
+          <!-- Leaderboard panel -->
           <div class="tab-panel hidden" id="panel-leaderboard">
-            <div class="actions-row">
-              <button id="btnBackToSelection">← Back to Selection</button>
+            <div class="actions-row" style="margin-bottom:14px;">
+              <button id="btnBackToSelection">← Back</button>
               <button id="btnRefreshLeaderboard">Refresh</button>
               <select id="historyMetricSelect">
                 <option value="profit">History: Realized Profit</option>
@@ -177,37 +246,40 @@
               <select id="plotXSelect" title="X axis"></select>
               <select id="plotYSelect" title="Y axis"></select>
             </div>
+
             <div id="leaderboardScatter" class="card"></div>
-            <h4 style="margin:12px 0 4px;font-size:0.9rem;">Cumulative Leaderboard</h4>
+
+            <h4 style="margin:16px 0 8px;font-size:13px;font-weight:600;color:var(--text-secondary);">Cumulative Leaderboard</h4>
             <div class="table-wrap">
               <table id="leaderboardTable">
                 <thead>
                   <tr>
-                    <th>Rank</th>
+                    <th>#</th>
                     <th>Team</th>
                     <th>Rounds</th>
-                    <th>Cumulative Supplier Utility</th>
-                    <th>Cumulative Market Share %</th>
-                    <th>Cumulative Supplier Quality</th>
-                    <th>Cumulative Realized Utility</th>
+                    <th>Supplier Utility ↑</th>
+                    <th>Market Share %</th>
+                    <th>Supplier Quality</th>
+                    <th>Realized Utility</th>
                     <th>Total Profit</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
               </table>
             </div>
-            <h4 style="margin:16px 0 4px;font-size:0.9rem;">Per-Round Leaderboard</h4>
+
+            <h4 style="margin:20px 0 8px;font-size:13px;font-weight:600;color:var(--text-secondary);">Per-Round Leaderboard</h4>
             <div class="table-wrap">
               <table id="turnLeaderboardTable">
                 <thead>
                   <tr>
                     <th>Round</th>
-                    <th>Rank</th>
+                    <th>#</th>
                     <th>Team</th>
                     <th>Supplier Utility</th>
                     <th>Market Share %</th>
-                    <th>Supplier Quality</th>
-                    <th>Profit Cost Score</th>
+                    <th>Quality</th>
+                    <th>Cost Score</th>
                     <th>Realized Utility</th>
                     <th>Profit</th>
                   </tr>
@@ -217,9 +289,10 @@
             </div>
           </div>
         </section>
-      </section>
-    </div>
 
-    <script type="module" src="/assets/app.js?v=20260412-1"></script>
+      </div><!-- /game-content -->
+    </section><!-- /gameScreen -->
+
+    <script type="module" src="/assets/app.js?v=20260412-2"></script>
   </body>
 </html>
