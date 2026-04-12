@@ -140,7 +140,7 @@ export function renderLeaderboardScatter(rows) {
   `;
 }
 
-export async function loadRoundHistory() {
+export function loadRoundHistory() {
   if (!state.gameCode) return;
 
   let container = document.getElementById("roundHistoryChart");
@@ -157,37 +157,50 @@ export async function loadRoundHistory() {
 
   if (!window.Plotly) return;
 
-  try {
-    const data = await api(`/api/sessions/${state.gameCode}/rounds/history`);
-    const { series = [], rounds = [] } = data;
+  const rows = state.latestRows;
+  if (!rows || !rows.length) {
+    container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
+    return;
+  }
 
-    if (!series.length || !rounds.length) {
-      container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
-      return;
-    }
+  const metric = state.historyMetric === "profit" ? "realized_profit" : "supplier_utility";
+  const metricLabel = metric === "realized_profit" ? "Realized Profit" : "Supplier Utility";
 
-    const metric = state.historyMetric || "profit";
-    const traces = series.map((s, i) => ({
-      x: s.data.map((d) => d.round_no),
-      y: s.data.map((d) => d[metric] ?? 0),
+  // Group by team
+  const byTeam = new Map();
+  for (const r of rows) {
+    const team = r.team ?? "(anonymous)";
+    if (!byTeam.has(team)) byTeam.set(team, []);
+    byTeam.get(team).push(r);
+  }
+
+  const teams = [...byTeam.keys()].sort();
+  if (!teams.length) {
+    container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
+    return;
+  }
+
+  const traces = teams.map((team, i) => {
+    const teamRows = byTeam.get(team).slice().sort((a, b) => (a.round_no ?? 0) - (b.round_no ?? 0));
+    return {
+      x: teamRows.map((r) => r.round_no),
+      y: teamRows.map((r) => Number(r[metric] ?? 0)),
       mode: "lines+markers",
-      name: s.team,
+      name: team,
       line: { color: PALETTE[i % PALETTE.length], width: 2 },
       marker: { size: 6 },
-    }));
+    };
+  });
 
-    window.Plotly.react(container, traces, {
-      margin: { t: 36, r: 16, b: 40, l: 56 },
-      title: { text: `Round History - ${metric === "profit" ? "Realized Profit" : "Utility"} per Team`, font: { size: 13 } },
-      xaxis: { title: "Round", dtick: 1, tickmode: "linear" },
-      yaxis: { title: metric === "profit" ? "Profit" : "Utility" },
-      legend: { orientation: "h", y: -0.25 },
-      plot_bgcolor: "#ffffff",
-      paper_bgcolor: "#ffffff",
-    }, { responsive: true, displayModeBar: false });
-  } catch (_e) {
-    container.innerHTML = '<p class="hint">Could not load round history.</p>';
-  }
+  window.Plotly.react(container, traces, {
+    margin: { t: 36, r: 16, b: 40, l: 56 },
+    title: { text: `Round History — ${metricLabel} per Team`, font: { size: 13 } },
+    xaxis: { title: "Round", dtick: 1, tickmode: "linear" },
+    yaxis: { title: metricLabel },
+    legend: { orientation: "h", y: -0.25 },
+    plot_bgcolor: "#ffffff",
+    paper_bgcolor: "#ffffff",
+  }, { responsive: true, displayModeBar: false });
 }
 
 export async function loadLeaderboard() {
