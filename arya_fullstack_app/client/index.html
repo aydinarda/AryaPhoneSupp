@@ -163,59 +163,6 @@
           </details>
         </section>
 
-        <!-- ── MAIN 2-COLUMN GRID ── -->
-        <div class="game-main-grid">
-
-          <!-- LEFT: Supplier selection -->
-          <div class="card suppliers-card">
-            <h3>Suppliers</h3>
-            <div id="supplierList" class="supplier-list"></div>
-          </div>
-
-          <!-- RIGHT: Team info + actions + metrics (sticky) -->
-          <div class="game-actions-stack">
-            <div class="card game-actions-card">
-              <h3>Your Submission</h3>
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label for="teamName">Team Name</label>
-                  <input id="teamName" type="text" placeholder="Your team" />
-                </div>
-                <div class="form-group">
-                  <label for="playerName">Player Name</label>
-                  <input id="playerName" type="text" placeholder="Your name" />
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-top:4px;">
-                <label for="pricePerUser">Price per User ($)</label>
-                <input id="pricePerUser" type="number" min="0" step="1" placeholder="e.g. 100" />
-              </div>
-
-              <div class="actions-row" style="margin-top:8px;">
-                <button id="btnManual">Evaluate</button>
-                <button id="btnSubmit" class="primary">Submit</button>
-              </div>
-
-              <hr class="divider" />
-
-              <div id="manualMetrics" class="metrics-grid"></div>
-              <p class="hint" id="statusText"></p>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Benchmark -->
-        <section class="card" id="benchmarkSummary">
-          <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;">Benchmark — Optimal Solutions</h3>
-          <div class="layout-2">
-            <div id="benchmarkProfitPanel"><em class="hint">Loading…</em></div>
-            <div id="benchmarkUtilPanel"></div>
-          </div>
-        </section>
-
         <!-- Distribution chart -->
         <section class="card" id="distributionCard">
           <h3 style="font-size:14px;font-weight:600;margin-bottom:6px;">Segment Density Distribution</h3>
@@ -287,6 +234,59 @@
                 <tbody></tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <!-- ── MAIN 2-COLUMN GRID ── -->
+        <div class="game-main-grid">
+
+          <!-- LEFT: Supplier selection -->
+          <div class="card suppliers-card">
+            <h3>Suppliers</h3>
+            <div id="supplierList" class="supplier-list"></div>
+          </div>
+
+          <!-- RIGHT: Team info + actions + metrics (sticky) -->
+          <div class="game-actions-stack">
+            <div class="card game-actions-card">
+              <h3>Your Submission</h3>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="teamName">Team Name</label>
+                  <input id="teamName" type="text" placeholder="Your team" />
+                </div>
+                <div class="form-group">
+                  <label for="playerName">Player Name</label>
+                  <input id="playerName" type="text" placeholder="Your name" />
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-top:4px;">
+                <label for="pricePerUser">Price per User ($)</label>
+                <input id="pricePerUser" type="number" min="0" step="1" placeholder="e.g. 100" />
+              </div>
+
+              <div class="actions-row" style="margin-top:8px;">
+                <button id="btnManual">Evaluate</button>
+                <button id="btnSubmit" class="primary">Submit</button>
+              </div>
+
+              <hr class="divider" />
+
+              <div id="manualMetrics" class="metrics-grid"></div>
+              <p class="hint" id="statusText"></p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Benchmark -->
+        <section class="card" id="benchmarkSummary">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;">Benchmark — Optimal Solutions</h3>
+          <div class="layout-2">
+            <div id="benchmarkProfitPanel"><em class="hint">Loading…</em></div>
+            <div id="benchmarkUtilPanel"></div>
           </div>
         </section>
 
