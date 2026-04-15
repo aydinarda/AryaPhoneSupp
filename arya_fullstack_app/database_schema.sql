@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS matching_results (
   round_no INTEGER NOT NULL,
   solver TEXT,
   matched_count INTEGER NOT NULL DEFAULT 0,
-  result JSONB NOT NULL
+  result JSONB NOT NULL,
+  CONSTRAINT uq_matching_results_session_round UNIQUE (session_token, round_no)
 );
 
 CREATE INDEX IF NOT EXISTS idx_matching_results_session_created ON matching_results(session_token, created_at DESC);
@@ -142,6 +143,10 @@ CREATE POLICY "Enable read access for all users (matching_results)" ON matching_
 DROP POLICY IF EXISTS "Enable insert for all users (matching_results)" ON matching_results;
 CREATE POLICY "Enable insert for all users (matching_results)" ON matching_results
   FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Enable update for all users (matching_results)" ON matching_results;
+CREATE POLICY "Enable update for all users (matching_results)" ON matching_results
+  FOR UPDATE USING (true);
 
 -- Role grants (required in addition to RLS policies)
 GRANT USAGE ON SCHEMA public TO anon, authenticated;

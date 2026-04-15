@@ -156,7 +156,12 @@ def fetch_submissions_for_round(session_code: str, round_no: int):
 
 
 def insert_matching_result(payload: dict):
-    return get_client().table("matching_results").insert(payload).execute()
+    return (
+        get_client()
+        .table("matching_results")
+        .upsert(payload, on_conflict="session_token,round_no")
+        .execute()
+    )
 
 
 def fetch_latest_matching_result(session_token: str):
