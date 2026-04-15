@@ -252,14 +252,6 @@ def load_supplier_user_tables(xlsx_path: Path) -> Tuple[pd.DataFrame, pd.DataFra
     return suppliers, users
 
 
-def _select_last_n_users(users_df: pd.DataFrame, n: int) -> pd.DataFrame:
-    n = int(n)
-    if n <= 0:
-        return users_df.iloc[0:0].copy()
-    if len(users_df) <= n:
-        return users_df.copy()
-    return users_df.iloc[-n:].copy()
-
 
 def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, float]:
     _zero = {
@@ -289,30 +281,27 @@ def _avg_of_selected(suppliers_df: pd.DataFrame, picks: List[str]) -> Dict[str, 
 
 
 @dataclass
-class MaxProfitConfig:
-    served_users: int = 8
-    price_per_user: float = 100.0
-    cost_scale: float = 10.0
-    env_cap: float = 2.75
-    social_cap: float = 3.0
+class OptimizerConfig:
+    """Optimizer parameters built from settings.py:GameSettings.
+    To change defaults (env_cap, social_cap, cost_scale, price_per_user),
+    edit settings.py — not this class."""
+    price_per_user: float
+    cost_scale: float
+    env_cap: float
+    social_cap: float
     output_flag: int = 0
 
 
-@dataclass
-class MaxUtilConfig:
-    served_users: int = 8
-    price_per_user: float = 100.0
-    cost_scale: float = 10.0
-    env_cap: float = 2.75
-    social_cap: float = 3.0
-    output_flag: int = 0
+# Backward-compatible aliases
+MaxProfitConfig = OptimizerConfig
+MaxUtilConfig = OptimizerConfig
 
 
 def manual_metrics(
     suppliers_df: pd.DataFrame,
     users_df: pd.DataFrame,
     policy: Policy,
-    cfg: MaxProfitConfig | MaxUtilConfig,
+    cfg: OptimizerConfig,
     picks: List[str],
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,

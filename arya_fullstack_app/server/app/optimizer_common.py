@@ -67,8 +67,6 @@ def solve_best_over_k(
     output_flag: int,
     objective_mode: str,
     density_weights: Optional[Dict[str, float]] = None,
-    # kept for backward compatibility — ignored
-    served_users: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Solve the supplier selection problem.
 
@@ -250,9 +248,6 @@ def compute_utility_total(
     policy: Any,
     best: Dict[str, Any],
     density_weights: Optional[Dict[str, float]] = None,
-    # kept for backward compatibility — ignored
-    served_users: int = 0,
-    price_per_user: float = 0.0,
 ) -> float:
     """
     Density-weighted total utility across all users.

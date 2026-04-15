@@ -12,9 +12,8 @@ from .optimization_controller import (
     DEFAULT_XLSX_PATH,
     GUROBI_AVAILABLE,
     MaxProfitAgent,
-    MaxProfitConfig,
     MaxUtilAgent,
-    MaxUtilConfig,
+    OptimizerConfig,
     manual_metrics,
     load_supplier_user_tables,
 )
@@ -112,18 +111,14 @@ def get_supplier_overview() -> list[dict[str, Any]]:
     return out.to_dict(orient="records")
 
 
-def _build_cfg(objective: str, price_per_user: float | None = None):
+def _build_cfg(price_per_user: float | None = None) -> OptimizerConfig:
     price_value = GAME_SETTINGS.price_per_user if price_per_user is None else max(0.0, float(price_per_user))
-    kwargs = dict(
+    return OptimizerConfig(
         price_per_user=price_value,
         cost_scale=GAME_SETTINGS.cost_scale,
         env_cap=GAME_SETTINGS.env_cap,
         social_cap=GAME_SETTINGS.social_cap,
-        output_flag=0,
     )
-    if objective == "max_profit":
-        return MaxProfitConfig(**kwargs)
-    return MaxUtilConfig(**kwargs)
 
 
 def build_density_weights(users_df: Any) -> dict[str, float]:
@@ -149,7 +144,6 @@ def build_density_weights(users_df: Any) -> dict[str, float]:
 
 
 def evaluate_manual(
-    objective: str,
     picks: list[str],
     price_per_user: float | None = None,
     beta_alpha: float = 3.0,
@@ -157,7 +151,7 @@ def evaluate_manual(
     delta: float | None = None,
 ) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
-    cfg = _build_cfg(objective, price_per_user=price_per_user)
+    cfg = _build_cfg(price_per_user=price_per_user)
     return manual_metrics(
         suppliers_df, users_df, FIXED_POLICY, cfg,
         [str(x) for x in picks],
@@ -172,7 +166,7 @@ def run_benchmark(objective: str, density_weights: dict[str, float] | None = Non
         raise RuntimeError("gurobipy is not available")
 
     suppliers_df, users_df = get_tables()
-    cfg = _build_cfg(objective)
+    cfg = _build_cfg()
 
     if objective == "max_profit":
         return MaxProfitAgent(suppliers_df, users_df, FIXED_POLICY, cfg, density_weights=density_weights).solve()

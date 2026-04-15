@@ -55,7 +55,7 @@ def suppliers() -> list[dict[str, Any]]:
 def manual_eval(req: EvalRequest) -> dict[str, Any]:
     try:
         return evaluate_manual(
-            req.objective, req.picks,
+            req.picks,
             price_per_user=req.price_per_user,
             beta_alpha=req.beta_alpha,
             beta_beta=req.beta_beta,
@@ -79,7 +79,7 @@ def benchmark(req: BenchmarkRequest) -> dict[str, Any]:
 def submit(req: SubmitRequest) -> dict[str, Any]:
     try:
         result = evaluate_manual(
-            req.objective, req.picks,
+            req.picks,
             price_per_user=req.price_per_user,
             delta=req.delta,
         )

@@ -10,9 +10,10 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from app.optimization_controller import Policy, MaxProfitConfig, manual_metrics
+from app.optimization_controller import Policy, manual_metrics
 from app.optimizer_common import GUROBI_AVAILABLE, solve_best_over_k
 from app.routers.sessions import _build_team_product_profiles
+from app.service import _build_cfg
 from app.supplier import Supplier
 
 
@@ -68,7 +69,7 @@ def _suppliers_by_id(df: pd.DataFrame) -> dict:
 
 
 _POLICY = Policy()
-_CFG = MaxProfitConfig()
+_CFG = _build_cfg()
 
 
 # ---------------------------------------------------------------------------
