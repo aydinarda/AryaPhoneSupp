@@ -235,9 +235,10 @@ export async function loadLeaderboard() {
           <td>${fmt(r.total_market_share_pct)}</td>
           <td>${fmt(r.total_supplier_quality)}</td>
           <td>${fmt(r.total_realized_utility)}</td>
+          <td><strong>${fmt(r.total_buyer_utility)}</strong></td>
           <td><strong>${fmt(r.total_profit)}</strong></td>
         </tr>`).join("")
-      : '<tr><td colspan="8">No cumulative leaderboard yet.</td></tr>';
+      : '<tr><td colspan="9">No cumulative leaderboard yet.</td></tr>';
 
     if (el.turnLeaderboardBody) {
       el.turnLeaderboardBody.innerHTML = turnRows.length
@@ -250,17 +251,18 @@ export async function loadLeaderboard() {
             <td>${fmt(r.supplier_quality)}</td>
             <td>${fmt(r.profit_cost_score)}</td>
             <td>${fmt(r.realized_utility)}</td>
+            <td><strong>${fmt(r.buyer_utility)}</strong></td>
             <td><strong>${fmt(r.realized_profit)}</strong></td>
           </tr>`).join("")
-        : '<tr><td colspan="9">No per-round leaderboard yet.</td></tr>';
+        : '<tr><td colspan="10">No per-round leaderboard yet.</td></tr>';
     }
   } catch (e) {
     state.latestRows = [];
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
-    el.leaderboardBody.innerHTML = `<tr><td colspan="8">${e.message}</td></tr>`;
+    el.leaderboardBody.innerHTML = `<tr><td colspan="9">${e.message}</td></tr>`;
     if (el.turnLeaderboardBody) {
-      el.turnLeaderboardBody.innerHTML = `<tr><td colspan="9">${e.message}</td></tr>`;
+      el.turnLeaderboardBody.innerHTML = `<tr><td colspan="10">${e.message}</td></tr>`;
     }
   }
 }

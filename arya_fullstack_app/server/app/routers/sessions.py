@@ -18,11 +18,10 @@ from ..db import (
     insert_game_round,
     insert_matching_result,
 )
-from ..matching_engine import run_market_matching
 from ..service import get_tables
 from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
 from ..session_service import create_session, get_session, join_session
-from ..settings import FIXED_POLICY, GAME_SETTINGS
+from ..settings import GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -496,6 +495,17 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
         round_profit_total += realized_profit
 
+        avg_env       = _safe_float(profile.get("avg_env"),       0.0)
+        avg_social    = _safe_float(profile.get("avg_social"),    0.0)
+        avg_strategic = _safe_float(profile.get("avg_strategic"), 0.0)
+        buyer_utility = round(
+            0.1 * realized_profit
+            + (5.0 - avg_env)
+            + (5.0 - avg_social)
+            + (5.0 - avg_strategic),
+            4,
+        )
+
         market_to_users[tid] = effective_users
         market_loads[tid] = {
             "demand_share": round(demand_share, 4),
@@ -509,9 +519,11 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "effective_users": effective_users,
             "realized_profit": round(realized_profit, 2),
             "realized_utility": realized_utility,
+            "buyer_utility": buyer_utility,
             "price_per_user": price,
             "avg_cost_score": avg_cost,
             "unit_margin": round(unit_margin, 2),
+            "avg_strategic": round(avg_strategic, 3),
         })
 
     # Build per-segment share breakdown (sorted by segment index = w_cost order)
@@ -654,8 +666,29 @@ def _parse_result_json(raw: Any) -> dict[str, Any]:
     return {}
 
 
+_LEADERBOARD_METRICS = {"buyer_utility", "profit", "market_share", "market_utility"}
+
+_METRIC_FIELD: dict[str, str] = {
+    "buyer_utility":  "buyer_utility",
+    "profit":         "realized_profit",
+    "market_share":   "market_share_pct",
+    "market_utility": "realized_utility",
+}
+
+_CUMULATIVE_FIELD: dict[str, str] = {
+    "buyer_utility":  "total_buyer_utility",
+    "profit":         "total_profit",
+    "market_share":   "total_market_share_pct",
+    "market_utility": "total_realized_utility",
+}
+
+
 @router.get("/{code}/leaderboard")
-def get_session_leaderboard(code: str) -> dict[str, Any]:
+def get_session_leaderboard(
+    code: str,
+    x_metric: str = "market_utility",
+    y_metric: str = "buyer_utility",
+) -> dict[str, Any]:
     """
     Full leaderboard for a session.
 
@@ -681,10 +714,13 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
     if not session_token or not session_code:
         raise HTTPException(status_code=400, detail="Session metadata is incomplete")
 
+    x_metric = x_metric if x_metric in _LEADERBOARD_METRICS else "market_utility"
+    y_metric = y_metric if y_metric in _LEADERBOARD_METRICS else "buyer_utility"
+
     # --- Load matching results (team financials per round) ---
     match_rows = _extract_rows(fetch_all_matching_results(session_token))
 
-    # round_no → { team → {demand_share, realized_profit, realized_utility} }
+    # round_no → { team → {demand_share, realized_profit, realized_utility, buyer_utility} }
     round_financials: dict[int, dict[str, dict[str, float]]] = {}
     for mr in match_rows:
         rno = _safe_int(mr.get("round_no"))
@@ -698,6 +734,7 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
                     "demand_share": float(tf.get("demand_share") or 0.0),
                     "realized_profit": float(tf.get("realized_profit") or 0.0),
                     "realized_utility": float(tf.get("realized_utility") or 0.0),
+                    "buyer_utility": float(tf.get("buyer_utility") or 0.0),
                 }
 
     # --- Load submissions (supplier attribute averages per team per round) ---
@@ -726,8 +763,8 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
         team_metrics: dict[str, dict[str, float]] = {}
         for team, fin in teams_fin.items():
             sub = sub_map.get((team, rno), {})
-            avg_env      = float(sub.get("env_avg")      or 0.0)
-            avg_social   = float(sub.get("social_avg")   or 0.0)
+            avg_env       = float(sub.get("env_avg")       or 0.0)
+            avg_social    = float(sub.get("social_avg")    or 0.0)
             avg_strategic = float(sub.get("strategic_avg") or 0.0)
             supplier_quality = (5.0 - avg_env) + (5.0 - avg_social) + (avg_strategic - 1.0)
             team_metrics[team] = {
@@ -748,16 +785,20 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
             profit_contribution = norm_profit * 5.0                   # [0,5], higher=better
             supplier_utility = m["supplier_quality"] + profit_contribution
 
-            round_entries.append({
+            entry = {
                 "team": team,
                 "round_no": rno,
                 "realized_profit": round(m["realized_profit"], 2),
                 "market_share_pct": round(m["demand_share"] * 100.0, 2),
                 "realized_utility": round(m["realized_utility"], 4),
+                "buyer_utility": round(m["buyer_utility"], 4),
                 "supplier_quality": round(m["supplier_quality"], 4),
                 "profit_cost_score": profit_cost_score,
                 "supplier_utility": round(supplier_utility, 4),
-            })
+            }
+            entry["x_value"] = entry[_METRIC_FIELD[x_metric]]
+            entry["y_value"] = entry[_METRIC_FIELD[y_metric]]
+            round_entries.append(entry)
 
         round_entries.sort(key=lambda x: x["supplier_utility"], reverse=True)
         turn_leaderboard.extend(round_entries)
@@ -773,14 +814,16 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
                 "total_profit": 0.0,
                 "total_market_share_pct": 0.0,
                 "total_realized_utility": 0.0,
+                "total_buyer_utility": 0.0,
                 "total_supplier_quality": 0.0,
                 "total_supplier_utility": 0.0,
             }
         c = cumulative[team]
-        c["rounds_played"] += 1
+        c["rounds_played"]          += 1
         c["total_profit"]            += entry["realized_profit"]
         c["total_market_share_pct"]  += entry["market_share_pct"]
         c["total_realized_utility"]  += entry["realized_utility"]
+        c["total_buyer_utility"]     += entry["buyer_utility"]
         c["total_supplier_quality"]  += entry["supplier_quality"]
         c["total_supplier_utility"]  += entry["supplier_utility"]
 
@@ -789,13 +832,19 @@ def get_session_leaderboard(code: str) -> dict[str, Any]:
         c["total_profit"]           = round(c["total_profit"], 2)
         c["total_market_share_pct"] = round(c["total_market_share_pct"], 2)
         c["total_realized_utility"] = round(c["total_realized_utility"], 4)
+        c["total_buyer_utility"]    = round(c["total_buyer_utility"], 4)
         c["total_supplier_quality"] = round(c["total_supplier_quality"], 4)
         c["total_supplier_utility"] = round(c["total_supplier_utility"], 4)
+        c["x_value"] = c[_CUMULATIVE_FIELD[x_metric]]
+        c["y_value"] = c[_CUMULATIVE_FIELD[y_metric]]
 
     cumulative_list.sort(key=lambda x: x["total_supplier_utility"], reverse=True)
 
     return {
         "rounds": all_rounds,
+        "available_metrics": sorted(_LEADERBOARD_METRICS),
+        "x_metric": x_metric,
+        "y_metric": y_metric,
         "turn_leaderboard": turn_leaderboard,
         "cumulative_leaderboard": cumulative_list,
     }
