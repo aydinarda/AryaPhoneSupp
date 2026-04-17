@@ -81,6 +81,8 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
         result = evaluate_manual(
             req.picks,
             price_per_user=req.price_per_user,
+            beta_alpha=req.beta_alpha,
+            beta_beta=req.beta_beta,
             delta=req.delta,
         )
         metrics = result["metrics"]
