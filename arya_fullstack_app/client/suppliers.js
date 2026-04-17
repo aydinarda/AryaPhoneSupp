@@ -61,14 +61,14 @@ function supplierCard(s, inputType, nameAttr, checked) {
       <div class="supplier-card-body">
         <div class="supplier-title"><strong>${id}</strong></div>
         <div class="supplier-bars">
-          ${supplierBar("Environmental risk", s.env_risk, s.env_bad_pct, "risk")}
-          ${supplierBar("Social risk", s.social_risk, s.social_bad_pct, "risk")}
+          ${supplierBar("Environmental Risk Score", s.env_risk, s.env_bad_pct, "risk")}
+          ${supplierBar("Social Risk Score", s.social_risk, s.social_bad_pct, "risk")}
           ${supplierBar("Cost score", s.cost_score, s.cost_bad_pct, "cost")}
-          ${supplierBar("Strategic value", s.strategic, s.strategic_good_pct, "good")}
+          ${supplierBar("Strategic Importance Value", s.strategic, s.strategic_good_pct, "good")}
         </div>
         <div class="supplier-flags">
-          <span class="supplier-flag ${hasChildLabor ? "flag-warn" : "flag-ok"}">Child labor: ${hasChildLabor ? "Yes" : "No"}</span>
-          <span class="supplier-flag ${hasBannedChem ? "flag-warn" : "flag-ok"}">Banned chemicals: ${hasBannedChem ? "Yes" : "No"}</span>
+          <span class="supplier-flag ${hasChildLabor ? "flag-warn" : "flag-ok"}">Child Labor Existence: ${hasChildLabor ? "Yes" : "No"}</span>
+          <span class="supplier-flag ${hasBannedChem ? "flag-warn" : "flag-ok"}">Banned Chemicals Existence: ${hasBannedChem ? "Yes" : "No"}</span>
         </div>
       </div>
     </label>`;
