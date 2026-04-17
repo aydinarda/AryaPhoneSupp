@@ -52,7 +52,7 @@ export function renderPlotSelectors(rows) {
     rows.some((r) => Number.isFinite(Number(r?.[key])))
   );
 
-  const withFallback = available.length ? available : ["supplier_utility", "market_share_pct"];
+  const withFallback = available.length ? available : ["realized_profit", "buyer_utility", "realized_utility", "market_share_pct"];
   if (!withFallback.includes(state.plotX)) state.plotX = withFallback[0];
   if (!withFallback.includes(state.plotY)) state.plotY = withFallback[Math.min(1, withFallback.length - 1)];
 

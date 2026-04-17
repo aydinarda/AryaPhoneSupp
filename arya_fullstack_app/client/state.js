@@ -27,16 +27,14 @@ export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
 export const ROUND_SYNC_INTERVAL_MS = 2000;
 
 export const PLOT_COLUMNS = {
-  supplier_utility: "Supplier Utility",
-  market_share_pct: "Market Share %",
-  supplier_quality: "Supplier Quality",
-  profit_cost_score: "Profit Cost Score",
-  realized_profit: "Profit",
-  realized_utility: "Realized Utility",
-  total_supplier_utility: "Cumulative Supplier Utility",
-  total_market_share_pct: "Cumulative Market Share %",
-  total_supplier_quality: "Cumulative Supplier Quality",
-  total_profit: "Cumulative Profit",
+  realized_profit:       "Profit",
+  buyer_utility:         "Buyer Utility",
+  realized_utility:      "Market Utility",
+  market_share_pct:      "Market Share %",
+  total_profit:          "Cumulative Profit",
+  total_buyer_utility:   "Cumulative Buyer Utility",
+  total_realized_utility:"Cumulative Market Utility",
+  total_market_share_pct:"Cumulative Market Share %",
 };
 
 export const el = {
