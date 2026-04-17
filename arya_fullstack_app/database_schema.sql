@@ -155,7 +155,7 @@ GRANT SELECT, INSERT ON TABLE submissions TO anon, authenticated;
 GRANT SELECT, INSERT ON TABLE game_sessions TO anon, authenticated;
 GRANT SELECT, INSERT ON TABLE session_players TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE game_rounds TO anon, authenticated;
-GRANT SELECT, INSERT ON TABLE matching_results TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON TABLE matching_results TO anon, authenticated;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
 
