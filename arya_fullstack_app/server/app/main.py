@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +12,19 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.types import Scope, Receive, Send
 
-from .db import fetch_all_submissions, insert_submission
+from .db import fetch_active_round, fetch_all_submissions, fetch_game_session_by_code, insert_submission
 from .matching_engine import run_market_matching
 from .routers.sessions import router as sessions_router
 from .schemas import BenchmarkRequest, EvalRequest, MatchingRequest, SubmitRequest
 from .service import evaluate_manual, get_both_benchmarks, get_game_constants, get_supplier_overview, run_benchmark
+from .ws_manager import manager
 
 app = FastAPI(title="Arya Phone Game API", version="1.0.0")
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    manager.set_loop(asyncio.get_running_loop())
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,14 +95,31 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
         metrics = result["metrics"]
         feasible = result.get("feasible", False)
 
+        session_code = (req.session_code or "").strip().upper() or None
+
+        # Resolve round_no from the server when the client hasn't synced yet
+        round_no = int(req.round_no) if req.round_no is not None else None
+        if round_no is None and session_code:
+            try:
+                sess = fetch_game_session_by_code(session_code)
+                sess_rows = getattr(sess, "data", None) or []
+                if sess_rows:
+                    token = str(sess_rows[0].get("session_token", "")).strip()
+                    active = fetch_active_round(token)
+                    active_rows = getattr(active, "data", None) or []
+                    if active_rows:
+                        round_no = int(active_rows[0].get("round_no") or 0) or None
+            except Exception:
+                pass
+
         payload = {
             "team": (req.team or "(anonymous)").strip() or "(anonymous)",
             "player_name": (req.player_name or "(anonymous)").strip() or "(anonymous)",
             "selected_suppliers": ",".join([str(x) for x in req.picks]),
             "objective": req.objective,
             "comment": req.comment,
-            "session_code": ((req.session_code or "").strip().upper() or None),
-            "round_no": int(req.round_no) if req.round_no is not None else None,
+            "session_code": session_code,
+            "round_no": round_no,
             "price": float(req.price_per_user) if req.price_per_user is not None else None,
             "profit": float(metrics.get("profit_total", 0.0)),
             "utility": float(metrics.get("utility_total", 0.0)),
@@ -106,6 +130,12 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
         }
 
         insert_submission(payload)
+        if session_code:
+            manager.broadcast_sync(session_code, {
+                "type": "submission_received",
+                "team": payload["team"],
+                "round_no": round_no,
+            })
         return {"ok": True, "manual": result}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -208,6 +208,10 @@ function _applyBetaFromData(data) {
   }
 }
 
+export function applyBetaFromServer(data) {
+  _applyBetaFromData(data);
+}
+
 export async function loadCurrentRound() {
   if (!state.gameCode) return;
   try {

@@ -7,7 +7,7 @@ export const state = {
   selected: {}, // { [category]: supplier_id } — one entry per category
   config: null,
   latestRows: [],
-  plotX: "supplier_utility",
+  plotX: "realized_profit",
   plotY: "market_share_pct",
   roundNo: null,
   totalRounds: null,

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from ..db import (
     close_active_rounds,
@@ -20,6 +22,7 @@ from ..db import (
 )
 from ..service import get_tables
 from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
+from ..ws_manager import manager
 from ..session_service import create_session, get_session, join_session
 from ..settings import GAME_SETTINGS
 
@@ -268,8 +271,17 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
     }
     insert_game_round(payload)
 
+    session_code = str(session_row.get("session_code", code)).strip().upper()
+    manager.broadcast_sync(session_code, {
+        "type": "round_started",
+        "round_no": next_round_no,
+        "total_rounds": total_rounds,
+        "duration_seconds": duration_seconds,
+        "ends_at": ends_at,
+    })
+
     return {
-        "session_code": str(session_row.get("session_code", "")),
+        "session_code": session_code,
         "round_no": next_round_no,
         "total_rounds": total_rounds,
         "remaining_rounds": max(0, total_rounds - next_round_no),
@@ -565,15 +577,20 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         },
     }
 
-    insert_matching_result(
-        {
-            "session_token": session_token,
-            "round_no": round_no,
-            "solver": result.get("meta", {}).get("solver", "unknown"),
-            "matched_count": _safe_int(result.get("meta", {}).get("matched_count")),
-            "result": result,
-        }
-    )
+    _db_payload = {
+        "session_token": session_token,
+        "round_no": round_no,
+        "solver": result.get("meta", {}).get("solver", "unknown"),
+        "matched_count": _safe_int(result.get("meta", {}).get("matched_count")),
+        "result": result,
+    }
+    threading.Thread(target=insert_matching_result, args=(_db_payload,), daemon=True).start()
+
+    manager.broadcast_sync(session_code, {
+        "type": "match_result",
+        "round_no": round_no,
+        "matching": result,
+    })
 
     return {
         "session_code": session_code,
@@ -848,3 +865,93 @@ def get_session_leaderboard(
         "turn_leaderboard": turn_leaderboard,
         "cumulative_leaderboard": cumulative_list,
     }
+
+
+# ---------------------------------------------------------------------------
+# WebSocket helpers + endpoint
+# ---------------------------------------------------------------------------
+
+def _build_sync_message(
+    session_code: str,
+    session_token: str,
+    session_row: dict[str, Any],
+) -> dict[str, Any]:
+    total_rounds = _resolve_total_rounds(session_row)
+    beta_alpha, beta_beta = _session_beta.get(session_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+    delta = _session_delta.get(session_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    audit_probability, catch_probability = _session_audit.get(
+        session_code, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
+    )
+
+    round_data = None
+    try:
+        active_rows = _extract_rows(fetch_active_round(session_token))
+        if active_rows:
+            r = active_rows[0]
+            round_data = {
+                "round_no": _safe_int(r.get("round_no")),
+                "duration_seconds": r.get("duration_seconds"),
+                "market_capacity": max(1, _safe_int(r.get("market_capacity"), GAME_SETTINGS.default_market_capacity)),
+                "started_at": r.get("created_at"),
+                "ends_at": r.get("ends_at"),
+                "is_active": bool(r.get("is_active", False)),
+            }
+    except Exception:
+        pass
+
+    match_data = None
+    try:
+        match_rows = _extract_rows(fetch_latest_matching_result(session_token))
+        if match_rows:
+            match_data = _parse_result_json(match_rows[0].get("result"))
+    except Exception:
+        pass
+
+    return {
+        "type": "sync",
+        "total_rounds": total_rounds,
+        "beta_alpha": beta_alpha,
+        "beta_beta": beta_beta,
+        "delta": delta,
+        "audit_probability": audit_probability,
+        "catch_probability": catch_probability,
+        "round": round_data,
+        "match": match_data,
+    }
+
+
+@router.websocket("/{code}/ws")
+async def websocket_session(code: str, websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    normalized = (code or "").strip().upper()
+    rows: list[dict[str, Any]] = []
+    try:
+        rows = _extract_rows(fetch_game_session_by_code(normalized))
+    except Exception:
+        pass
+
+    if not rows or rows[0].get("is_active") is False:
+        await websocket.close(code=4004)
+        return
+
+    session_row = rows[0]
+    session_code = str(session_row.get("session_code", normalized)).strip().upper()
+    session_token = str(session_row.get("session_token", "")).strip()
+
+    manager.register(session_code, websocket)
+    try:
+        await websocket.send_json(_build_sync_message(session_code, session_token, session_row))
+        async for text in websocket.iter_text():
+            try:
+                msg = json.loads(text)
+                if isinstance(msg, dict) and msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        manager.disconnect(session_code, websocket)

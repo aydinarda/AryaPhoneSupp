@@ -142,7 +142,10 @@ function setupEvents() {
 
   document.getElementById("btnManual").addEventListener("click", runManual);
   document.getElementById("btnSubmit").addEventListener("click", submit);
-  document.getElementById("btnRefreshLeaderboard").addEventListener("click", loadLeaderboard);
+  document.getElementById("btnRefreshLeaderboard").addEventListener("click", async () => {
+    await loadLeaderboard();
+    loadRoundHistory();
+  });
 
   ensureLeaderboardPlotUI();
   if (el.plotXSelect) {
