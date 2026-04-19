@@ -1,6 +1,7 @@
 import { state, el, ROUND_SYNC_INTERVAL_MS } from "./state.js";
 import { api } from "./api.js";
 import { renderDistributionChart } from "./distribution.js";
+import { renderConfigInfo } from "./suppliers.js";
 
 export function clearRoundTimer() {
   if (state.roundTimerId) {
@@ -194,6 +195,7 @@ function _applyBetaFromData(data) {
   if (dOk) state.delta = d;
   if (auditOk) state.auditProbability = auditProbability;
   if (catchOk) state.catchProbability = catchProbability;
+  renderConfigInfo();
   // Sync admin inputs ONLY on first load so polls never overwrite what the admin typed
   if (!_betaInputsInitialized) {
     if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;

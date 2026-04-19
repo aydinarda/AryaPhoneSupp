@@ -2,6 +2,25 @@ import { state, el } from "./state.js";
 import { api, fmt, metricCard } from "./api.js";
 import { loadLeaderboard } from "./leaderboard.js";
 
+function fmtConfigValue(value, fallback = "-") {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
+}
+
+export function renderConfigInfo() {
+  if (!el.configInfo || !state.config) return;
+
+  const config = state.config;
+  el.configInfo.textContent = [
+    `Risk caps: avg env ≤ ${fmtConfigValue(config.env_cap)}, avg social ≤ ${fmtConfigValue(config.social_cap)}`,
+    `Cost scale: ${fmtConfigValue(config.cost_scale)}`,
+    `Price sensitivity: ${fmtConfigValue(state.delta)}`,
+    `Audit prob.: ${fmtConfigValue(state.auditProbability)}`,
+    `Detection prob.: ${fmtConfigValue(state.catchProbability)}`,
+  ].join(" | ");
+}
+
 export function renderMetrics(target, title, payload) {
   if (!payload || !payload.metrics) {
     target.innerHTML = "";
@@ -148,7 +167,7 @@ export async function loadConfigAndSuppliers() {
   if (el.pricePerUser && (el.pricePerUser.value === "" || el.pricePerUser.value == null)) {
     el.pricePerUser.value = Number.isFinite(Number(config.price_per_user)) ? String(config.price_per_user) : "100";
   }
-  el.configInfo.textContent = `Risk caps: avg env ≤ ${config.env_cap}, avg social ≤ ${config.social_cap} | Price: ${config.price_per_user} | Cost scale: ${config.cost_scale}`;
+  renderConfigInfo();
   renderSuppliers();
 }
 

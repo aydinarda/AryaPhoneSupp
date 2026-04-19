@@ -1,10 +1,12 @@
 import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import { api } from "./api.js";
 import {
+  clearRoundSync,
   clearRoundTimer,
   renderAdminControls,
   renderRoundSummary,
   resetBetaInputsInitialized,
+  startRoundSync,
 } from "./round.js";
 import { connectWS, disconnectWS } from "./ws.js";
 import { loadBenchmarkSummary } from "./benchmark.js";
@@ -57,11 +59,13 @@ export function showGameScreen() {
   renderRoundSummary();
   renderDistributionChart();
   connectWS(state.gameCode);
+  startRoundSync();
   loadBenchmarkSummary();
 }
 
 export function showLobbyScreen() {
   disconnectWS();
+  clearRoundSync();
   clearRoundTimer();
   el.gameScreen.classList.add("hidden");
   el.lobbyScreen.classList.remove("hidden");

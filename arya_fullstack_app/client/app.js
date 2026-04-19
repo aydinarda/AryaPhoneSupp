@@ -2,7 +2,7 @@ import { state, el } from "./state.js";
 import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
-import { loadConfigAndSuppliers, runManual, submit } from "./suppliers.js";
+import { loadConfigAndSuppliers, renderConfigInfo, runManual, submit } from "./suppliers.js";
 import { loadLeaderboard, loadRoundHistory, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
 
@@ -85,6 +85,7 @@ async function applyBetaDistribution() {
   if (Number.isFinite(d) && d > 0) state.delta = d;
   state.auditProbability = auditProbability;
   state.catchProbability = catchProbability;
+  renderConfigInfo();
   renderDistributionChart();
 
   if (!state.gameCode) return;
@@ -104,6 +105,7 @@ async function applyBetaDistribution() {
     const savedCatchProbability = Number(saved.catch_probability ?? catchProbability);
     if (Number.isFinite(savedAuditProbability)) state.auditProbability = savedAuditProbability;
     if (Number.isFinite(savedCatchProbability)) state.catchProbability = savedCatchProbability;
+    renderConfigInfo();
     if (el.adminRoundHint) {
       const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";
       el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}; investigation=${formatProbability(savedAuditProbability)}, detection=${formatProbability(savedCatchProbability)}).`;

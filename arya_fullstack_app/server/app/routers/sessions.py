@@ -20,6 +20,7 @@ from ..db import (
     insert_game_round,
     insert_matching_result,
 )
+from ..live_state import get_live_round_submissions, get_live_session_submissions
 from ..service import get_tables
 from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
 from ..ws_manager import manager
@@ -359,6 +360,12 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
         session_code,
         (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
     )
+    session_token = str(session_row.get("session_token", "")).strip()
+    if session_token:
+        manager.broadcast_sync(
+            session_code,
+            _build_sync_message(session_code, session_token, session_row),
+        )
     return {
         "ok": True,
         "session_code": session_code,
@@ -397,7 +404,12 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
     round_no = _safe_int(target_round.get("round_no"))
     market_capacity = max(1, _safe_int(target_round.get("market_capacity"), GAME_SETTINGS.default_market_capacity))
-    submission_rows = _extract_rows(fetch_submissions_for_round(session_code, round_no))
+    live_submission_rows = get_live_round_submissions(session_code, round_no)
+    submission_source = "live"
+    submission_rows = live_submission_rows
+    if not submission_rows:
+        submission_source = "database"
+        submission_rows = _extract_rows(fetch_submissions_for_round(session_code, round_no))
     if not submission_rows:
         raise HTTPException(status_code=400, detail="No submissions found for this round")
 
@@ -557,6 +569,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "eligible_team_count": len(profiles),
             "matched_count": N,
             "submitted_team_count": len(by_team),
+            "submission_source": submission_source,
             "infeasible_excluded_count": len(excluded_infeasible_teams),
             "round_profit_total": round(round_profit_total, 2),
         },
@@ -631,7 +644,7 @@ def get_round_history(code: str) -> dict[str, Any]:
     session_row = _get_session_row_or_404(code)
     session_code = str(session_row.get("session_code", "")).strip().upper()
 
-    rows = _extract_rows(fetch_submissions_for_session(session_code))
+    rows = get_live_session_submissions(session_code) or _extract_rows(fetch_submissions_for_session(session_code))
     if not rows:
         return {"teams": [], "rounds": []}
 
@@ -755,7 +768,7 @@ def get_session_leaderboard(
                 }
 
     # --- Load submissions (supplier attribute averages per team per round) ---
-    sub_rows = _extract_rows(fetch_submissions_for_session(session_code))
+    sub_rows = get_live_session_submissions(session_code) or _extract_rows(fetch_submissions_for_session(session_code))
 
     # (team, round_no) → latest submission row
     sub_map: dict[tuple[str, int], dict[str, Any]] = {}
@@ -884,18 +897,21 @@ def _build_sync_message(
     )
 
     round_data = None
+    live_submissions: list[dict[str, Any]] = []
     try:
         active_rows = _extract_rows(fetch_active_round(session_token))
         if active_rows:
             r = active_rows[0]
+            round_no = _safe_int(r.get("round_no"))
             round_data = {
-                "round_no": _safe_int(r.get("round_no")),
+                "round_no": round_no,
                 "duration_seconds": r.get("duration_seconds"),
                 "market_capacity": max(1, _safe_int(r.get("market_capacity"), GAME_SETTINGS.default_market_capacity)),
                 "started_at": r.get("created_at"),
                 "ends_at": r.get("ends_at"),
                 "is_active": bool(r.get("is_active", False)),
             }
+            live_submissions = get_live_round_submissions(session_code, round_no)
     except Exception:
         pass
 
@@ -916,6 +932,7 @@ def _build_sync_message(
         "audit_probability": audit_probability,
         "catch_probability": catch_probability,
         "round": round_data,
+        "submissions": live_submissions,
         "match": match_data,
     }
 

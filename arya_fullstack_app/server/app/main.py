@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from starlette.types import Scope, Receive, Send
 
 from .db import fetch_active_round, fetch_all_submissions, fetch_game_session_by_code, insert_submission
 from .matching_engine import run_market_matching
+from .live_state import upsert_live_submission
 from .routers.sessions import router as sessions_router
 from .schemas import BenchmarkRequest, EvalRequest, MatchingRequest, SubmitRequest
 from .service import evaluate_manual, get_both_benchmarks, get_game_constants, get_supplier_overview, run_benchmark
@@ -127,14 +129,22 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "social_avg": float(metrics.get("avg_social", 0.0)),
             "cost_avg": float(metrics.get("avg_cost", 0.0)),
             "strategic_avg": float(metrics.get("avg_strategic", 0.0)),
+            "feasible": bool(feasible),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
-        insert_submission(payload)
+        live_submission = upsert_live_submission(payload)
+        try:
+            insert_submission(payload)
+        except Exception:
+            # Live classroom matching uses in-memory state; DB history is best-effort.
+            pass
         if session_code:
             manager.broadcast_sync(session_code, {
                 "type": "submission_received",
                 "team": payload["team"],
                 "round_no": round_no,
+                "submission": live_submission or payload,
             })
         return {"ok": True, "manual": result}
     except Exception as exc:
