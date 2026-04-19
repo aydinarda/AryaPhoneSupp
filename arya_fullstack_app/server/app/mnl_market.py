@@ -22,8 +22,8 @@ Realized outcomes per buyer across all segments:
     share_{i,s}           = exp(U_{i,s}) / sum_j exp(U_{j,s})
     demand_{i,s}          = (d_s / sum d) * share_{i,s}
     realized_earnings_i   = sum_s  price_i * demand_{i,s}
-    realized_utility_i    = sum_s  q_{i,s} * demand_{i,s}
-                            (no price/delta term — comparable with frictionless benchmark)
+    realized_utility_i    = sum_s  U_{i,s} * demand_{i,s}
+                            (net utility, including the price/delta term)
 
 Computation is parallelised across segments via ThreadPoolExecutor.
 """
@@ -100,12 +100,16 @@ class MarketResult:
 def _quality_score(profile: BuyerProfile, segment: "CustomerSegment") -> float:
     """
     Quality component of U_{i,s} — price-free dot product of buyer and segment vectors.
-    Used both in the MNL logit and in realized_utility (benchmark-comparable).
     """
     return (
         segment.w_env      * (5.0 - profile.avg_env)
         + segment.w_social * (5.0 - profile.avg_social)
     )
+
+
+def _net_utility_score(profile: BuyerProfile, segment: "CustomerSegment", delta: float) -> float:
+    """Net utility used by MNL: quality utility minus price disutility."""
+    return _quality_score(profile, segment) - delta * segment.w_cost * profile.price_per_user
 
 
 def _mnl_for_segment(
@@ -128,9 +132,7 @@ def _mnl_for_segment(
     logits: list[float] = []
 
     for p in profiles:
-        q = _quality_score(p, segment)
-        mnl_u = q - delta * segment.w_cost * p.price_per_user
-        logits.append(mnl_u)
+        logits.append(_net_utility_score(p, segment, delta))
 
     if not logits:
         return SegmentAllocation(segment_id=segment.segment_id, density=segment.density, shares={})
@@ -221,6 +223,6 @@ def run_mnl_market(
             demand = norm_density * share
             br.total_demand      += demand
             br.realized_earnings += p.price_per_user * demand
-            br.realized_utility  += _quality_score(p, seg) * demand
+            br.realized_utility  += _net_utility_score(p, seg, delta) * demand
 
     return result
