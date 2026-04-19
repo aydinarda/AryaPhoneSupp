@@ -13,9 +13,10 @@ class GameSettings:
     social_cap: float = 3.0
     cost_scale: float = 10.0
     price_per_user: float = 100.0
-    # delta: price sensitivity in MNL utility  U = quality - delta * w_cost * price
+    # MNL utility: U = quality_sensitivity * quality - delta * w_cost * price
     # delta=0.1 means a $10 price increase (at w_cost=1) shifts utility by -1.0 (≈ one quality unit)
     price_sensitivity_delta: float = 0.1
+    quality_sensitivity: float = 1.0
     # Audit parameters (admin-configurable per session, default = audit disabled)
     audit_probability: float = 0.0   # P(supplier selected for audit)
     catch_probability: float = 1.0   # P(violation found | audited AND has violation)

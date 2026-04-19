@@ -6,12 +6,16 @@ Multinomial logit (MNL) demand model for the Arya Phone market game.
 Full dot-product formulation
 -----------------------------
 The MNL logit for buyer i in segment s is the inner product of the buyer's
-attribute vector and the segment's weight vector, with price scaled by delta:
+attribute vector and the segment's weight vector, with quality and price scaled
+by global sensitivity parameters:
 
-    U_{i,s} = w_env_s    * (5 - avg_env_i)
-             + w_social_s * (5 - avg_social_i)
+    U_{i,s} = quality_sensitivity * (
+                 w_env_s    * (5 - avg_env_i)
+               + w_social_s * (5 - avg_social_i)
+             )
              - delta * w_cost_s * price_i
 
+quality_sensitivity (default 1.0) scales the quality/sustainability component.
 delta (default 1.0) scales the price sensitivity globally.
   delta = 0  →  price has no effect on market share (quality-only competition)
   delta = 1  →  standard MNL (price weighted by each segment's w_cost)
@@ -82,7 +86,7 @@ class BuyerMarketResult:
     total_demand: float = 0.0
     # sum of price_i * demand_{i,s}
     realized_earnings: float = 0.0
-    # sum of q_{i,s} * demand_{i,s}  — no price/delta term
+    # sum of U_{i,s} * demand_{i,s}  — net utility after quality and price sensitivities
     realized_utility: float = 0.0
 
 
@@ -107,21 +111,27 @@ def _quality_score(profile: BuyerProfile, segment: "CustomerSegment") -> float:
     )
 
 
-def _net_utility_score(profile: BuyerProfile, segment: "CustomerSegment", delta: float) -> float:
+def _net_utility_score(
+    profile: BuyerProfile,
+    segment: "CustomerSegment",
+    delta: float,
+    quality_sensitivity: float,
+) -> float:
     """Net utility used by MNL: quality utility minus price disutility."""
-    return _quality_score(profile, segment) - delta * segment.w_cost * profile.price_per_user
+    return quality_sensitivity * _quality_score(profile, segment) - delta * segment.w_cost * profile.price_per_user
 
 
 def _mnl_for_segment(
     segment: "CustomerSegment",
     profiles: list[BuyerProfile],
     delta: float,
+    quality_sensitivity: float,
     u_outside: float | None,
 ) -> SegmentAllocation:
     """
     Compute MNL shares for one segment.
 
-    U_{i,s} = q_{i,s} - delta * w_cost_s * price_i
+    U_{i,s} = quality_sensitivity * q_{i,s} - delta * w_cost_s * price_i
 
     u_outside: utility of the outside option.
                None = no outside option (all demand is served by buyers).
@@ -132,7 +142,7 @@ def _mnl_for_segment(
     logits: list[float] = []
 
     for p in profiles:
-        logits.append(_net_utility_score(p, segment, delta))
+        logits.append(_net_utility_score(p, segment, delta, quality_sensitivity))
 
     if not logits:
         return SegmentAllocation(segment_id=segment.segment_id, density=segment.density, shares={})
@@ -162,6 +172,7 @@ def run_mnl_market(
     profiles: list[BuyerProfile],
     segments: list["CustomerSegment"],
     delta: float = 1.0,
+    quality_sensitivity: float = 1.0,
     u_outside: float | None = None,
     max_workers: int | None = None,
 ) -> MarketResult:
@@ -174,6 +185,7 @@ def run_mnl_market(
     segments    : customer segments with density weights
     delta       : price sensitivity multiplier (default 1.0)
                   0 = price ignored in MNL, 1 = standard, >1 = amplified
+    quality_sensitivity: quality/sustainability multiplier (default 1.0)
     u_outside   : outside option utility; None = no outside option
     max_workers : thread pool size (None = cpu_count)
 
@@ -203,7 +215,7 @@ def run_mnl_market(
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_mnl_for_segment, seg, profiles, delta, u_outside): idx
+            pool.submit(_mnl_for_segment, seg, profiles, delta, quality_sensitivity, u_outside): idx
             for idx, seg in enumerate(segments)
         }
         for future in as_completed(futures):
@@ -223,6 +235,6 @@ def run_mnl_market(
             demand = norm_density * share
             br.total_demand      += demand
             br.realized_earnings += p.price_per_user * demand
-            br.realized_utility  += _net_utility_score(p, seg, delta) * demand
+            br.realized_utility  += _net_utility_score(p, seg, delta, quality_sensitivity) * demand
 
     return result

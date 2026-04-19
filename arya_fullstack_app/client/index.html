@@ -6,7 +6,7 @@
     <title>Arya Phones — Supplier Game</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/styles.css?v=20260419-admin" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260419-sustainability" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -95,6 +95,10 @@
               <div class="admin-param">
                 <label for="deltaInput">Price Sensitivity δ</label>
                 <input id="deltaInput" type="number" min="0.001" max="2" step="0.01" value="0.1" />
+              </div>
+              <div class="admin-param">
+                <label for="qualitySensitivityInput">Sustainability Sensitivity</label>
+                <input id="qualitySensitivityInput" type="number" min="0" step="0.1" value="1" />
               </div>
             </div>
           </div>
@@ -213,9 +217,9 @@
                   <tr>
                     <th>Team</th>
                     <th>Avg Demand Share</th>
-                    <th>Total Realized Profit</th>
-                    <th>Total Market Utility</th>
-                    <th>Total Buyer Utility</th>
+                    <th>Avg Realized Profit</th>
+                    <th>Avg Market Utility</th>
+                    <th>Avg Buyer Utility</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -232,38 +236,18 @@
                     <th>#</th>
                     <th>Team</th>
                     <th>Rounds</th>
-                    <th>Supplier Utility ↑</th>
-                    <th>Market Share %</th>
-                    <th>Supplier Quality</th>
-                    <th>Realized Utility</th>
-                    <th>Buyer Utility</th>
-                    <th>Total Profit</th>
+                    <th>Avg Supplier Utility ↑</th>
+                    <th>Avg Market Share %</th>
+                    <th>Avg Supplier Quality</th>
+                    <th>Avg Market Utility</th>
+                    <th>Avg Buyer Utility</th>
+                    <th>Avg Profit</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
               </table>
             </div>
 
-            <h4 style="margin:20px 0 8px;font-size:13px;font-weight:600;color:var(--text-secondary);">Per-Round Leaderboard</h4>
-            <div class="table-wrap">
-              <table id="turnLeaderboardTable">
-                <thead>
-                  <tr>
-                    <th>Round</th>
-                    <th>#</th>
-                    <th>Team</th>
-                    <th>Supplier Utility</th>
-                    <th>Market Share %</th>
-                    <th>Quality</th>
-                    <th>Cost Score</th>
-                    <th>Realized Utility</th>
-                    <th>Buyer Utility</th>
-                    <th>Profit</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
           </div>
         </section>
 
@@ -317,6 +301,6 @@
       </div><!-- /game-content -->
     </section><!-- /gameScreen -->
 
-    <script type="module" src="/assets/app.js?v=20260419-admin"></script>
+    <script type="module" src="/assets/app.js?v=20260419-sustainability"></script>
   </body>
 </html>

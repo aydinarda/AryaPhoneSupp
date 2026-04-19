@@ -119,6 +119,7 @@ export function renderMatchingResult(payload) {
     `Teams: ${meta.eligible_team_count ?? 0}`,
     `Users: ${meta.user_pool_count ?? 0}`,
     `δ: ${financials.delta ?? "-"}`,
+    `Sustainability sens.: ${financials.quality_sensitivity ?? "-"}`,
     auditSummary,
     excluded.length ? `Excluded: ${excluded.join(", ")}` : null,
   ].filter(Boolean).join("  |  ");
@@ -198,17 +199,20 @@ function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
   const d = Number(data.delta);
+  const q = Number(data.quality_sensitivity ?? state.qualitySensitivity);
   const auditProbability = Number(data.audit_probability ?? state.auditProbability);
   const catchProbability = Number(data.catch_probability ?? state.catchProbability);
   const aOk = Number.isFinite(a) && a > 0;
   const bOk = Number.isFinite(b) && b > 0;
   const dOk = Number.isFinite(d) && d > 0;
+  const qOk = Number.isFinite(q) && q >= 0;
   const auditOk = Number.isFinite(auditProbability) && auditProbability >= 0 && auditProbability <= 1;
   const catchOk = Number.isFinite(catchProbability) && catchProbability >= 0 && catchProbability <= 1;
   const chartChanged = (aOk && a !== state.betaAlpha) || (bOk && b !== state.betaBeta) || (dOk && d !== state.delta);
   if (aOk) state.betaAlpha = a;
   if (bOk) state.betaBeta = b;
   if (dOk) state.delta = d;
+  if (qOk) state.qualitySensitivity = q;
   if (auditOk) state.auditProbability = auditProbability;
   if (catchOk) state.catchProbability = catchProbability;
   renderConfigInfo();
@@ -217,6 +221,7 @@ function _applyBetaFromData(data) {
     if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
     if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
     if (el.deltaInput) el.deltaInput.value = state.delta;
+    if (el.qualitySensitivityInput) el.qualitySensitivityInput.value = state.qualitySensitivity;
     if (el.auditProbabilityInput) el.auditProbabilityInput.value = state.auditProbability;
     if (el.catchProbabilityInput) el.catchProbabilityInput.value = state.catchProbability;
     _betaInputsInitialized = true;

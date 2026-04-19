@@ -62,10 +62,15 @@ async function applyBetaDistribution() {
   const a = readNumberInput(el.betaAlpha, NaN);
   const b = readNumberInput(el.betaBeta, NaN);
   const d = readNumberInput(el.deltaInput, NaN);
+  const qualitySensitivity = readNumberInput(el.qualitySensitivityInput, NaN);
   const auditProbability = readNumberInput(el.auditProbabilityInput, NaN);
   const catchProbability = readNumberInput(el.catchProbabilityInput, NaN);
   if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid α/β values.";
+    return;
+  }
+  if (!Number.isFinite(qualitySensitivity) || qualitySensitivity < 0) {
+    if (el.adminRoundHint) el.adminRoundHint.textContent = "Invalid sustainability sensitivity. Use 0 or higher.";
     return;
   }
   if (
@@ -82,6 +87,7 @@ async function applyBetaDistribution() {
   state.betaAlpha = a;
   state.betaBeta = b;
   if (Number.isFinite(d) && d > 0) state.delta = d;
+  state.qualitySensitivity = qualitySensitivity;
   state.auditProbability = auditProbability;
   state.catchProbability = catchProbability;
   renderConfigInfo();
@@ -92,6 +98,7 @@ async function applyBetaDistribution() {
     const body = {
       beta_alpha: a,
       beta_beta: b,
+      quality_sensitivity: qualitySensitivity,
       audit_probability: auditProbability,
       catch_probability: catchProbability,
     };
@@ -102,8 +109,10 @@ async function applyBetaDistribution() {
     });
     const savedAuditProbability = Number(saved.audit_probability ?? auditProbability);
     const savedCatchProbability = Number(saved.catch_probability ?? catchProbability);
+    const savedQualitySensitivity = Number(saved.quality_sensitivity ?? qualitySensitivity);
     if (Number.isFinite(savedAuditProbability)) state.auditProbability = savedAuditProbability;
     if (Number.isFinite(savedCatchProbability)) state.catchProbability = savedCatchProbability;
+    if (Number.isFinite(savedQualitySensitivity)) state.qualitySensitivity = savedQualitySensitivity;
     renderConfigInfo();
     if (el.adminRoundHint) {
       const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";

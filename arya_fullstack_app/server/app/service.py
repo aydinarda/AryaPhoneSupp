@@ -149,6 +149,7 @@ def evaluate_manual(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
+    quality_sensitivity: float | None = None,
 ) -> dict[str, Any]:
     suppliers_df, users_df = get_tables()
     cfg = _build_cfg(price_per_user=price_per_user)
@@ -158,6 +159,7 @@ def evaluate_manual(
         beta_alpha=beta_alpha,
         beta_beta=beta_beta,
         delta=delta,
+        quality_sensitivity=quality_sensitivity,
     )
 
 
@@ -180,6 +182,7 @@ def get_game_constants() -> dict[str, Any]:
         "social_cap": GAME_SETTINGS.social_cap,
         "cost_scale": GAME_SETTINGS.cost_scale,
         "price_per_user": GAME_SETTINGS.price_per_user,
+        "quality_sensitivity": GAME_SETTINGS.quality_sensitivity,
         "gurobi_available": GUROBI_AVAILABLE,
         "num_segments": int(len(users_df)),
     }

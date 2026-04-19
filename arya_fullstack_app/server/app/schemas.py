@@ -15,6 +15,7 @@ class EvalRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
     delta: Optional[float] = Field(default=None, gt=0)
+    quality_sensitivity: Optional[float] = Field(default=None, ge=0)
 
 
 class BenchmarkRequest(BaseModel):
@@ -40,6 +41,7 @@ class SessionConfigRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
     delta: Optional[float] = Field(default=None, gt=0)
+    quality_sensitivity: Optional[float] = Field(default=None, ge=0)
     audit_probability: Optional[float] = Field(default=None, ge=0, le=1)
     catch_probability: Optional[float] = Field(default=None, ge=0, le=1)
 
@@ -56,6 +58,7 @@ class SubmitRequest(BaseModel):
     beta_alpha: float = Field(default=3.0, gt=0)
     beta_beta: float = Field(default=3.0, gt=0)
     delta: Optional[float] = Field(default=None, gt=0)
+    quality_sensitivity: Optional[float] = Field(default=None, ge=0)
     comment: Optional[str] = None
     player_name: Optional[str] = None
     session_code: Optional[str] = None

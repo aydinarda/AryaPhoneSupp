@@ -10,10 +10,24 @@ function asRows(value) {
 function cumulativeChartRows(rows) {
   return asRows(rows).map((row) => {
     const rounds = Number(row.rounds_played ?? 0);
-    const totalShare = Number(row.total_market_share_pct ?? 0);
+    const divisor = rounds > 0 ? rounds : 1;
+    const {
+      total_profit: _totalProfit,
+      total_market_share_pct: _totalMarketSharePct,
+      total_realized_utility: _totalRealizedUtility,
+      total_buyer_utility: _totalBuyerUtility,
+      total_supplier_quality: _totalSupplierQuality,
+      total_supplier_utility: _totalSupplierUtility,
+      ...rest
+    } = row;
     return {
-      ...row,
-      avg_market_share_pct: rounds > 0 ? totalShare / rounds : 0,
+      ...rest,
+      avg_profit: Number(_totalProfit ?? 0) / divisor,
+      avg_market_share_pct: Number(_totalMarketSharePct ?? 0) / divisor,
+      avg_realized_utility: Number(_totalRealizedUtility ?? 0) / divisor,
+      avg_buyer_utility: Number(_totalBuyerUtility ?? 0) / divisor,
+      avg_supplier_quality: Number(_totalSupplierQuality ?? 0) / divisor,
+      avg_supplier_utility: Number(_totalSupplierUtility ?? 0) / divisor,
     };
   });
 }
@@ -23,15 +37,15 @@ function renderCumulativeMatchSummary(rows) {
 
   const sorted = cumulativeChartRows(rows)
     .slice()
-    .sort((a, b) => Number(b.total_profit ?? 0) - Number(a.total_profit ?? 0));
+    .sort((a, b) => Number(b.avg_profit ?? 0) - Number(a.avg_profit ?? 0));
 
   el.cumulativeMatchBody.innerHTML = sorted.length
     ? sorted.map((r) => `<tr>
         <td><strong>${r.team ?? "-"}</strong></td>
         <td>${fmt(r.avg_market_share_pct)}%</td>
-        <td><strong>${fmt(r.total_profit)}</strong></td>
-        <td>${fmt(r.total_realized_utility)}</td>
-        <td><strong>${fmt(r.total_buyer_utility)}</strong></td>
+        <td><strong>${fmt(r.avg_profit)}</strong></td>
+        <td>${fmt(r.avg_realized_utility)}</td>
+        <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
       </tr>`).join("")
     : '<tr><td colspan="5">No cumulative match summary yet.</td></tr>';
 }
@@ -178,64 +192,44 @@ export async function loadLeaderboard() {
     if (el.leaderboardBody) {
       el.leaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the leaderboard.</td></tr>';
     }
-    if (el.turnLeaderboardBody) {
-      el.turnLeaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the per-round leaderboard.</td></tr>';
-    }
     return;
   }
 
   try {
     const data = await api(`/api/sessions/${state.gameCode}/leaderboard`);
     const cumulativeRows = asRows(data.cumulative_leaderboard);
-    const turnRows = asRows(data.turn_leaderboard);
     const cumulativeRowsForChart = cumulativeChartRows(cumulativeRows);
     state.latestRows = cumulativeRowsForChart;
 
-    const cumulativeKeys = ["total_profit", "total_buyer_utility", "total_realized_utility", "total_market_share_pct", "avg_market_share_pct"];
-    if (!cumulativeKeys.includes(state.plotX)) state.plotX = "total_profit";
+    const cumulativeKeys = ["avg_profit", "avg_buyer_utility", "avg_realized_utility", "avg_market_share_pct", "avg_supplier_quality", "avg_supplier_utility"];
+    if (!cumulativeKeys.includes(state.plotX)) state.plotX = "avg_profit";
     if (!cumulativeKeys.includes(state.plotY)) state.plotY = "avg_market_share_pct";
 
     renderCumulativeMatchSummary(cumulativeRows);
     renderPlotSelectors(cumulativeRowsForChart);
     renderLeaderboardScatter(cumulativeRowsForChart);
 
-    el.leaderboardBody.innerHTML = cumulativeRows.length
-      ? cumulativeRows.map((r, idx) => `<tr>
+    const averageRows = cumulativeRowsForChart
+      .slice()
+      .sort((a, b) => Number(b.avg_supplier_utility ?? 0) - Number(a.avg_supplier_utility ?? 0));
+
+    el.leaderboardBody.innerHTML = averageRows.length
+      ? averageRows.map((r, idx) => `<tr>
           <td>${idx + 1}</td>
           <td>${r.team ?? "-"}</td>
           <td>${r.rounds_played ?? 0}</td>
-          <td><strong>${fmt(r.total_supplier_utility)}</strong></td>
-          <td>${fmt(r.total_market_share_pct)}</td>
-          <td>${fmt(r.total_supplier_quality)}</td>
-          <td>${fmt(r.total_realized_utility)}</td>
-          <td><strong>${fmt(r.total_buyer_utility)}</strong></td>
-          <td><strong>${fmt(r.total_profit)}</strong></td>
+          <td><strong>${fmt(r.avg_supplier_utility)}</strong></td>
+          <td>${fmt(r.avg_market_share_pct)}</td>
+          <td>${fmt(r.avg_supplier_quality)}</td>
+          <td>${fmt(r.avg_realized_utility)}</td>
+          <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
+          <td><strong>${fmt(r.avg_profit)}</strong></td>
         </tr>`).join("")
       : '<tr><td colspan="9">No cumulative leaderboard yet.</td></tr>';
-
-    if (el.turnLeaderboardBody) {
-      el.turnLeaderboardBody.innerHTML = turnRows.length
-        ? turnRows.map((r, idx) => `<tr>
-            <td>${r.round_no ?? "-"}</td>
-            <td>${idx + 1}</td>
-            <td>${r.team ?? "-"}</td>
-            <td><strong>${fmt(r.supplier_utility)}</strong></td>
-            <td>${fmt(r.market_share_pct)}</td>
-            <td>${fmt(r.supplier_quality)}</td>
-            <td>${fmt(r.profit_cost_score)}</td>
-            <td>${fmt(r.realized_utility)}</td>
-            <td><strong>${fmt(r.buyer_utility)}</strong></td>
-            <td><strong>${fmt(r.realized_profit)}</strong></td>
-          </tr>`).join("")
-        : '<tr><td colspan="10">No per-round leaderboard yet.</td></tr>';
-    }
   } catch (e) {
     state.latestRows = [];
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
     el.leaderboardBody.innerHTML = `<tr><td colspan="9">${e.message}</td></tr>`;
-    if (el.turnLeaderboardBody) {
-      el.turnLeaderboardBody.innerHTML = `<tr><td colspan="10">${e.message}</td></tr>`;
-    }
   }
 }

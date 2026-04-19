@@ -16,6 +16,7 @@ export function renderConfigInfo() {
     `Risk caps: avg env ≤ ${fmtConfigValue(config.env_cap)}, avg social ≤ ${fmtConfigValue(config.social_cap)}`,
     `Cost scale: ${fmtConfigValue(config.cost_scale)}`,
     `Price sensitivity: ${fmtConfigValue(state.delta)}`,
+    `Sustainability sensitivity: ${fmtConfigValue(state.qualitySensitivity)}`,
     `Audit prob.: ${fmtConfigValue(state.auditProbability)}`,
     `Detection prob.: ${fmtConfigValue(state.catchProbability)}`,
   ].join(" | ");
@@ -164,6 +165,12 @@ export async function loadConfigAndSuppliers() {
   if (Number.isFinite(Number(config.num_segments)) && config.num_segments > 0) {
     state.numSegments = Number(config.num_segments);
   }
+  if (Number.isFinite(Number(config.quality_sensitivity))) {
+    state.qualitySensitivity = Number(config.quality_sensitivity);
+  }
+  if (el.qualitySensitivityInput && (el.qualitySensitivityInput.value === "" || el.qualitySensitivityInput.value == null)) {
+    el.qualitySensitivityInput.value = String(state.qualitySensitivity);
+  }
   if (el.pricePerUser && (el.pricePerUser.value === "" || el.pricePerUser.value == null)) {
     el.pricePerUser.value = Number.isFinite(Number(config.price_per_user)) ? String(config.price_per_user) : "100";
   }
@@ -199,6 +206,7 @@ export function currentPayload() {
     beta_alpha: state.betaAlpha ?? 3.0,
     beta_beta: state.betaBeta ?? 3.0,
     delta: state.delta ?? 0.1,
+    quality_sensitivity: state.qualitySensitivity ?? 1.0,
   };
 }
 

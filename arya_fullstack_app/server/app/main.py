@@ -78,6 +78,7 @@ def manual_eval(req: EvalRequest) -> dict[str, Any]:
             beta_alpha=req.beta_alpha,
             beta_beta=req.beta_beta,
             delta=req.delta,
+            quality_sensitivity=req.quality_sensitivity,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -102,6 +103,7 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             beta_alpha=req.beta_alpha,
             beta_beta=req.beta_beta,
             delta=req.delta,
+            quality_sensitivity=req.quality_sensitivity,
         )
         metrics = result["metrics"]
         feasible = result.get("feasible", False)
@@ -132,6 +134,7 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
             "session_code": session_code,
             "round_no": round_no,
             "price": float(req.price_per_user) if req.price_per_user is not None else None,
+            "quality_sensitivity": float(req.quality_sensitivity) if req.quality_sensitivity is not None else None,
             "profit": float(metrics.get("profit_total", 0.0)),
             "utility": float(metrics.get("utility_total", 0.0)),
             "env_avg": float(metrics.get("avg_env", 0.0)),

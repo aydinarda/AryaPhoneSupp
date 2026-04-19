@@ -306,6 +306,7 @@ def manual_metrics(
     beta_alpha: float = 3.0,
     beta_beta: float = 3.0,
     delta: float | None = None,
+    quality_sensitivity: float | None = None,
 ) -> Dict[str, Any]:
     from .beta_density import BetaDensity
     from .mnl_market import BuyerProfile, run_mnl_market
@@ -384,7 +385,14 @@ def manual_metrics(
     )
 
     _delta = float(delta) if delta is not None else 0.1
-    mnl_result = run_mnl_market([profile], segments, delta=_delta, u_outside=-3.0)
+    _quality_sensitivity = float(quality_sensitivity) if quality_sensitivity is not None else 1.0
+    mnl_result = run_mnl_market(
+        [profile],
+        segments,
+        delta=_delta,
+        quality_sensitivity=_quality_sensitivity,
+        u_outside=-3.0,
+    )
     br = mnl_result.buyer_results.get("team")
 
     if br and br.total_demand > 0:

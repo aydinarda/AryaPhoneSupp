@@ -33,6 +33,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 # Resets on server restart (acceptable for a classroom game).
 _session_beta: dict[str, tuple[float, float]] = {}
 _session_delta: dict[str, float] = {}
+_session_quality_sensitivity: dict[str, float] = {}
 _session_audit: dict[str, tuple[float, float]] = {}  # (audit_probability, catch_probability)
 
 _DEFAULT_ALPHA = 3.0
@@ -307,6 +308,7 @@ def get_current_round(code: str) -> dict[str, Any]:
     normalized = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
+    quality_sensitivity = _session_quality_sensitivity.get(normalized, float(GAME_SETTINGS.quality_sensitivity))
     audit_probability, catch_probability = _session_audit.get(
         normalized, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
     )
@@ -315,6 +317,7 @@ def get_current_round(code: str) -> dict[str, Any]:
         return {
             "round": None, "total_rounds": total_rounds,
             "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta,
+            "quality_sensitivity": quality_sensitivity,
             "audit_probability": audit_probability, "catch_probability": catch_probability,
         }
 
@@ -332,6 +335,7 @@ def get_current_round(code: str) -> dict[str, Any]:
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "delta": delta,
+        "quality_sensitivity": quality_sensitivity,
         "audit_probability": audit_probability,
         "catch_probability": catch_probability,
     }
@@ -347,6 +351,8 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
     _session_beta[session_code] = (float(req.beta_alpha), float(req.beta_beta))
     if req.delta is not None:
         _session_delta[session_code] = float(req.delta)
+    if req.quality_sensitivity is not None:
+        _session_quality_sensitivity[session_code] = float(req.quality_sensitivity)
     if req.audit_probability is not None or req.catch_probability is not None:
         old_ap, old_cp = _session_audit.get(
             session_code,
@@ -356,6 +362,7 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
         new_cp = float(req.catch_probability) if req.catch_probability is not None else old_cp
         _session_audit[session_code] = (new_ap, new_cp)
     current_delta = _session_delta.get(session_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    current_quality_sensitivity = _session_quality_sensitivity.get(session_code, float(GAME_SETTINGS.quality_sensitivity))
     current_ap, current_cp = _session_audit.get(
         session_code,
         (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
@@ -372,6 +379,7 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
         "beta_alpha": req.beta_alpha,
         "beta_beta": req.beta_beta,
         "delta": current_delta,
+        "quality_sensitivity": current_quality_sensitivity,
         "audit_probability": current_ap,
         "catch_probability": current_cp,
     }
@@ -475,6 +483,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     normalized_code = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    quality_sensitivity = _session_quality_sensitivity.get(normalized_code, float(GAME_SETTINGS.quality_sensitivity))
     bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     segments = [
@@ -500,7 +509,13 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         for tid in team_ids_sorted
     ]
 
-    mnl_result = run_mnl_market(profiles, segments, delta=delta, u_outside=None)
+    mnl_result = run_mnl_market(
+        profiles,
+        segments,
+        delta=delta,
+        quality_sensitivity=quality_sensitivity,
+        u_outside=None,
+    )
 
     market_to_users: dict[str, Any] = {}
     market_loads: dict[str, Any] = {}
@@ -582,6 +597,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "round_financials": {
             "formula": "realized_profit = effective_users(MNL) x unit_margin",
             "delta": round(delta, 4),
+            "quality_sensitivity": round(quality_sensitivity, 4),
             "beta_alpha": beta_alpha,
             "beta_beta": beta_beta,
             "cost_scale": float(GAME_SETTINGS.cost_scale),
@@ -892,6 +908,7 @@ def _build_sync_message(
     total_rounds = _resolve_total_rounds(session_row)
     beta_alpha, beta_beta = _session_beta.get(session_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     delta = _session_delta.get(session_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    quality_sensitivity = _session_quality_sensitivity.get(session_code, float(GAME_SETTINGS.quality_sensitivity))
     audit_probability, catch_probability = _session_audit.get(
         session_code, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
     )
@@ -929,6 +946,7 @@ def _build_sync_message(
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "delta": delta,
+        "quality_sensitivity": quality_sensitivity,
         "audit_probability": audit_probability,
         "catch_probability": catch_probability,
         "round": round_data,

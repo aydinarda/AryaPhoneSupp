@@ -18,6 +18,7 @@ export const state = {
   betaAlpha: 3.0,
   betaBeta: 3.0,
   delta: 0.1,
+  qualitySensitivity: 1.0,
   auditProbability: 0.0,
   catchProbability: 1.0,
   numSegments: 0,
@@ -35,7 +36,12 @@ export const PLOT_COLUMNS = {
   total_buyer_utility:   "Cumulative Buyer Utility",
   total_realized_utility:"Cumulative Market Utility",
   total_market_share_pct:"Cumulative Market Share %",
+  avg_profit:            "Avg Profit",
+  avg_buyer_utility:     "Avg Buyer Utility",
+  avg_realized_utility:  "Avg Market Utility",
   avg_market_share_pct:  "Avg Market Share %",
+  avg_supplier_quality:  "Avg Supplier Quality",
+  avg_supplier_utility:  "Avg Supplier Utility",
 };
 
 export const el = {
@@ -50,7 +56,6 @@ export const el = {
   pricePerUser: document.getElementById("pricePerUser"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
   cumulativeMatchBody: document.querySelector("#cumulativeMatchTable tbody"),
-  turnLeaderboardBody: document.querySelector("#turnLeaderboardTable tbody"),
   plotXSelect: document.getElementById("plotXSelect"),
   plotYSelect: document.getElementById("plotYSelect"),
   leaderboardScatter: document.getElementById("leaderboardScatter"),
@@ -75,6 +80,7 @@ export const el = {
   betaAlpha: document.getElementById("betaAlpha"),
   betaBeta: document.getElementById("betaBeta"),
   deltaInput: document.getElementById("deltaInput"),
+  qualitySensitivityInput: document.getElementById("qualitySensitivityInput"),
   auditProbabilityInput: document.getElementById("auditProbabilityInput"),
   catchProbabilityInput: document.getElementById("catchProbabilityInput"),
   btnStartRound: document.getElementById("btnStartRound"),
