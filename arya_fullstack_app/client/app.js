@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
 import { loadConfigAndSuppliers, renderConfigInfo, runManual, submit } from "./suppliers.js";
-import { loadLeaderboard, loadRoundHistory, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
+import { loadLeaderboard, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
 
 function showSelectionPanel() {
@@ -35,7 +35,6 @@ function setupTabs() {
         panelLeaderboard.classList.remove("hidden");
         tab.classList.add("active");
         await loadLeaderboard();
-        await loadRoundHistory();
         return;
       }
     });
@@ -126,13 +125,6 @@ function setupEvents() {
     el.btnBackToSelection.addEventListener("click", showSelectionPanel);
   }
 
-  if (el.historyMetricSelect) {
-    el.historyMetricSelect.addEventListener("change", (e) => {
-      state.historyMetric = e.target.value;
-      loadRoundHistory();
-    });
-  }
-
   // Beta distribution: applied explicitly via button, not on every keystroke
   if (el.btnApplyDistribution) el.btnApplyDistribution.addEventListener("click", applyBetaDistribution);
 
@@ -145,7 +137,6 @@ function setupEvents() {
   document.getElementById("btnSubmit").addEventListener("click", submit);
   document.getElementById("btnRefreshLeaderboard").addEventListener("click", async () => {
     await loadLeaderboard();
-    loadRoundHistory();
   });
 
   ensureLeaderboardPlotUI();

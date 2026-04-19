@@ -107,7 +107,7 @@ export function renderMatchingResult(payload) {
   // Update table header for MNL
   const thead = el.matchingTableBody.closest("table")?.querySelector("thead tr");
   if (thead) {
-    thead.innerHTML = "<th>Team</th><th>Demand Share</th><th>Eff. Users</th><th>Unit Margin</th><th>Realized Profit</th><th>Market Utility</th><th>Strategic Imp.</th><th>Buyer Utility</th>";
+    thead.innerHTML = "<th>Team</th><th>Demand Share</th><th>Realized Profit</th><th>Market Utility</th><th>Buyer Utility</th>";
   }
 
   if (teamFinancials.length) {
@@ -117,11 +117,8 @@ export function renderMatchingResult(payload) {
         return `<tr>
           <td><strong>${tf.team}</strong></td>
           <td>${share}%</td>
-          <td>${(tf.effective_users ?? 0).toFixed(1)}</td>
-          <td>${(tf.unit_margin ?? 0).toFixed(1)}</td>
           <td><strong>${(tf.realized_profit ?? 0).toFixed(1)}</strong></td>
           <td>${(tf.realized_utility ?? 0).toFixed(1)}</td>
-          <td>${(tf.avg_strategic ?? 0).toFixed(2)}</td>
           <td><strong>${(tf.buyer_utility ?? 0).toFixed(2)}</strong></td>
         </tr>`;
       })

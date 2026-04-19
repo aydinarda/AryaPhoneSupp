@@ -7,6 +7,35 @@ function asRows(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function cumulativeChartRows(rows) {
+  return asRows(rows).map((row) => {
+    const rounds = Number(row.rounds_played ?? 0);
+    const totalShare = Number(row.total_market_share_pct ?? 0);
+    return {
+      ...row,
+      avg_market_share_pct: rounds > 0 ? totalShare / rounds : 0,
+    };
+  });
+}
+
+function renderCumulativeMatchSummary(rows) {
+  if (!el.cumulativeMatchBody) return;
+
+  const sorted = cumulativeChartRows(rows)
+    .slice()
+    .sort((a, b) => Number(b.total_profit ?? 0) - Number(a.total_profit ?? 0));
+
+  el.cumulativeMatchBody.innerHTML = sorted.length
+    ? sorted.map((r) => `<tr>
+        <td><strong>${r.team ?? "-"}</strong></td>
+        <td>${fmt(r.avg_market_share_pct)}%</td>
+        <td><strong>${fmt(r.total_profit)}</strong></td>
+        <td>${fmt(r.total_realized_utility)}</td>
+        <td><strong>${fmt(r.total_buyer_utility)}</strong></td>
+      </tr>`).join("")
+    : '<tr><td colspan="5">No cumulative match summary yet.</td></tr>';
+}
+
 export function ensureLeaderboardPlotUI() {
   const panel = document.getElementById("panel-leaderboard");
   if (!panel) return;
@@ -140,76 +169,14 @@ export function renderLeaderboardScatter(rows) {
   `;
 }
 
-export function loadRoundHistory() {
-  if (!state.gameCode) return;
-
-  let container = document.getElementById("roundHistoryChart");
-  if (!container) {
-    const panel = document.getElementById("panel-leaderboard");
-    if (!panel) return;
-    container = document.createElement("div");
-    container.id = "roundHistoryChart";
-    container.style.cssText = "height:280px;margin-bottom:12px;";
-    const tableWrap = panel.querySelector(".table-wrap");
-    if (tableWrap) panel.insertBefore(container, tableWrap);
-    else panel.appendChild(container);
-  }
-
-  if (!window.Plotly) return;
-
-  const rows = state.latestRows;
-  if (!rows || !rows.length) {
-    container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
-    return;
-  }
-
-  const metric = state.historyMetric === "profit" ? "realized_profit" : "supplier_utility";
-  const metricLabel = metric === "realized_profit" ? "Realized Profit" : "Supplier Utility";
-
-  // Group by team
-  const byTeam = new Map();
-  for (const r of rows) {
-    const team = r.team ?? "(anonymous)";
-    if (!byTeam.has(team)) byTeam.set(team, []);
-    byTeam.get(team).push(r);
-  }
-
-  const teams = [...byTeam.keys()].sort();
-  if (!teams.length) {
-    container.innerHTML = '<p class="hint">No round data yet for this session.</p>';
-    return;
-  }
-
-  const traces = teams.map((team, i) => {
-    const teamRows = byTeam.get(team).slice().sort((a, b) => (a.round_no ?? 0) - (b.round_no ?? 0));
-    return {
-      x: teamRows.map((r) => r.round_no),
-      y: teamRows.map((r) => Number(r[metric] ?? 0)),
-      mode: "lines+markers",
-      name: team,
-      line: { color: PALETTE[i % PALETTE.length], width: 2 },
-      marker: { size: 6 },
-    };
-  });
-
-  window.Plotly.react(container, traces, {
-    margin: { t: 36, r: 16, b: 40, l: 56 },
-    title: { text: `Round History — ${metricLabel} per Team`, font: { size: 13 } },
-    xaxis: { title: "Round", dtick: 1, tickmode: "linear" },
-    yaxis: { title: metricLabel },
-    legend: { orientation: "h", y: -0.25 },
-    plot_bgcolor: "#ffffff",
-    paper_bgcolor: "#ffffff",
-  }, { responsive: true, displayModeBar: false });
-}
-
 export async function loadLeaderboard() {
   if (!state.gameCode) {
     state.latestRows = [];
+    renderCumulativeMatchSummary([]);
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
     if (el.leaderboardBody) {
-      el.leaderboardBody.innerHTML = '<tr><td colspan="8">Join or create a session to see the leaderboard.</td></tr>';
+      el.leaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the leaderboard.</td></tr>';
     }
     if (el.turnLeaderboardBody) {
       el.turnLeaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the per-round leaderboard.</td></tr>';
@@ -221,10 +188,16 @@ export async function loadLeaderboard() {
     const data = await api(`/api/sessions/${state.gameCode}/leaderboard`);
     const cumulativeRows = asRows(data.cumulative_leaderboard);
     const turnRows = asRows(data.turn_leaderboard);
-    state.latestRows = turnRows;
+    const cumulativeRowsForChart = cumulativeChartRows(cumulativeRows);
+    state.latestRows = cumulativeRowsForChart;
 
-    renderPlotSelectors(state.latestRows);
-    renderLeaderboardScatter(state.latestRows);
+    const cumulativeKeys = ["total_profit", "total_buyer_utility", "total_realized_utility", "total_market_share_pct", "avg_market_share_pct"];
+    if (!cumulativeKeys.includes(state.plotX)) state.plotX = "total_profit";
+    if (!cumulativeKeys.includes(state.plotY)) state.plotY = "avg_market_share_pct";
+
+    renderCumulativeMatchSummary(cumulativeRows);
+    renderPlotSelectors(cumulativeRowsForChart);
+    renderLeaderboardScatter(cumulativeRowsForChart);
 
     el.leaderboardBody.innerHTML = cumulativeRows.length
       ? cumulativeRows.map((r, idx) => `<tr>

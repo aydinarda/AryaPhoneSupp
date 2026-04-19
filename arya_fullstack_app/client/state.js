@@ -20,7 +20,6 @@ export const state = {
   auditProbability: 0.0,
   catchProbability: 1.0,
   numSegments: 0,
-  historyMetric: "profit",
 };
 
 export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
@@ -35,6 +34,7 @@ export const PLOT_COLUMNS = {
   total_buyer_utility:   "Cumulative Buyer Utility",
   total_realized_utility:"Cumulative Market Utility",
   total_market_share_pct:"Cumulative Market Share %",
+  avg_market_share_pct:  "Avg Market Share %",
 };
 
 export const el = {
@@ -48,6 +48,7 @@ export const el = {
   playerName: null,
   pricePerUser: document.getElementById("pricePerUser"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
+  cumulativeMatchBody: document.querySelector("#cumulativeMatchTable tbody"),
   turnLeaderboardBody: document.querySelector("#turnLeaderboardTable tbody"),
   plotXSelect: document.getElementById("plotXSelect"),
   plotYSelect: document.getElementById("plotYSelect"),
@@ -85,5 +86,4 @@ export const el = {
   segmentSharesBody: document.getElementById("segmentSharesBody"),
   distributionChart: document.getElementById("distributionChart"),
   btnBackToSelection: document.getElementById("btnBackToSelection"),
-  historyMetricSelect: document.getElementById("historyMetricSelect"),
 };
