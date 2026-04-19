@@ -13,11 +13,11 @@ export function renderMetrics(target, title, payload) {
     : '<span style="color: red; font-weight: bold;">✗ Infeasible</span>';
   target.innerHTML = [
     metricCard(`${title}`, feasibleBadge),
-    metricCard("Profit", fmt(m.profit_total)),
-    metricCard("Cost / Unit", fmt(m.cost_per_unit)),
-    metricCard("Utility", fmt(m.utility_total)),
-    metricCard("Avg Env", fmt(m.avg_env)),
-    metricCard("Avg Social", fmt(m.avg_social)),
+    metricCard("Max Possible Profit", fmt(m.profit_total)),
+    metricCard("Cost per a Unit Sale", fmt(m.cost_per_unit)),
+    metricCard("Max Possible Market Utility", fmt(m.utility_total)),
+    metricCard("Avg Env Risk", fmt(m.avg_env)),
+    metricCard("Avg Social Risk", fmt(m.avg_social)),
     metricCard("Avg Cost", fmt(m.avg_cost)),
     metricCard("# Suppliers", String(Math.round(Number(m.k || 0)))),
   ].join("");
