@@ -219,7 +219,7 @@ export async function submit() {
     const payload = {
       ...currentPayload(),
       team: (el.teamName.value || "(anonymous)").trim(),
-      player_name: (el.playerName.value || "(anonymous)").trim(),
+      player_name: (el.teamName.value || "(anonymous)").trim(),
       session_code: state.gameCode || null,
       round_no: state.roundNo,
       comment: sessionMeta || null,

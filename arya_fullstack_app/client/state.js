@@ -45,7 +45,7 @@ export const el = {
   benchmarkProfitPanel: document.getElementById("benchmarkProfitPanel"),
   benchmarkUtilPanel: document.getElementById("benchmarkUtilPanel"),
   teamName: document.getElementById("teamName"),
-  playerName: document.getElementById("playerName"),
+  playerName: null,
   pricePerUser: document.getElementById("pricePerUser"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
   turnLeaderboardBody: document.querySelector("#turnLeaderboardTable tbody"),

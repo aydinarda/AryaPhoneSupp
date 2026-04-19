@@ -135,7 +135,6 @@ function setupEvents() {
   if (el.btnApplyDistribution) el.btnApplyDistribution.addEventListener("click", applyBetaDistribution);
 
   el.teamName.addEventListener("change", saveLobbyState);
-  el.playerName.addEventListener("change", saveLobbyState);
   el.playerJoinCode.addEventListener("change", () => {
     el.playerJoinCode.value = (el.playerJoinCode.value || "").toUpperCase();
   });

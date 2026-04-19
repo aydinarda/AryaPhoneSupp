@@ -125,6 +125,15 @@ def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -
             }
             try:
                 insert_game_session(payload)
+                # Reserve the admin's team name so no player can claim it
+                try:
+                    insert_session_player({
+                        "session_token": token,
+                        "team_name": cleaned_game_name,
+                        "team_name_normalized": _normalize_team_name(cleaned_game_name),
+                    })
+                except Exception:
+                    pass
                 return {
                     "code": code,
                     "game_name": cleaned_game_name,
@@ -235,7 +244,7 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
             existing = fetch_session_player(token, normalized_team)
             existing_rows = getattr(existing, "data", None) or []
             if existing_rows:
-                raise ValueError("same username exist")
+                raise ValueError("Team name already taken in this session. Please choose a different name.")
 
             try:
                 insert_session_player(
@@ -247,7 +256,7 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
                 )
             except Exception as exc:
                 if _is_duplicate_db_error(exc):
-                    raise ValueError("same username exist") from exc
+                    raise ValueError("Team name already taken in this session. Please choose a different name.") from exc
                 raise RuntimeError(f"Failed to join session: {exc}") from exc
 
             session = _from_db_row(row)
@@ -271,7 +280,7 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
 
         players = _session_players.setdefault(normalized, set())
         if normalized_team in players:
-            raise ValueError("same username exist")
+            raise ValueError("Team name already taken in this session. Please choose a different name.")
 
         players.add(normalized_team)
         return session

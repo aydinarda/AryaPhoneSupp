@@ -4,8 +4,6 @@ import {
   clearRoundTimer,
   renderAdminControls,
   renderRoundSummary,
-  loadCurrentRound,
-  loadLatestMatch,
   resetBetaInputsInitialized,
 } from "./round.js";
 import { connectWS, disconnectWS } from "./ws.js";
@@ -19,7 +17,7 @@ export function saveLobbyState() {
     gameName: state.gameName,
     totalRounds: state.totalRounds,
     teamName: (el.teamName.value || "").trim(),
-    playerName: (el.playerName.value || "").trim(),
+    playerName: (el.teamName.value || "").trim(),
   };
   localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(payload));
 }
@@ -33,9 +31,6 @@ export function loadLobbyState() {
     if (saved.totalRounds) el.adminNumberOfRounds.value = saved.totalRounds;
     if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
     if (saved.teamName) el.playerTeamName.value = saved.teamName;
-    if (saved.playerName) {
-      el.adminName.value = saved.playerName;
-    }
   } catch (_err) {
     localStorage.removeItem(LOBBY_STORAGE_KEY);
   }
@@ -70,6 +65,8 @@ export function showLobbyScreen() {
   clearRoundTimer();
   el.gameScreen.classList.add("hidden");
   el.lobbyScreen.classList.remove("hidden");
+  el.teamName.readOnly = false;
+  el.teamName.style.opacity = "";
 }
 
 export function clearLobbyHints() {
@@ -105,13 +102,12 @@ export async function enterAsAdmin() {
     state.gameCode = session.code;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : numberOfRounds;
     el.teamName.value = session.game_name;
-    el.playerName.value = session.admin_name || "Admin";
+    el.teamName.readOnly = true;
+    el.teamName.style.opacity = "0.65";
     el.playerJoinCode.value = session.code;
     el.playerTeamName.value = session.game_name;
     saveLobbyState();
     showGameScreen();
-    await loadCurrentRound();
-    await loadLatestMatch();
   } catch (e) {
     el.adminHint.textContent = e.message || "Could not create session.";
   }
@@ -142,11 +138,10 @@ export async function enterAsPlayer() {
     state.gameName = session.game_name;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : state.totalRounds;
     el.teamName.value = teamName;
-    el.playerName.value = "Player";
+    el.teamName.readOnly = true;
+    el.teamName.style.opacity = "0.65";
     saveLobbyState();
     showGameScreen();
-    await loadCurrentRound();
-    await loadLatestMatch();
   } catch (e) {
     el.playerHint.textContent = e.message || "Session code not found.";
   }
