@@ -68,6 +68,25 @@ export function renderAdminControls() {
   if (el.matchingResultCard) {
     el.matchingResultCard.classList.toggle("hidden", !isAdmin);
   }
+  renderAdminPlayMode();
+}
+
+export function renderAdminPlayMode() {
+  const isAdmin = state.role === "admin";
+  const adminIsPlaying = isAdmin && state.adminPlays;
+  if (el.adminPlayToggle) {
+    el.adminPlayToggle.checked = Boolean(state.adminPlays);
+  }
+  if (el.gameMainGrid) {
+    el.gameMainGrid.classList.toggle("hidden", isAdmin && !adminIsPlaying);
+  }
+  if (el.adminObserverCard) {
+    el.adminObserverCard.classList.toggle("hidden", !isAdmin || adminIsPlaying);
+  }
+  if (isAdmin && el.teamName) {
+    el.teamName.readOnly = !adminIsPlaying;
+    el.teamName.style.opacity = adminIsPlaying ? "" : "0.65";
+  }
 }
 
 export function renderMatchingResult(payload) {

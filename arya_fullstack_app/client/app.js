@@ -1,7 +1,7 @@
 import { state, el } from "./state.js";
 import { api } from "./api.js";
 import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
-import { startRound, runMatchingNow, renderRoundSummary } from "./round.js";
+import { startRound, runMatchingNow, renderAdminPlayMode, renderRoundSummary } from "./round.js";
 import { loadConfigAndSuppliers, renderConfigInfo, runManual, submit } from "./suppliers.js";
 import { loadLeaderboard, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
 import { renderDistributionChart } from "./distribution.js";
@@ -120,6 +120,13 @@ function setupEvents() {
   el.btnBackLobby.addEventListener("click", showLobbyScreen);
   if (el.btnStartRound) el.btnStartRound.addEventListener("click", startRound);
   if (el.btnRunMatch) el.btnRunMatch.addEventListener("click", runMatchingNow);
+  if (el.adminPlayToggle) {
+    el.adminPlayToggle.addEventListener("change", () => {
+      state.adminPlays = Boolean(el.adminPlayToggle.checked);
+      renderAdminPlayMode();
+      saveLobbyState();
+    });
+  }
 
   if (el.btnBackToSelection) {
     el.btnBackToSelection.addEventListener("click", showSelectionPanel);

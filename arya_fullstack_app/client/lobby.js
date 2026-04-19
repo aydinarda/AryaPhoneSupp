@@ -15,6 +15,7 @@ import { renderDistributionChart } from "./distribution.js";
 export function saveLobbyState() {
   const payload = {
     role: state.role,
+    adminPlays: state.adminPlays,
     gameCode: state.gameCode,
     gameName: state.gameName,
     totalRounds: state.totalRounds,
@@ -102,6 +103,7 @@ export async function enterAsAdmin() {
 
     resetBetaInputsInitialized();
     state.role = "admin";
+    state.adminPlays = false;
     state.gameName = session.game_name;
     state.gameCode = session.code;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : numberOfRounds;
@@ -138,6 +140,7 @@ export async function enterAsPlayer() {
     });
     resetBetaInputsInitialized();
     state.role = "player";
+    state.adminPlays = false;
     state.gameCode = session.code;
     state.gameName = session.game_name;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : state.totalRounds;

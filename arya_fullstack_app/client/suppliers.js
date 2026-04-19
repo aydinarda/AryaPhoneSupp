@@ -248,7 +248,7 @@ export async function submit() {
       body: JSON.stringify(payload),
     });
     el.statusText.textContent = "Submission saved to leaderboard!";
-    await loadLeaderboard();
+    loadLeaderboard().catch(() => {});
   } catch (e) {
     el.statusText.textContent = e.message;
   }

@@ -240,6 +240,20 @@ button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fe
   align-self: stretch;
   margin: 0 4px;
 }
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: 0;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.admin-toggle input {
+  width: auto;
+  margin: 0;
+}
 .admin-actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
 #adminRoundHint { margin-top: 8px; }
 
@@ -251,6 +265,19 @@ button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fe
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.admin-observer-card {
+  display: grid;
+  gap: 4px;
+}
+.admin-observer-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.admin-observer-card p {
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 /* ===== GAME MAIN GRID ===== */

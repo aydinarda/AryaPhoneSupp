@@ -6,7 +6,7 @@
     <title>Arya Phones — Supplier Game</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/assets/styles.css?v=20260412-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260419-admin" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   </head>
   <body>
@@ -132,6 +132,17 @@
             </div>
           </div>
 
+          <div class="admin-divider"></div>
+
+          <!-- Admin participation -->
+          <div class="admin-section">
+            <span class="section-title">Admin Mode</span>
+            <label class="admin-toggle">
+              <input id="adminPlayToggle" type="checkbox" />
+              <span>Admin also plays</span>
+            </label>
+          </div>
+
         </div>
         <p class="hint" id="adminRoundHint" style="max-width:1400px;margin:6px auto 0;padding:0 0px;"></p>
       </div>
@@ -168,6 +179,11 @@
           <h3 style="font-size:14px;font-weight:600;margin-bottom:6px;">Segment Density Distribution</h3>
           <p class="hint" style="margin-bottom:10px;">Customer segment weights across the market. Admin can adjust shape via α and β.</p>
           <div id="distributionChart" style="height:280px;"></div>
+        </section>
+
+        <section id="adminObserverCard" class="card admin-observer-card hidden">
+          <h3>Admin control mode</h3>
+          <p>Manage settings, rounds, matching, and results without submitting a team.</p>
         </section>
 
         <!-- Leaderboard tabs -->
@@ -252,7 +268,7 @@
         </section>
 
         <!-- ── MAIN 2-COLUMN GRID ── -->
-        <div class="game-main-grid">
+        <div class="game-main-grid" id="gameMainGrid">
 
           <!-- LEFT: Supplier selection -->
           <div class="card suppliers-card">
@@ -301,6 +317,6 @@
       </div><!-- /game-content -->
     </section><!-- /gameScreen -->
 
-    <script type="module" src="/assets/app.js?v=20260412-2"></script>
+    <script type="module" src="/assets/app.js?v=20260419-admin"></script>
   </body>
 </html>

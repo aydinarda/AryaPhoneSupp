@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,14 @@ from .service import evaluate_manual, get_both_benchmarks, get_game_constants, g
 from .ws_manager import manager
 
 app = FastAPI(title="Arya Phone Game API", version="1.0.0")
+
+
+def _insert_submission_best_effort(payload: dict[str, Any]) -> None:
+    try:
+        insert_submission(payload)
+    except Exception:
+        # Live classroom matching uses in-memory state; DB history is best-effort.
+        pass
 
 
 @app.on_event("startup")
@@ -134,11 +143,11 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
         }
 
         live_submission = upsert_live_submission(payload)
-        try:
-            insert_submission(payload)
-        except Exception:
-            # Live classroom matching uses in-memory state; DB history is best-effort.
-            pass
+        threading.Thread(
+            target=_insert_submission_best_effort,
+            args=(payload.copy(),),
+            daemon=True,
+        ).start()
         if session_code:
             manager.broadcast_sync(session_code, {
                 "type": "submission_received",
