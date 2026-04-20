@@ -834,25 +834,7 @@ def get_session_leaderboard(
     x_metric: str = "market_utility",
     y_metric: str = "buyer_utility",
 ) -> dict[str, Any]:
-    """
-    Full leaderboard for a session.
-
-    Metrics computed per team per round:
-      supplier_quality   — (5-avg_env) + (5-avg_social) + (avg_strategic-1)
-                           ∈ [0,12], higher = better sustainability/quality
-      profit_cost_score  — realized_profit min-max normalised within the round,
-                           inverted to [0,5]; LOWER = better (0 = highest profit)
-      supplier_utility   — supplier_quality + (1-profit_cost_score/5)*5
-                           = quality + profit contribution; higher = better
-      market_share_pct   — demand fraction (%) captured in MNL; proxy for
-                           user-side utility; higher = better
-
-    Returns:
-      turn_leaderboard    : list of per-(round, team) entries sorted by
-                            supplier_utility descending within each round
-      cumulative_leaderboard : per-team sums across all rounds, sorted by
-                               total_supplier_utility descending
-    """
+    """Return match leaderboard metrics: demand share, profit, market/customer utility, and buyer utility."""
     session_row = _get_session_row_or_404(code)
     session_token = str(session_row.get("session_token", "")).strip()
     session_code = str(session_row.get("session_code", "")).strip().upper()
@@ -884,19 +866,6 @@ def get_session_leaderboard(
                     "excluded_by_infeasible": bool(tf.get("excluded_by_infeasible")),
                 }
 
-    # --- Load submissions (supplier attribute averages per team per round) ---
-    sub_rows = get_live_session_submissions(session_code) or _extract_rows(fetch_submissions_for_session(session_code))
-
-    # (team, round_no) → latest submission row
-    sub_map: dict[tuple[str, int], dict[str, Any]] = {}
-    for row in sub_rows:
-        team = str(row.get("team") or "(anonymous)").strip()
-        rno = _safe_int(row.get("round_no"))
-        key = (team, rno)
-        existing = sub_map.get(key)
-        if existing is None or str(existing.get("created_at") or "") <= str(row.get("created_at") or ""):
-            sub_map[key] = row
-
     # --- Build per-round entries ---
     all_rounds = sorted(round_financials.keys())
     turn_leaderboard: list[dict[str, Any]] = []
@@ -906,35 +875,8 @@ def get_session_leaderboard(
         if not teams_fin:
             continue
 
-        # Compute supplier_quality per team
-        team_metrics: dict[str, dict[str, float]] = {}
-        for team, fin in teams_fin.items():
-            if fin.get("excluded_by_audit") or fin.get("excluded_by_infeasible"):
-                supplier_quality = 0.0
-            else:
-                sub = sub_map.get((team, rno), {})
-                avg_env       = float(sub.get("env_avg")       or 0.0)
-                avg_social    = float(sub.get("social_avg")    or 0.0)
-                avg_strategic = float(sub.get("strategic_avg") or 0.0)
-                supplier_quality = (5.0 - avg_env) + (5.0 - avg_social) + (avg_strategic - 1.0)
-            team_metrics[team] = {
-                **fin,
-                "supplier_quality": supplier_quality,
-            }
-
-        # Min-max normalise profit within this round → profit_cost_score
-        profits = [m["realized_profit"] for m in team_metrics.values()]
-        min_p = min(profits)
-        max_p = max(profits)
-        p_range = max_p - min_p if max_p != min_p else 1.0
-
         round_entries: list[dict[str, Any]] = []
-        for team, m in team_metrics.items():
-            norm_profit = (m["realized_profit"] - min_p) / p_range  # [0,1], 1=best
-            profit_cost_score = round(5.0 * (1.0 - norm_profit), 4)  # [0,5], LOWER=better
-            profit_contribution = norm_profit * 5.0                   # [0,5], higher=better
-            supplier_utility = 0.0 if (m.get("excluded_by_audit") or m.get("excluded_by_infeasible")) else m["supplier_quality"] + profit_contribution
-
+        for team, m in teams_fin.items():
             entry = {
                 "team": team,
                 "round_no": rno,
@@ -942,15 +884,12 @@ def get_session_leaderboard(
                 "market_share_pct": round(m["demand_share"] * 100.0, 2),
                 "realized_utility": round(m["realized_utility"], 4),
                 "buyer_utility": round(m["buyer_utility"], 4),
-                "supplier_quality": round(m["supplier_quality"], 4),
-                "profit_cost_score": profit_cost_score,
-                "supplier_utility": round(supplier_utility, 4),
             }
             entry["x_value"] = entry[_METRIC_FIELD[x_metric]]
             entry["y_value"] = entry[_METRIC_FIELD[y_metric]]
             round_entries.append(entry)
 
-        round_entries.sort(key=lambda x: x["supplier_utility"], reverse=True)
+        round_entries.sort(key=lambda x: x["realized_profit"], reverse=True)
         turn_leaderboard.extend(round_entries)
 
     # --- Build cumulative leaderboard (plain sum across rounds) ---
@@ -965,8 +904,6 @@ def get_session_leaderboard(
                 "total_market_share_pct": 0.0,
                 "total_realized_utility": 0.0,
                 "total_buyer_utility": 0.0,
-                "total_supplier_quality": 0.0,
-                "total_supplier_utility": 0.0,
             }
         c = cumulative[team]
         c["rounds_played"]          += 1
@@ -974,8 +911,6 @@ def get_session_leaderboard(
         c["total_market_share_pct"]  += entry["market_share_pct"]
         c["total_realized_utility"]  += entry["realized_utility"]
         c["total_buyer_utility"]     += entry["buyer_utility"]
-        c["total_supplier_quality"]  += entry["supplier_quality"]
-        c["total_supplier_utility"]  += entry["supplier_utility"]
 
     cumulative_list = list(cumulative.values())
     for c in cumulative_list:
@@ -983,12 +918,13 @@ def get_session_leaderboard(
         c["total_market_share_pct"] = round(c["total_market_share_pct"], 2)
         c["total_realized_utility"] = round(c["total_realized_utility"], 4)
         c["total_buyer_utility"]    = round(c["total_buyer_utility"], 4)
-        c["total_supplier_quality"] = round(c["total_supplier_quality"], 4)
-        c["total_supplier_utility"] = round(c["total_supplier_utility"], 4)
         c["x_value"] = c[_CUMULATIVE_FIELD[x_metric]]
         c["y_value"] = c[_CUMULATIVE_FIELD[y_metric]]
 
-    cumulative_list.sort(key=lambda x: x["total_supplier_utility"], reverse=True)
+    cumulative_list.sort(
+        key=lambda x: (x["total_profit"] / max(1, x["rounds_played"])),
+        reverse=True,
+    )
 
     return {
         "rounds": all_rounds,

@@ -17,8 +17,6 @@ function cumulativeChartRows(rows) {
       total_market_share_pct: _totalMarketSharePct,
       total_realized_utility: _totalRealizedUtility,
       total_buyer_utility: _totalBuyerUtility,
-      total_supplier_quality: _totalSupplierQuality,
-      total_supplier_utility: _totalSupplierUtility,
       ...rest
     } = row;
     return {
@@ -27,8 +25,6 @@ function cumulativeChartRows(rows) {
       avg_market_share_pct: Number(_totalMarketSharePct ?? 0) / divisor,
       avg_realized_utility: Number(_totalRealizedUtility ?? 0) / divisor,
       avg_buyer_utility: Number(_totalBuyerUtility ?? 0) / divisor,
-      avg_supplier_quality: Number(_totalSupplierQuality ?? 0) / divisor,
-      avg_supplier_utility: Number(_totalSupplierUtility ?? 0) / divisor,
     };
   });
 }
@@ -49,6 +45,20 @@ function renderCumulativeMatchSummary(rows) {
         <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
       </tr>`).join("")
     : '<tr><td colspan="5">No cumulative match summary yet.</td></tr>';
+}
+
+function renderLeaderboardTableHeader() {
+  const thead = el.leaderboardBody?.closest("table")?.querySelector("thead tr");
+  if (!thead) return;
+  thead.innerHTML = `
+    <th>#</th>
+    <th>Team</th>
+    <th>Rounds</th>
+    <th>Avg Demand Share</th>
+    <th>Avg Profit</th>
+    <th>Avg Customer (Market) Utility</th>
+    <th>Avg Buyer Utility</th>
+  `;
 }
 
 export function ensureLeaderboardPlotUI() {
@@ -96,7 +106,7 @@ export function renderPlotSelectors(rows) {
     rows.some((r) => Number.isFinite(Number(r?.[key])))
   );
 
-  const withFallback = available.length ? available : ["realized_profit", "buyer_utility", "realized_utility", "market_share_pct"];
+  const withFallback = available.length ? available : ["avg_realized_utility", "avg_buyer_utility", "avg_profit", "avg_market_share_pct"];
   if (!withFallback.includes(state.plotX)) state.plotX = withFallback[0];
   if (!withFallback.includes(state.plotY)) state.plotY = withFallback[Math.min(1, withFallback.length - 1)];
 
@@ -186,13 +196,14 @@ export function renderLeaderboardScatter(rows) {
 
 export async function loadLeaderboard() {
   const requestSeq = ++_leaderboardRequestSeq;
+  renderLeaderboardTableHeader();
   if (!state.gameCode) {
     state.latestRows = [];
     renderCumulativeMatchSummary([]);
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
     if (el.leaderboardBody) {
-      el.leaderboardBody.innerHTML = '<tr><td colspan="9">Join or create a session to see the leaderboard.</td></tr>';
+      el.leaderboardBody.innerHTML = '<tr><td colspan="7">Join or create a session to see the leaderboard.</td></tr>';
     }
     return;
   }
@@ -204,8 +215,8 @@ export async function loadLeaderboard() {
     const cumulativeRowsForChart = cumulativeChartRows(cumulativeRows);
     state.latestRows = cumulativeRowsForChart;
 
-    const cumulativeKeys = ["avg_profit", "avg_buyer_utility", "avg_realized_utility", "avg_market_share_pct", "avg_supplier_quality", "avg_supplier_utility"];
-    if (!cumulativeKeys.includes(state.plotX)) state.plotX = "avg_profit";
+    const cumulativeKeys = ["avg_realized_utility", "avg_buyer_utility", "avg_profit", "avg_market_share_pct"];
+    if (!cumulativeKeys.includes(state.plotX)) state.plotX = "avg_realized_utility";
     if (!cumulativeKeys.includes(state.plotY)) state.plotY = "avg_market_share_pct";
 
     renderCumulativeMatchSummary(cumulativeRows);
@@ -214,26 +225,24 @@ export async function loadLeaderboard() {
 
     const averageRows = cumulativeRowsForChart
       .slice()
-      .sort((a, b) => Number(b.avg_supplier_utility ?? 0) - Number(a.avg_supplier_utility ?? 0));
+      .sort((a, b) => Number(b.avg_profit ?? 0) - Number(a.avg_profit ?? 0));
 
     el.leaderboardBody.innerHTML = averageRows.length
       ? averageRows.map((r, idx) => `<tr>
           <td>${idx + 1}</td>
           <td>${r.team ?? "-"}</td>
           <td>${r.rounds_played ?? 0}</td>
-          <td><strong>${fmt(r.avg_supplier_utility)}</strong></td>
-          <td>${fmt(r.avg_market_share_pct)}</td>
-          <td>${fmt(r.avg_supplier_quality)}</td>
+          <td>${fmt(r.avg_market_share_pct)}%</td>
+          <td><strong>${fmt(r.avg_profit)}</strong></td>
           <td>${fmt(r.avg_realized_utility)}</td>
           <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
-          <td><strong>${fmt(r.avg_profit)}</strong></td>
         </tr>`).join("")
-      : '<tr><td colspan="9">No cumulative leaderboard yet.</td></tr>';
+      : '<tr><td colspan="7">No cumulative leaderboard yet.</td></tr>';
   } catch (e) {
     if (requestSeq !== _leaderboardRequestSeq) return;
     state.latestRows = [];
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
-    el.leaderboardBody.innerHTML = `<tr><td colspan="9">${e.message}</td></tr>`;
+    el.leaderboardBody.innerHTML = `<tr><td colspan="7">${e.message}</td></tr>`;
   }
 }

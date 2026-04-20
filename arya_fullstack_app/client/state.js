@@ -8,8 +8,8 @@ export const state = {
   selected: {}, // { [category]: supplier_id } — one entry per category
   config: null,
   latestRows: [],
-  plotX: "realized_profit",
-  plotY: "market_share_pct",
+  plotX: "avg_realized_utility",
+  plotY: "avg_market_share_pct",
   roundNo: null,
   totalRounds: null,
   roundEndsAt: null,
@@ -28,20 +28,10 @@ export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
 export const ROUND_SYNC_INTERVAL_MS = 2000;
 
 export const PLOT_COLUMNS = {
-  realized_profit:       "Profit",
-  buyer_utility:         "Buyer Utility",
-  realized_utility:      "Market Utility",
-  market_share_pct:      "Market Share %",
-  total_profit:          "Cumulative Profit",
-  total_buyer_utility:   "Cumulative Buyer Utility",
-  total_realized_utility:"Cumulative Market Utility",
-  total_market_share_pct:"Cumulative Market Share %",
-  avg_profit:            "Avg Profit",
+  avg_realized_utility:  "Avg Customer (Market) Utility",
   avg_buyer_utility:     "Avg Buyer Utility",
-  avg_realized_utility:  "Avg Market Utility",
-  avg_market_share_pct:  "Avg Market Share %",
-  avg_supplier_quality:  "Avg Supplier Quality",
-  avg_supplier_utility:  "Avg Supplier Utility",
+  avg_profit:            "Avg Profit",
+  avg_market_share_pct:  "Avg Demand Share %",
 };
 
 export const el = {
