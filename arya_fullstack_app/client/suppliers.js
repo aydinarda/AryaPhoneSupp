@@ -96,9 +96,11 @@ function supplierCard(s, inputType, nameAttr, checked) {
   const hasChildLabor = Number(s.child_labor || 0) >= 0.5;
   const hasBannedChem = Number(s.banned_chem || 0) >= 0.5;
   const cat = s.category || "";
+  const selectedClass = checked ? " is-selected" : "";
   return `
-    <label class="supplier-item">
+    <label class="supplier-item${selectedClass}">
       <input type="${inputType}" ${nameAttr} data-id="${id}" data-cat="${cat}" ${checked} />
+      <span class="supplier-select-indicator ${inputType}" aria-hidden="true"></span>
       <div class="supplier-card-body">
         <div class="supplier-title"><strong>${id}</strong></div>
         <div class="supplier-bars">
@@ -133,6 +135,7 @@ export function renderSuppliers() {
         if (!(state.selected instanceof Set)) state.selected = new Set();
         if (ev.target.checked) state.selected.add(id);
         else state.selected.delete(id);
+        ev.target.closest(".supplier-item")?.classList.toggle("is-selected", ev.target.checked);
         persistSelectionState();
       });
     });
@@ -176,6 +179,11 @@ export function renderSuppliers() {
     input.addEventListener("change", (ev) => {
       if (!ev.target.checked) return;
       state.selected[ev.target.dataset.cat] = ev.target.dataset.id;
+      el.supplierList
+        .querySelectorAll(`input[type=radio][name="${ev.target.name}"]`)
+        .forEach((radio) => {
+          radio.closest(".supplier-item")?.classList.toggle("is-selected", radio.checked);
+        });
       persistSelectionState();
     });
   });
