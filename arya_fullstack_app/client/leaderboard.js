@@ -2,6 +2,7 @@ import { state, el, PLOT_COLUMNS } from "./state.js";
 import { api, fmt } from "./api.js";
 
 const PALETTE = ["#2563eb", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2", "#be123c", "#65a30d", "#c026d3", "#ea580c"];
+let _leaderboardRequestSeq = 0;
 
 function asRows(value) {
   return Array.isArray(value) ? value : [];
@@ -184,6 +185,7 @@ export function renderLeaderboardScatter(rows) {
 }
 
 export async function loadLeaderboard() {
+  const requestSeq = ++_leaderboardRequestSeq;
   if (!state.gameCode) {
     state.latestRows = [];
     renderCumulativeMatchSummary([]);
@@ -197,6 +199,7 @@ export async function loadLeaderboard() {
 
   try {
     const data = await api(`/api/sessions/${state.gameCode}/leaderboard`);
+    if (requestSeq !== _leaderboardRequestSeq) return;
     const cumulativeRows = asRows(data.cumulative_leaderboard);
     const cumulativeRowsForChart = cumulativeChartRows(cumulativeRows);
     state.latestRows = cumulativeRowsForChart;
@@ -227,6 +230,7 @@ export async function loadLeaderboard() {
         </tr>`).join("")
       : '<tr><td colspan="9">No cumulative leaderboard yet.</td></tr>';
   } catch (e) {
+    if (requestSeq !== _leaderboardRequestSeq) return;
     state.latestRows = [];
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);

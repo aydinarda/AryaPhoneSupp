@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import random
 import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -20,7 +22,13 @@ from ..db import (
     insert_game_round,
     insert_matching_result,
 )
-from ..live_state import get_live_round_submissions, get_live_session_submissions
+from ..live_state import (
+    get_live_latest_matching_result,
+    get_live_matching_results,
+    get_live_round_submissions,
+    get_live_session_submissions,
+    upsert_live_matching_result,
+)
 from ..service import get_tables
 from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
 from ..ws_manager import manager
@@ -38,6 +46,11 @@ _session_audit: dict[str, tuple[float, float]] = {}  # (audit_probability, catch
 
 _DEFAULT_ALPHA = 3.0
 _DEFAULT_BETA = 3.0
+
+
+def _stable_seed(payload: dict[str, Any]) -> int:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return int(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16], 16)
 
 
 def _extract_rows(res: Any) -> list[dict[str, Any]]:
@@ -434,8 +447,6 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         team: row for team, row in by_team.items() if _submission_is_feasible(row)
     }
     excluded_infeasible_teams = sorted(team for team in by_team if team not in eligible_rows)
-    if not eligible_rows:
-        raise HTTPException(status_code=400, detail="No feasible submissions found for this round")
 
     suppliers_df, users_df = get_tables()
     suppliers_df = suppliers_df.copy()
@@ -445,15 +456,18 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         for _, row in suppliers_df.iterrows()
     }
 
-    team_profiles, profile_excluded = _build_team_product_profiles(eligible_rows, suppliers_by_id)
+    team_profiles, profile_excluded = _build_team_product_profiles(eligible_rows, suppliers_by_id) if eligible_rows else ({}, [])
     if profile_excluded:
         excluded_infeasible_teams = sorted(set(excluded_infeasible_teams + profile_excluded))
-    if not team_profiles:
-        raise HTTPException(status_code=400, detail="No feasible team product found for matching")
 
     N = len(users_df)
     if N <= 0:
         raise HTTPException(status_code=400, detail="No users available in dataset for matching")
+
+    normalized_code = (code or "").strip().upper()
+    beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
+    delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
+    quality_sensitivity = _session_quality_sensitivity.get(normalized_code, float(GAME_SETTINGS.quality_sensitivity))
 
     # --- Audit phase (runs before MNL; caught teams are excluded from market) ---
     from ..audit import run_audit
@@ -462,28 +476,45 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         session_code,
         (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
     )
+    match_input = {
+        "session_code": session_code,
+        "round_no": round_no,
+        "beta_alpha": beta_alpha,
+        "beta_beta": beta_beta,
+        "delta": delta,
+        "quality_sensitivity": quality_sensitivity,
+        "audit_probability": audit_ap,
+        "catch_probability": audit_cp,
+        "teams": [
+            {
+                "team": team,
+                "selected_suppliers": str(row.get("selected_suppliers") or ""),
+                "price": _safe_float(row.get("price"), GAME_SETTINGS.price_per_user),
+                "feasible": _submission_is_feasible(row),
+            }
+            for team, row in sorted(by_team.items())
+        ],
+    }
+    match_seed = _stable_seed(match_input)
+    pre_audit_team_profiles = {team: dict(profile) for team, profile in team_profiles.items()}
     audit_result = run_audit(
         team_profiles=team_profiles,
         suppliers_df=suppliers_df,
         audit_probability=audit_ap,
         catch_probability=audit_cp,
+        rng=random.Random(match_seed),
     )
     if audit_result.excluded_teams:
         excluded_infeasible_teams = sorted(set(excluded_infeasible_teams + audit_result.excluded_teams))
         for t in audit_result.excluded_teams:
             team_profiles.pop(t, None)
-    if not team_profiles:
-        raise HTTPException(status_code=400, detail="No teams remain after audit phase")
+    audit_excluded_teams = sorted(audit_result.excluded_teams)
 
     # --- MNL demand model ---
     from ..beta_density import BetaDensity
     from ..mnl_market import BuyerProfile, run_mnl_market
     from ..customer_segment import CustomerSegment
 
-    normalized_code = (code or "").strip().upper()
-    beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
-    quality_sensitivity = _session_quality_sensitivity.get(normalized_code, float(GAME_SETTINGS.quality_sensitivity))
     bd = BetaDensity(alpha=max(0.01, beta_alpha), beta=max(0.01, beta_beta))
     users_sorted = users_df.sort_values("w_cost").reset_index(drop=True)
     segments = [
@@ -515,7 +546,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         delta=delta,
         quality_sensitivity=quality_sensitivity,
         u_outside=None,
-    )
+    ) if profiles else None
 
     market_to_users: dict[str, Any] = {}
     market_loads: dict[str, Any] = {}
@@ -524,7 +555,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
 
     for tid in team_ids_sorted:
         profile = team_profiles[tid]
-        br = mnl_result.buyer_results.get(tid)
+        br = mnl_result.buyer_results.get(tid) if mnl_result else None
         demand_share = br.total_demand if br else 0.0
         effective_users = round(demand_share * N, 3)
         price = _safe_float(profile["price_per_user"], GAME_SETTINGS.price_per_user)
@@ -563,11 +594,45 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "avg_cost_score": avg_cost,
             "unit_margin": round(unit_margin, 2),
             "avg_strategic": round(avg_strategic, 3),
+            "excluded_by_audit": False,
+            "excluded_by_infeasible": False,
         })
+
+    zero_team_ids = sorted(set(excluded_infeasible_teams))
+    for tid in zero_team_ids:
+        if tid in {row["team"] for row in team_round_financials}:
+            continue
+        original_profile = pre_audit_team_profiles.get(tid, {})
+        original_row = by_team.get(tid, {})
+        team_round_financials.append({
+            "team": tid,
+            "demand_share": 0.0,
+            "effective_users": 0.0,
+            "realized_profit": 0.0,
+            "realized_utility": 0.0,
+            "buyer_utility": 0.0,
+            "price_per_user": _safe_float(
+                original_profile.get("price_per_user", original_row.get("price")),
+                GAME_SETTINGS.price_per_user,
+            ),
+            "avg_cost_score": _safe_float(
+                original_profile.get("avg_cost", original_row.get("cost_avg")),
+                0.0,
+            ),
+            "unit_margin": 0.0,
+            "avg_strategic": _safe_float(
+                original_profile.get("avg_strategic", original_row.get("strategic_avg")),
+                0.0,
+            ),
+            "excluded_by_audit": tid in audit_excluded_teams,
+            "excluded_by_infeasible": tid not in audit_excluded_teams,
+        })
+
+    team_round_financials.sort(key=lambda row: str(row.get("team") or ""))
 
     # Build per-segment share breakdown (sorted by segment index = w_cost order)
     segment_shares: list[dict[str, Any]] = []
-    for idx, alloc in enumerate(mnl_result.segment_allocations):
+    for idx, alloc in enumerate(mnl_result.segment_allocations if mnl_result else []):
         entry: dict[str, Any] = {
             "segment_index": idx + 1,
             "segment_id": alloc.segment_id,
@@ -577,9 +642,12 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         segment_shares.append(entry)
     segment_shares.sort(key=lambda x: x["segment_index"])
 
+    completed_at = datetime.now(UTC).isoformat()
     result = {
         "meta": {
             "solver": "mnl_v1",
+            "completed_at": completed_at,
+            "input_fingerprint": f"{match_seed:016x}",
             "user_pool_count": N,
             "eligible_team_count": len(profiles),
             "matched_count": N,
@@ -613,7 +681,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "matched_count": _safe_int(result.get("meta", {}).get("matched_count")),
         "result": result,
     }
-    threading.Thread(target=insert_matching_result, args=(_db_payload,), daemon=True).start()
+    upsert_live_matching_result(_db_payload)
+    threading.Thread(target=insert_matching_result, args=(_db_payload.copy(),), daemon=True).start()
 
     manager.broadcast_sync(session_code, {
         "type": "match_result",
@@ -638,7 +707,9 @@ def get_latest_match(code: str) -> dict[str, Any]:
     if not session_token:
         raise HTTPException(status_code=400, detail="Session token not found")
 
-    rows = _extract_rows(fetch_latest_matching_result(session_token))
+    rows = get_live_latest_matching_result(session_token)
+    if not rows:
+        rows = _extract_rows(fetch_latest_matching_result(session_token))
     if not rows:
         return {"match": None}
 
@@ -712,6 +783,34 @@ def _parse_result_json(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def _match_row_completed_at(row: dict[str, Any]) -> str:
+    result = _parse_result_json(row.get("result"))
+    meta = result.get("meta") or {}
+    return str(meta.get("completed_at") or row.get("created_at") or "")
+
+
+def _latest_match_rows_by_round(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        rno = _safe_int(row.get("round_no"))
+        if rno <= 0:
+            continue
+        existing = latest.get(rno)
+        if existing is None or _match_row_completed_at(existing) <= _match_row_completed_at(row):
+            latest[rno] = row
+    return [latest[rno] for rno in sorted(latest)]
+
+
+def _load_matching_rows(session_token: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    try:
+        rows.extend(_extract_rows(fetch_all_matching_results(session_token)))
+    except Exception:
+        pass
+    rows.extend(get_live_matching_results(session_token))
+    return _latest_match_rows_by_round(rows)
+
+
 _LEADERBOARD_METRICS = {"buyer_utility", "profit", "market_share", "market_utility"}
 
 _METRIC_FIELD: dict[str, str] = {
@@ -764,7 +863,7 @@ def get_session_leaderboard(
     y_metric = y_metric if y_metric in _LEADERBOARD_METRICS else "buyer_utility"
 
     # --- Load matching results (team financials per round) ---
-    match_rows = _extract_rows(fetch_all_matching_results(session_token))
+    match_rows = _load_matching_rows(session_token)
 
     # round_no → { team → {demand_share, realized_profit, realized_utility, buyer_utility} }
     round_financials: dict[int, dict[str, dict[str, float]]] = {}
@@ -781,6 +880,8 @@ def get_session_leaderboard(
                     "realized_profit": float(tf.get("realized_profit") or 0.0),
                     "realized_utility": float(tf.get("realized_utility") or 0.0),
                     "buyer_utility": float(tf.get("buyer_utility") or 0.0),
+                    "excluded_by_audit": bool(tf.get("excluded_by_audit")),
+                    "excluded_by_infeasible": bool(tf.get("excluded_by_infeasible")),
                 }
 
     # --- Load submissions (supplier attribute averages per team per round) ---
@@ -808,11 +909,14 @@ def get_session_leaderboard(
         # Compute supplier_quality per team
         team_metrics: dict[str, dict[str, float]] = {}
         for team, fin in teams_fin.items():
-            sub = sub_map.get((team, rno), {})
-            avg_env       = float(sub.get("env_avg")       or 0.0)
-            avg_social    = float(sub.get("social_avg")    or 0.0)
-            avg_strategic = float(sub.get("strategic_avg") or 0.0)
-            supplier_quality = (5.0 - avg_env) + (5.0 - avg_social) + (avg_strategic - 1.0)
+            if fin.get("excluded_by_audit") or fin.get("excluded_by_infeasible"):
+                supplier_quality = 0.0
+            else:
+                sub = sub_map.get((team, rno), {})
+                avg_env       = float(sub.get("env_avg")       or 0.0)
+                avg_social    = float(sub.get("social_avg")    or 0.0)
+                avg_strategic = float(sub.get("strategic_avg") or 0.0)
+                supplier_quality = (5.0 - avg_env) + (5.0 - avg_social) + (avg_strategic - 1.0)
             team_metrics[team] = {
                 **fin,
                 "supplier_quality": supplier_quality,
@@ -829,7 +933,7 @@ def get_session_leaderboard(
             norm_profit = (m["realized_profit"] - min_p) / p_range  # [0,1], 1=best
             profit_cost_score = round(5.0 * (1.0 - norm_profit), 4)  # [0,5], LOWER=better
             profit_contribution = norm_profit * 5.0                   # [0,5], higher=better
-            supplier_utility = m["supplier_quality"] + profit_contribution
+            supplier_utility = 0.0 if (m.get("excluded_by_audit") or m.get("excluded_by_infeasible")) else m["supplier_quality"] + profit_contribution
 
             entry = {
                 "team": team,

@@ -117,7 +117,7 @@ def run_audit(
         violation_map[sid] = has_violation
 
     # Audit each unique supplier independently
-    for sid in all_picked:
+    for sid in sorted(all_picked):
         has_violation = violation_map.get(sid, False)
         result.violation_flags[sid] = has_violation
 
@@ -130,7 +130,8 @@ def run_audit(
                 result.caught_suppliers.add(sid)
 
     # Determine which teams are excluded
-    for team, profile in team_profiles.items():
+    for team in sorted(team_profiles):
+        profile = team_profiles[team]
         caught_picks = [
             sid for sid in profile.get("picked_suppliers", [])
             if str(sid) in result.caught_suppliers

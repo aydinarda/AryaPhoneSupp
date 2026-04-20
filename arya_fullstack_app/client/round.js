@@ -3,6 +3,9 @@ import { api } from "./api.js";
 import { renderDistributionChart } from "./distribution.js";
 import { renderConfigInfo } from "./suppliers.js";
 
+let _latestMatchCompletedAt = "";
+let _matchInFlight = false;
+
 export function clearRoundTimer() {
   if (state.roundTimerId) {
     clearInterval(state.roundTimerId);
@@ -89,13 +92,25 @@ export function renderAdminPlayMode() {
   }
 }
 
-export function renderMatchingResult(payload) {
+function matchCompletedAt(payload) {
+  return String(payload?.meta?.completed_at || "");
+}
+
+export function renderMatchingResult(payload, options = {}) {
   if (!el.matchingResultText || !el.matchingTableBody) return;
   if (!payload || !payload.market_to_users) {
+    if (_latestMatchCompletedAt && !options.force) return false;
     el.matchingResultText.textContent = "No matching result yet.";
     el.matchingTableBody.innerHTML = "";
-    return;
+    if (options.force) _latestMatchCompletedAt = "";
+    return true;
   }
+
+  const completedAt = matchCompletedAt(payload);
+  if (_latestMatchCompletedAt && (!completedAt || completedAt < _latestMatchCompletedAt)) {
+    return false;
+  }
+  if (completedAt) _latestMatchCompletedAt = completedAt;
 
   const meta = payload.meta || {};
   const excluded = payload.excluded_infeasible_teams || [];
@@ -116,7 +131,7 @@ export function renderMatchingResult(payload) {
 
   el.matchingResultText.textContent = [
     `Solver: ${meta.solver || "-"}`,
-    `Teams: ${meta.eligible_team_count ?? 0}`,
+    `Teams: ${teamFinancials.length || meta.eligible_team_count || 0}`,
     `Users: ${meta.user_pool_count ?? 0}`,
     `δ: ${financials.delta ?? "-"}`,
     `Sustainability sens.: ${financials.quality_sensitivity ?? "-"}`,
@@ -161,6 +176,7 @@ export function renderMatchingResult(payload) {
 
   // Per-segment breakdown
   _renderSegmentShares(payload.segment_shares || [], teamFinancials.map((tf) => tf.team));
+  return true;
 }
 
 function _renderSegmentShares(segmentShares, teams) {
@@ -329,6 +345,12 @@ export async function startRound() {
 export async function runMatchingNow() {
   if (state.role !== "admin") return;
   if (!state.gameCode) return;
+  if (_matchInFlight) return;
+  _matchInFlight = true;
+  if (el.btnRunMatch) {
+    el.btnRunMatch.disabled = true;
+    el.btnRunMatch.textContent = "Running...";
+  }
   if (el.adminRoundHint) el.adminRoundHint.textContent = "";
 
   try {
@@ -336,13 +358,19 @@ export async function runMatchingNow() {
       method: "POST",
       body: JSON.stringify({ round_no: state.roundNo }),
     });
-    renderMatchingResult(data.matching);
-    if (el.adminRoundHint) {
+    const rendered = renderMatchingResult(data.matching);
+    if (rendered && el.adminRoundHint) {
       el.adminRoundHint.textContent = `Matching completed for round ${data.round_no}.`;
     }
   } catch (e) {
     if (el.adminRoundHint) {
       el.adminRoundHint.textContent = e.message || "Matching failed.";
+    }
+  } finally {
+    _matchInFlight = false;
+    if (el.btnRunMatch) {
+      el.btnRunMatch.disabled = false;
+      el.btnRunMatch.textContent = "Run Match";
     }
   }
 }

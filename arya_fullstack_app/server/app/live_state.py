@@ -8,6 +8,7 @@ from typing import Any
 
 _lock = RLock()
 _submissions: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
+_matching_results: dict[str, dict[int, dict[str, Any]]] = {}
 
 
 def _session_code(value: Any) -> str:
@@ -65,3 +66,51 @@ def get_live_session_submissions(session_code: str) -> list[dict[str, Any]]:
             if code == normalized:
                 rows.extend(by_team.values())
         return deepcopy(sorted(rows, key=lambda row: str(row.get("created_at") or "")))
+
+
+def _session_token(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _match_created_at(row: dict[str, Any]) -> str:
+    result = row.get("result") if isinstance(row, dict) else {}
+    if isinstance(result, dict):
+        meta = result.get("meta") or {}
+        completed_at = meta.get("completed_at")
+        if completed_at:
+            return str(completed_at)
+    return str(row.get("created_at") or "")
+
+
+def upsert_live_matching_result(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Store the latest matching result per session round in server memory."""
+    session_token = _session_token(row.get("session_token"))
+    round_no = _round_no(row.get("round_no"))
+    if not session_token or round_no <= 0:
+        return None
+
+    stored = deepcopy(row)
+    stored["session_token"] = session_token
+    stored["round_no"] = round_no
+    if not stored.get("created_at"):
+        result = stored.get("result") if isinstance(stored.get("result"), dict) else {}
+        meta = result.get("meta") if isinstance(result, dict) else {}
+        stored["created_at"] = str((meta or {}).get("completed_at") or datetime.now(UTC).isoformat())
+
+    with _lock:
+        _matching_results.setdefault(session_token, {})[round_no] = stored
+        return deepcopy(stored)
+
+
+def get_live_matching_results(session_token: str) -> list[dict[str, Any]]:
+    normalized = _session_token(session_token)
+    with _lock:
+        rows = list(_matching_results.get(normalized, {}).values())
+        return deepcopy(sorted(rows, key=lambda row: (_round_no(row.get("round_no")), _match_created_at(row))))
+
+
+def get_live_latest_matching_result(session_token: str) -> list[dict[str, Any]]:
+    rows = get_live_matching_results(session_token)
+    if not rows:
+        return []
+    return [max(rows, key=lambda row: (_round_no(row.get("round_no")), _match_created_at(row)))]

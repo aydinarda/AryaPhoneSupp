@@ -100,8 +100,8 @@ function _handleMessage(msg) {
 
   if (type === "match_result") {
     if (state.role === "admin") {
-      renderMatchingResult(msg.matching);
-      if (el.adminRoundHint) {
+      const rendered = renderMatchingResult(msg.matching);
+      if (rendered && el.adminRoundHint) {
         el.adminRoundHint.textContent = `Matching completed for round ${msg.round_no}.`;
       }
     }
