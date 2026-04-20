@@ -13,6 +13,7 @@ import { loadBenchmarkSummary } from "./benchmark.js";
 import { renderDistributionChart } from "./distribution.js";
 
 export function saveLobbyState() {
+  const selected = state.selected instanceof Set ? [...state.selected] : state.selected;
   const payload = {
     role: state.role,
     adminPlays: state.adminPlays,
@@ -21,6 +22,7 @@ export function saveLobbyState() {
     totalRounds: state.totalRounds,
     teamName: (el.teamName.value || "").trim(),
     playerName: (el.teamName.value || "").trim(),
+    selected,
   };
   localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(payload));
 }
@@ -28,15 +30,49 @@ export function saveLobbyState() {
 export function loadLobbyState() {
   try {
     const raw = localStorage.getItem(LOBBY_STORAGE_KEY);
-    if (!raw) return;
+    if (!raw) return null;
     const saved = JSON.parse(raw);
     if (saved.gameName) el.adminGameName.value = saved.gameName;
     if (saved.totalRounds) el.adminNumberOfRounds.value = saved.totalRounds;
     if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
     if (saved.teamName) el.playerTeamName.value = saved.teamName;
+    if (Array.isArray(saved.selected)) {
+      state.selected = new Set(saved.selected.map(String));
+    } else if (saved.selected && typeof saved.selected === "object") {
+      state.selected = saved.selected;
+    }
+    return saved;
   } catch (_err) {
     localStorage.removeItem(LOBBY_STORAGE_KEY);
+    return null;
   }
+}
+
+export function restoreSavedGame(saved) {
+  if (!saved || !saved.role || !saved.gameCode) return false;
+  const role = saved.role === "admin" ? "admin" : saved.role === "player" ? "player" : null;
+  if (!role) return false;
+
+  state.role = role;
+  state.adminPlays = Boolean(saved.adminPlays);
+  state.gameCode = String(saved.gameCode || "").trim().toUpperCase();
+  state.gameName = String(saved.gameName || "").trim();
+  state.totalRounds = Number.isFinite(Number(saved.totalRounds)) ? Number(saved.totalRounds) : state.totalRounds;
+
+  el.playerJoinCode.value = state.gameCode;
+  if (role === "admin") {
+    el.adminGameName.value = state.gameName;
+    el.teamName.value = String(saved.teamName || state.gameName || "Admin").trim();
+    el.playerTeamName.value = el.teamName.value;
+  } else {
+    el.teamName.value = String(saved.teamName || saved.playerName || "").trim();
+    el.playerTeamName.value = el.teamName.value;
+  }
+
+  el.teamName.readOnly = true;
+  el.teamName.style.opacity = "0.65";
+  showGameScreen();
+  return true;
 }
 
 export function renderSessionSummary() {

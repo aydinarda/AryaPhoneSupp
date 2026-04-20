@@ -1,6 +1,6 @@
 import { state, el } from "./state.js";
 import { api } from "./api.js";
-import { loadLobbyState, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
+import { loadLobbyState, restoreSavedGame, showLobbyScreen, enterAsAdmin, enterAsPlayer, saveLobbyState } from "./lobby.js";
 import { startRound, runMatchingNow, renderAdminPlayMode, renderRoundSummary } from "./round.js";
 import { loadConfigAndSuppliers, renderConfigInfo, runManual, submit } from "./suppliers.js";
 import { loadLeaderboard, renderLeaderboardScatter, ensureLeaderboardPlotUI } from "./leaderboard.js";
@@ -172,13 +172,15 @@ function setupEvents() {
 }
 
 async function init() {
-  loadLobbyState();
+  const savedLobby = loadLobbyState();
   setupTabs();
   setupEvents();
-  showLobbyScreen();
   renderRoundSummary();
   await loadConfigAndSuppliers();
   renderDistributionChart();
+  if (!restoreSavedGame(savedLobby)) {
+    showLobbyScreen();
+  }
   await runManual();
   await loadLeaderboard();
 }

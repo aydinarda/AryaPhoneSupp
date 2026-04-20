@@ -1,6 +1,27 @@
-import { state, el } from "./state.js";
+import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import { api, fmt, metricCard } from "./api.js";
 import { loadLeaderboard } from "./leaderboard.js";
+
+function persistSelectionState() {
+  try {
+    const raw = localStorage.getItem(LOBBY_STORAGE_KEY);
+    const existing = raw ? JSON.parse(raw) : {};
+    const selected = state.selected instanceof Set ? [...state.selected] : state.selected;
+    localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify({
+      ...existing,
+      role: state.role,
+      adminPlays: state.adminPlays,
+      gameCode: state.gameCode,
+      gameName: state.gameName,
+      totalRounds: state.totalRounds,
+      teamName: (el.teamName?.value || existing.teamName || "").trim(),
+      playerName: (el.teamName?.value || existing.playerName || "").trim(),
+      selected,
+    }));
+  } catch (_err) {
+    // Local persistence is a convenience only; gameplay still works without it.
+  }
+}
 
 function fmtConfigValue(value, fallback = "-") {
   const n = Number(value);
@@ -112,6 +133,7 @@ export function renderSuppliers() {
         if (!(state.selected instanceof Set)) state.selected = new Set();
         if (ev.target.checked) state.selected.add(id);
         else state.selected.delete(id);
+        persistSelectionState();
       });
     });
     return;
@@ -154,6 +176,7 @@ export function renderSuppliers() {
     input.addEventListener("change", (ev) => {
       if (!ev.target.checked) return;
       state.selected[ev.target.dataset.cat] = ev.target.dataset.id;
+      persistSelectionState();
     });
   });
 }
