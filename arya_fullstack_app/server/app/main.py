@@ -51,6 +51,11 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.get("/api/config")
 def config() -> dict[str, Any]:
     return get_game_constants()

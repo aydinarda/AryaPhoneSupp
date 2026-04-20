@@ -5,7 +5,15 @@ export async function api(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const detail = err.detail || err.message || `HTTP ${res.status}`;
+    console.error("API request failed", {
+      path,
+      status: res.status,
+      statusText: res.statusText,
+      detail,
+      response: err,
+    });
+    throw new Error(detail);
   }
   return res.json();
 }
