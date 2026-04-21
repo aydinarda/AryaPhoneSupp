@@ -76,7 +76,7 @@ export function renderDistributionChart() {
         font: { size: 13 },
       },
       xaxis: {
-        title: "Segment index  (1 = quality-preferring  →  N = price-sensitive)",
+        title: "Price sensitivity  (lower → higher)",
         tickmode: "linear",
         dtick: Math.max(1, Math.ceil(N / 10)),
         range: [0.5, N + 0.5],

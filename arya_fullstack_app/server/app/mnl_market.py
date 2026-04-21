@@ -111,14 +111,24 @@ def _quality_score(profile: BuyerProfile, segment: "CustomerSegment") -> float:
     )
 
 
+# Additive constant applied to every logit to shift realized_utility into positive range.
+# Invariant: adding the same constant to all options leaves softmax shares unchanged
+# (max_logit increases by the same amount, so u - max_logit is identical).
+_U_BASE: float = 50.0
+
+
 def _net_utility_score(
     profile: BuyerProfile,
     segment: "CustomerSegment",
     delta: float,
     quality_sensitivity: float,
 ) -> float:
-    """Net utility used by MNL: quality utility minus price disutility."""
-    return quality_sensitivity * _quality_score(profile, segment) - delta * segment.w_cost * profile.price_per_user
+    """Net utility used by MNL: quality utility minus price disutility, plus base shift."""
+    return (
+        quality_sensitivity * _quality_score(profile, segment)
+        - delta * segment.w_cost * profile.price_per_user
+        + _U_BASE
+    )
 
 
 def _mnl_for_segment(
