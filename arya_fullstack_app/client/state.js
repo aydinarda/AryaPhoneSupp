@@ -45,6 +45,7 @@ export const el = {
   playerName: null,
   pricePerUser: document.getElementById("pricePerUser"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
+  turnLeaderboardBody: document.querySelector("#turnLeaderboardTable tbody"),
   cumulativeMatchBody: document.querySelector("#cumulativeMatchTable tbody"),
   plotXSelect: document.getElementById("plotXSelect"),
   plotYSelect: document.getElementById("plotYSelect"),

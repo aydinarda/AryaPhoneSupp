@@ -862,6 +862,7 @@ def get_session_leaderboard(
                     "realized_profit": float(tf.get("realized_profit") or 0.0),
                     "realized_utility": float(tf.get("realized_utility") or 0.0),
                     "buyer_utility": float(tf.get("buyer_utility") or 0.0),
+                    "price_per_user": float(tf.get("price_per_user") or 0.0),
                     "excluded_by_audit": bool(tf.get("excluded_by_audit")),
                     "excluded_by_infeasible": bool(tf.get("excluded_by_infeasible")),
                 }
@@ -880,6 +881,7 @@ def get_session_leaderboard(
             entry = {
                 "team": team,
                 "round_no": rno,
+                "price_per_user": round(m["price_per_user"], 2),
                 "realized_profit": round(m["realized_profit"], 2),
                 "market_share_pct": round(m["demand_share"] * 100.0, 2),
                 "realized_utility": round(m["realized_utility"], 4),

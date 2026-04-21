@@ -29,6 +29,30 @@ function cumulativeChartRows(rows) {
   });
 }
 
+function renderLastRound(turnRows) {
+  if (!el.turnLeaderboardBody) return;
+  const rows = asRows(turnRows);
+  if (!rows.length) {
+    el.turnLeaderboardBody.innerHTML = '<tr><td colspan="7">No round results yet.</td></tr>';
+    return;
+  }
+  const maxRound = Math.max(...rows.map((r) => r.round_no ?? 0));
+  const lastRows = rows
+    .filter((r) => (r.round_no ?? 0) === maxRound)
+    .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
+
+  el.turnLeaderboardBody.innerHTML = lastRows.map((r, idx) => `<tr>
+    <td>${r.round_no ?? "-"}</td>
+    <td>${idx + 1}</td>
+    <td><strong>${r.team ?? "-"}</strong></td>
+    <td>${r.price_per_user != null ? `$${Number(r.price_per_user).toFixed(0)}` : "-"}</td>
+    <td>${fmt(r.market_share_pct)}%</td>
+    <td><strong>${fmt(r.realized_profit)}</strong></td>
+    <td>${fmt(r.realized_utility)}</td>
+    <td><strong>${fmt(r.buyer_utility)}</strong></td>
+  </tr>`).join("");
+}
+
 function renderCumulativeMatchSummary(rows) {
   if (!el.cumulativeMatchBody) return;
 
@@ -212,8 +236,11 @@ export async function loadLeaderboard() {
     const data = await api(`/api/sessions/${state.gameCode}/leaderboard`);
     if (requestSeq !== _leaderboardRequestSeq) return;
     const cumulativeRows = asRows(data.cumulative_leaderboard);
+    const turnRows = asRows(data.turn_leaderboard);
     const cumulativeRowsForChart = cumulativeChartRows(cumulativeRows);
     state.latestRows = cumulativeRowsForChart;
+
+    renderLastRound(turnRows);
 
     const cumulativeKeys = ["avg_realized_utility", "avg_buyer_utility", "avg_profit", "avg_market_share_pct"];
     if (!cumulativeKeys.includes(state.plotX)) state.plotX = "avg_realized_utility";
@@ -241,6 +268,7 @@ export async function loadLeaderboard() {
   } catch (e) {
     if (requestSeq !== _leaderboardRequestSeq) return;
     state.latestRows = [];
+    renderLastRound([]);
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
     el.leaderboardBody.innerHTML = `<tr><td colspan="7">${e.message}</td></tr>`;
