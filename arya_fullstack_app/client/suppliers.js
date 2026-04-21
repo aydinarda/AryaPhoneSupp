@@ -55,8 +55,8 @@ export function renderMetrics(target, title, payload) {
   target.innerHTML = [
     metricCard(`${title}`, feasibleBadge),
     metricCard("Max Possible Profit", fmt(m.profit_total)),
-    metricCard("Cost per a Unit Sale", fmt(m.cost_per_unit)),
-    metricCard("Market Utility Indicator", fmt(m.utility_total)),
+    metricCard("Unit Cost", fmt(m.cost_per_unit)),
+    metricCard("Market Utility", fmt(m.utility_total)),
     metricCard("Avg Env Risk", fmt(m.avg_env)),
     metricCard("Avg Social Risk", fmt(m.avg_social)),
     metricCard("Avg Cost", fmt(m.avg_cost)),

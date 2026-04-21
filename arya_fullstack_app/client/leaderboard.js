@@ -56,7 +56,7 @@ function renderLeaderboardTableHeader() {
     <th>Rounds</th>
     <th>Avg Demand Share</th>
     <th>Avg Profit</th>
-    <th>Avg Customer (Market) Utility</th>
+    <th>Avg Market Utility</th>
     <th>Avg Buyer Utility</th>
   `;
 }
