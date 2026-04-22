@@ -78,6 +78,42 @@ def test_player_can_join_with_team_name() -> None:
     assert joined.json()["code"] == code
 
 
+def test_join_broadcasts_joined_players_to_admin_clients(monkeypatch) -> None:
+    emitted: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        sessions_router,
+        "join_session",
+        lambda code, team_name: {
+            "code": code,
+            "game_name": "Joinable Session",
+            "admin_name": "Host",
+            "number_of_rounds": 5,
+        },
+    )
+    monkeypatch.setattr(
+        sessions_router,
+        "list_session_players",
+        lambda code: ["TeamAlpha", "TeamBeta"],
+    )
+    monkeypatch.setattr(
+        sessions_router.manager,
+        "broadcast_sync",
+        lambda session_code, message: emitted.append((session_code, message)),
+    )
+
+    response = client.post("/api/sessions/ABC123/join", json={"team_name": "TeamBeta"})
+    assert response.status_code == 200
+    assert emitted == [(
+        "ABC123",
+        {
+            "type": "player_joined",
+            "team_name": "TeamBeta",
+            "players": ["TeamAlpha", "TeamBeta"],
+        },
+    )]
+
+
 def test_duplicate_team_name_is_rejected() -> None:
     created = client.post(
         "/api/sessions",

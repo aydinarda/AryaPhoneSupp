@@ -287,6 +287,31 @@ button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fe
   font-size: 13px;
 }
 
+.session-players-card {
+  display: grid;
+  gap: 8px;
+}
+.session-players-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.session-players-list {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+.session-player-item {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 /* ===== GAME MAIN GRID ===== */
 .game-main-grid {
   display: grid;

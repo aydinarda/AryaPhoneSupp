@@ -11,6 +11,7 @@ import {
 import { connectWS, disconnectWS } from "./ws.js";
 import { loadBenchmarkSummary } from "./benchmark.js";
 import { renderDistributionChart } from "./distribution.js";
+import { clearJoinedTeams, renderSessionPlayers } from "./sessionPlayers.js";
 
 export function saveLobbyState() {
   const selected = state.selected instanceof Set ? [...state.selected] : state.selected;
@@ -93,6 +94,7 @@ export function showGameScreen() {
   el.gameScreen.classList.remove("hidden");
   renderSessionSummary();
   renderAdminControls();
+  renderSessionPlayers();
   renderRoundSummary();
   renderDistributionChart();
   connectWS(state.gameCode);
@@ -104,6 +106,7 @@ export function showLobbyScreen() {
   disconnectWS();
   clearRoundSync();
   clearRoundTimer();
+  clearJoinedTeams();
   el.gameScreen.classList.add("hidden");
   el.lobbyScreen.classList.remove("hidden");
   el.teamName.readOnly = false;
@@ -143,6 +146,7 @@ export async function enterAsAdmin() {
     state.gameName = session.game_name;
     state.gameCode = session.code;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : numberOfRounds;
+    clearJoinedTeams();
     el.teamName.value = session.game_name;
     el.teamName.readOnly = true;
     el.teamName.style.opacity = "0.65";
@@ -180,6 +184,7 @@ export async function enterAsPlayer() {
     state.gameCode = session.code;
     state.gameName = session.game_name;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : state.totalRounds;
+    clearJoinedTeams();
     el.teamName.value = teamName;
     el.teamName.readOnly = true;
     el.teamName.style.opacity = "0.65";

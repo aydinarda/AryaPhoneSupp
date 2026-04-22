@@ -8,6 +8,7 @@ from typing import Any
 from .db import (
     fetch_game_session_by_code,
     fetch_session_player,
+    fetch_session_players,
     has_supabase_credentials,
     insert_game_session,
     insert_session_player,
@@ -18,7 +19,7 @@ SESSION_CODE_LENGTH = 6
 
 _sessions_lock = Lock()
 _sessions: dict[str, dict[str, Any]] = {}
-_session_players: dict[str, set[str]] = {}  # code -> set of lowercase team names
+_session_players: dict[str, dict[str, str]] = {}  # code -> {normalized_team_name: display_name}
 _session_round_limits: dict[str, int] = {}
 
 
@@ -212,6 +213,48 @@ def get_session(code: str) -> dict[str, Any] | None:
         return _sessions.get(normalized)
 
 
+def list_session_players(code: str) -> list[str]:
+    normalized = _normalize_session_code(code)
+    if not normalized:
+        return []
+
+    if _use_db_backend():
+        try:
+            res = fetch_game_session_by_code(normalized)
+            rows = getattr(res, "data", None) or []
+            if not rows:
+                return []
+            row = rows[0]
+            if row.get("is_active") is False:
+                return []
+
+            token = str(row.get("session_token") or "").strip()
+            game_name = str(row.get("game_name") or "").strip()
+            if not token:
+                return []
+
+            players_res = fetch_session_players(token)
+            player_rows = getattr(players_res, "data", None) or []
+            seen: set[str] = set()
+            players: list[str] = []
+            for prow in player_rows:
+                team_name = str(prow.get("team_name") or "").strip()
+                team_key = team_name.lower()
+                if not team_name or team_name == game_name or team_key in seen:
+                    continue
+                seen.add(team_key)
+                players.append(team_name)
+            return players
+        except Exception as exc:
+            if _is_recoverable_db_error(exc):
+                raise RuntimeError(f"DB access/config error while listing session players: {exc}") from exc
+            raise RuntimeError(f"Failed to list session players: {exc}") from exc
+
+    with _sessions_lock:
+        players = _session_players.get(normalized, {})
+        return list(players.values())
+
+
 def join_session(code: str, team_name: str) -> dict[str, Any] | None:
     """Register a player team name into a session.
 
@@ -278,9 +321,9 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
         if session is None:
             return None
 
-        players = _session_players.setdefault(normalized, set())
+        players = _session_players.setdefault(normalized, {})
         if normalized_team in players:
             raise ValueError("Team name already taken in this session. Please choose a different name.")
 
-        players.add(normalized_team)
+        players[normalized_team] = clean_team
         return session

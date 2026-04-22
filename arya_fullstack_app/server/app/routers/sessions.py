@@ -32,7 +32,7 @@ from ..live_state import (
 from ..service import get_tables
 from ..schemas import MatchRunRequest, PlayerJoinRequest, RoundStartRequest, SessionConfigRequest, SessionCreateRequest
 from ..ws_manager import manager
-from ..session_service import create_session, get_session, join_session
+from ..session_service import create_session, get_session, join_session, list_session_players
 from ..settings import GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -248,6 +248,15 @@ def join_game_session(code: str, req: PlayerJoinRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if session is None:
         raise HTTPException(status_code=404, detail="Session code not found")
+    session_code = str(session.get("code", code)).strip().upper()
+    try:
+        manager.broadcast_sync(session_code, {
+            "type": "player_joined",
+            "team_name": (req.team_name or "").strip(),
+            "players": list_session_players(session_code),
+        })
+    except Exception:
+        pass
     return session
 
 
@@ -989,6 +998,7 @@ def _build_sync_message(
     return {
         "type": "sync",
         "total_rounds": total_rounds,
+        "players": list_session_players(session_code),
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "quality_sensitivity": quality_sensitivity,

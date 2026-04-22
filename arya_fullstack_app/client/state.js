@@ -22,6 +22,7 @@ export const state = {
   auditProbability: 0.0,
   catchProbability: 1.0,
   numSegments: 0,
+  joinedTeams: [],
 };
 
 export const LOBBY_STORAGE_KEY = "arya_lobby_state_v1";
@@ -56,6 +57,9 @@ export const el = {
   gameScreen: document.getElementById("gameScreen"),
   gameMainGrid: document.getElementById("gameMainGrid"),
   adminObserverCard: document.getElementById("adminObserverCard"),
+  sessionPlayersCard: document.getElementById("sessionPlayersCard"),
+  sessionPlayersHint: document.getElementById("sessionPlayersHint"),
+  sessionPlayersList: document.getElementById("sessionPlayersList"),
   sessionSummary: document.getElementById("sessionSummary"),
   adminGameName: document.getElementById("adminGameName"),
   adminName: document.getElementById("adminName"),

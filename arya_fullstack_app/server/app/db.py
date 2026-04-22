@@ -76,6 +76,16 @@ def fetch_session_player(session_token: str, team_name_normalized: str):
     )
 
 
+def fetch_session_players(session_token: str):
+    return (
+        get_client()
+        .table("session_players")
+        .select("team_name")
+        .eq("session_token", session_token)
+        .execute()
+    )
+
+
 def insert_session_player(payload: dict):
     return get_client().table("session_players").insert(payload).execute()
 

@@ -7,6 +7,7 @@ import {
   clearRoundTimer,
 } from "./round.js";
 import { loadLeaderboard } from "./leaderboard.js";
+import { setJoinedTeams } from "./sessionPlayers.js";
 
 let _ws = null;
 let _reconnectTimer = null;
@@ -81,6 +82,7 @@ function _handleMessage(msg) {
   const { type } = msg;
 
   if (type === "sync") {
+    setJoinedTeams(msg.players || []);
     applyBetaFromServer(msg);
     _applyRoundFromMsg(msg);
     if (msg.match && state.role === "admin") {
@@ -106,6 +108,11 @@ function _handleMessage(msg) {
       }
     }
     loadLeaderboard();
+    return;
+  }
+
+  if (type === "player_joined") {
+    setJoinedTeams(msg.players || []);
     return;
   }
 

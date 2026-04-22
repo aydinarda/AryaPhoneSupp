@@ -71,6 +71,9 @@ export function renderAdminControls() {
   if (el.matchingResultCard) {
     el.matchingResultCard.classList.toggle("hidden", !isAdmin);
   }
+  if (el.sessionPlayersCard) {
+    el.sessionPlayersCard.classList.toggle("hidden", !isAdmin);
+  }
   renderAdminPlayMode();
 }
 
