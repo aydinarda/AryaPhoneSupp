@@ -122,12 +122,12 @@ export function renderMatchingResult(payload, options = {}) {
   const auditedCount = Object.values(audit.audited_suppliers || {}).filter(Boolean).length;
   const auditSummary = audit.audit_probability > 0
     ? [
-        `Investigation: p=${audit.audit_probability ?? 0}, detection=${audit.catch_probability ?? 0}`,
+        `Scrutiny: level=${audit.audit_probability ?? 0}, detection=${audit.catch_probability ?? 0}`,
         `Investigated suppliers: ${auditedCount}`,
         caughtSuppliers.length ? `Violations found: ${caughtSuppliers.join(", ")}` : "Violations found: none",
         auditExcludedTeams.length ? `Investigation excluded: ${auditExcludedTeams.join(", ")}` : null,
       ].filter(Boolean).join("  |  ")
-    : "Investigation: off";
+    : "Scrutiny: off";
 
   el.matchingResultText.textContent = [
     `Solver: ${meta.solver || "-"}`,

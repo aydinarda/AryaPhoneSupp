@@ -116,7 +116,7 @@ async function applyBetaDistribution() {
     renderConfigInfo();
     if (el.adminRoundHint) {
       const dStr = Number.isFinite(d) && d > 0 ? ` δ=${d}` : "";
-      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}; investigation=${formatProbability(savedAuditProbability)}, detection=${formatProbability(savedCatchProbability)}).`;
+      el.adminRoundHint.textContent = `Distribution applied (α=${a}, β=${b}${dStr}; scrutiny=${formatProbability(savedAuditProbability)}, detection=${formatProbability(savedCatchProbability)}).`;
     }
   } catch (e) {
     if (el.adminRoundHint) el.adminRoundHint.textContent = `Failed to apply: ${e.message}`;

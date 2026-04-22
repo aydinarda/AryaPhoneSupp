@@ -38,7 +38,7 @@ export function renderConfigInfo() {
     `Cost scale: ${fmtConfigValue(config.cost_scale)}`,
     `Price sensitivity: ${fmtConfigValue(state.delta)}`,
     `Sustainability sensitivity: ${fmtConfigValue(state.qualitySensitivity)}`,
-    `Audit prob.: ${fmtConfigValue(state.auditProbability)}`,
+    `Scrutiny level: ${fmtConfigValue(state.auditProbability)}`,
     `Detection prob.: ${fmtConfigValue(state.catchProbability)}`,
   ].join(" | ");
 }
