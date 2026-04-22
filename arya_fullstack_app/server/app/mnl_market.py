@@ -27,7 +27,8 @@ Realized outcomes per buyer across all segments:
     demand_{i,s}          = (d_s / sum d) * share_{i,s}
     realized_earnings_i   = sum_s  price_i * demand_{i,s}
     realized_utility_i    = sum_s  U_{i,s} * demand_{i,s}
-                            (net utility, including the price/delta term)
+                            where U_{i,s} is reported after an affine transform
+                            that shifts utilities positive and scales them
 
 Computation is parallelised across segments via ThreadPoolExecutor.
 """
@@ -111,10 +112,16 @@ def _quality_score(profile: BuyerProfile, segment: "CustomerSegment") -> float:
     )
 
 
-# Additive constant applied to every logit to shift realized_utility into positive range.
-# Invariant: adding the same constant to all options leaves softmax shares unchanged
-# (max_logit increases by the same amount, so u - max_logit is identical).
+# Affine transform applied to every MNL utility before softmax/reporting.
+# The +base shift keeps utilities positive, and the multiplicative scale
+# increases logit separation while preserving rank order.
 _U_BASE: float = 50.0
+_U_SCALE: float = 1.2
+
+
+def _transform_utility(raw_utility: float) -> float:
+    """Shift utilities positive, then scale them for MNL and reporting."""
+    return (raw_utility + _U_BASE) * _U_SCALE
 
 
 def _net_utility_score(
@@ -123,12 +130,12 @@ def _net_utility_score(
     delta: float,
     quality_sensitivity: float,
 ) -> float:
-    """Net utility used by MNL: quality utility minus price disutility, plus base shift."""
-    return (
+    """Net utility used by MNL after the shared positive-shift and scaling transform."""
+    raw_utility = (
         quality_sensitivity * _quality_score(profile, segment)
         - delta * segment.w_cost * profile.price_per_user
-        + _U_BASE
     )
+    return _transform_utility(raw_utility)
 
 
 def _mnl_for_segment(
