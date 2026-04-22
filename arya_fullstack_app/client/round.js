@@ -118,14 +118,14 @@ export function renderMatchingResult(payload, options = {}) {
   const teamFinancials = financials.team_financials || [];
   const audit = payload.audit || {};
   const caughtSuppliers = audit.caught_suppliers || [];
-  const auditExcludedTeams = audit.excluded_teams || [];
+  const auditPenalizedTeams = audit.penalized_teams || [];
   const auditedCount = Object.values(audit.audited_suppliers || {}).filter(Boolean).length;
   const auditSummary = audit.audit_probability > 0
     ? [
         `Scrutiny: level=${audit.audit_probability ?? 0}, detection=${audit.catch_probability ?? 0}`,
         `Investigated suppliers: ${auditedCount}`,
         caughtSuppliers.length ? `Violations found: ${caughtSuppliers.join(", ")}` : "Violations found: none",
-        auditExcludedTeams.length ? `Investigation excluded: ${auditExcludedTeams.join(", ")}` : null,
+        auditPenalizedTeams.length ? `Audit penalty ${audit.utility_penalty ?? -10}: ${auditPenalizedTeams.join(", ")}` : null,
       ].filter(Boolean).join("  |  ")
     : "Scrutiny: off";
 

@@ -59,6 +59,7 @@ class BuyerProfile:
     price_per_user: float
     avg_env: float
     avg_social: float
+    utility_adjustment: float = 0.0
 
     @classmethod
     def from_buyer(cls, buyer: "Buyer") -> "BuyerProfile":
@@ -67,6 +68,7 @@ class BuyerProfile:
             price_per_user=buyer.price_per_user or 0.0,
             avg_env=buyer.avg_env or 0.0,
             avg_social=buyer.avg_social or 0.0,
+            utility_adjustment=0.0,
         )
 
 
@@ -135,7 +137,7 @@ def _net_utility_score(
         quality_sensitivity * _quality_score(profile, segment)
         - delta * segment.w_cost * profile.price_per_user
     )
-    return _transform_utility(raw_utility)
+    return _transform_utility(raw_utility) + profile.utility_adjustment
 
 
 def _mnl_for_segment(

@@ -250,9 +250,8 @@ def run_simulation(alpha: float, beta: float, label: str) -> list[pd.DataFrame]:
             catch_probability=CATCH_PROB,
             rng=rng,
         )
-        audit_excl_set = set(audit_result.excluded_teams)
-        for t in audit_excl_set:
-            team_profiles.pop(t, None)
+        audit_penalty_map = {team: float(penalty) for team, penalty in audit_result.team_penalties.items()}
+        audit_pen_set = set(audit_result.penalized_teams)
 
         # MNL market
         active_profiles = [
@@ -261,6 +260,7 @@ def run_simulation(alpha: float, beta: float, label: str) -> list[pd.DataFrame]:
                 price_per_user=tp["price_per_user"],
                 avg_env=tp["avg_env"],
                 avg_social=tp["avg_social"],
+                utility_adjustment=audit_penalty_map.get(tp["team"], 0.0),
             )
             for tp in team_profiles.values()
         ]
@@ -272,7 +272,7 @@ def run_simulation(alpha: float, beta: float, label: str) -> list[pd.DataFrame]:
         for s in students:
             a             = avg_attrs(s.picks)
             feasible      = is_feasible(s.picks)
-            audit_excl    = s.name in audit_excl_set
+            audit_excl    = s.name in audit_pen_set
             avg_env       = a.get("env_risk",    0.0)
             avg_social    = a.get("social_risk", 0.0)
             avg_strategic = a.get("strategic",   0.0)

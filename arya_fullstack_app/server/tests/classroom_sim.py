@@ -269,14 +269,13 @@ for round_no in range(1, N_ROUNDS + 1):
         catch_probability=CATCH_PROB,
         rng=RNG,
     )
-    audit_excl_set = set(audit_result.excluded_teams)
-    for t in audit_excl_set:
-        team_profiles.pop(t, None)
+    audit_penalty_map = {team: float(penalty) for team, penalty in audit_result.team_penalties.items()}
+    audit_pen_set = set(audit_result.penalized_teams)
 
     print(
         f"  Active: {len(team_profiles):2d}  |  "
         f"Infeasible: {len(infeasible_names):2d}  |  "
-        f"Audit excl.: {len(audit_excl_set):2d}"
+        f"Audit penalized: {len(audit_pen_set):2d}"
     )
 
     # MNL market
@@ -286,6 +285,7 @@ for round_no in range(1, N_ROUNDS + 1):
             price_per_user=tp["price_per_user"],
             avg_env=tp["avg_env"],
             avg_social=tp["avg_social"],
+            utility_adjustment=audit_penalty_map.get(tp["team"], 0.0),
         )
         for tp in team_profiles.values()
     ]

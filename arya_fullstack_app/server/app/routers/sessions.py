@@ -468,7 +468,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
     quality_sensitivity = _session_quality_sensitivity.get(normalized_code, float(GAME_SETTINGS.quality_sensitivity))
 
-    # --- Audit phase (runs before MNL; caught teams are excluded from market) ---
+    # --- Audit phase (runs before MNL; caught teams receive a utility penalty) ---
     from ..audit import run_audit
 
     audit_ap, audit_cp = _session_audit.get(
@@ -503,11 +503,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         catch_probability=audit_cp,
         rng=random.Random(match_seed),
     )
-    if audit_result.excluded_teams:
-        excluded_infeasible_teams = sorted(set(excluded_infeasible_teams + audit_result.excluded_teams))
-        for t in audit_result.excluded_teams:
-            team_profiles.pop(t, None)
-    audit_excluded_teams = sorted(audit_result.excluded_teams)
+    audit_penalized_teams = sorted(audit_result.penalized_teams)
+    audit_penalties = {str(team): _safe_float(penalty) for team, penalty in audit_result.team_penalties.items()}
 
     # --- MNL demand model ---
     from ..beta_density import BetaDensity
@@ -535,6 +532,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             price_per_user=_safe_float(team_profiles[tid]["price_per_user"], GAME_SETTINGS.price_per_user),
             avg_env=_safe_float(team_profiles[tid]["avg_env"]),
             avg_social=_safe_float(team_profiles[tid]["avg_social"]),
+            utility_adjustment=_safe_float(audit_penalties.get(tid, 0.0)),
         )
         for tid in team_ids_sorted
     ]
@@ -562,6 +560,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost
         realized_profit = effective_users * unit_margin
         realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
+        audit_penalty = _safe_float(audit_penalties.get(tid, 0.0))
         round_profit_total += realized_profit
 
         avg_env       = _safe_float(profile.get("avg_env"),       0.0)
@@ -593,6 +592,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "avg_cost_score": avg_cost,
             "unit_margin": round(unit_margin, 2),
             "avg_strategic": round(avg_strategic, 3),
+            "audit_penalty": round(audit_penalty, 3),
+            "penalized_by_audit": audit_penalty != 0.0,
             "excluded_by_audit": False,
             "excluded_by_infeasible": False,
         })
@@ -623,8 +624,10 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
                 original_profile.get("avg_strategic", original_row.get("strategic_avg")),
                 0.0,
             ),
-            "excluded_by_audit": tid in audit_excluded_teams,
-            "excluded_by_infeasible": tid not in audit_excluded_teams,
+            "audit_penalty": 0.0,
+            "penalized_by_audit": False,
+            "excluded_by_audit": False,
+            "excluded_by_infeasible": True,
         })
 
     team_round_financials.sort(key=lambda row: str(row.get("team") or ""))
@@ -665,6 +668,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
             "formula": "realized_profit = effective_users(MNL) x unit_margin",
             "delta": round(delta, 4),
             "quality_sensitivity": round(quality_sensitivity, 4),
+            "audit_utility_penalty": float(audit_result.utility_penalty),
             "beta_alpha": beta_alpha,
             "beta_beta": beta_beta,
             "cost_scale": float(GAME_SETTINGS.cost_scale),
@@ -862,6 +866,8 @@ def get_session_leaderboard(
                     "realized_utility": float(tf.get("realized_utility") or 0.0),
                     "buyer_utility": float(tf.get("buyer_utility") or 0.0),
                     "price_per_user": float(tf.get("price_per_user") or 0.0),
+                    "audit_penalty": float(tf.get("audit_penalty") or 0.0),
+                    "penalized_by_audit": bool(tf.get("penalized_by_audit")),
                     "excluded_by_audit": bool(tf.get("excluded_by_audit")),
                     "excluded_by_infeasible": bool(tf.get("excluded_by_infeasible")),
                 }

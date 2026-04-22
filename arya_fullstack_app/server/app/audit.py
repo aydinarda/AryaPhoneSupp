@@ -16,9 +16,9 @@ the admin can trigger an audit phase with two probabilistic parameters:
                       No false positives — a clean supplier is never caught.
 
 If a supplier is audited and its violation is discovered, every team that
-selected that supplier is immediately marked as NOT FEASIBLE and excluded from
-the MNL market calculation.  The audit outcome is revealed only at the end of
-the round so it cannot be exploited in advance or leak into optimisation models.
+selected that supplier receives a utility penalty in the MNL market calculation.
+The audit outcome is revealed only at the end of the round so it cannot be
+exploited in advance or leak into optimisation models.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from typing import Any
+
+
+AUDIT_UTILITY_PENALTY: float = -10.0
 
 
 @dataclass
@@ -48,7 +51,16 @@ class AuditResult:
     # team_name -> list of caught supplier IDs they selected
     team_violations: dict[str, list[str]] = field(default_factory=dict)
 
-    # teams disqualified from market matching this round
+    # Utility delta applied to teams whose suppliers were caught in audit.
+    utility_penalty: float = AUDIT_UTILITY_PENALTY
+
+    # teams receiving the audit utility penalty this round
+    penalized_teams: list[str] = field(default_factory=list)
+
+    # team_name -> penalty applied in MNL utility
+    team_penalties: dict[str, float] = field(default_factory=dict)
+
+    # Legacy field kept for payload compatibility; teams are no longer excluded.
     excluded_teams: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,6 +71,9 @@ class AuditResult:
             "violation_flags": self.violation_flags,
             "caught_suppliers": sorted(self.caught_suppliers),
             "team_violations": self.team_violations,
+            "utility_penalty": self.utility_penalty,
+            "penalized_teams": self.penalized_teams,
+            "team_penalties": self.team_penalties,
             "excluded_teams": self.excluded_teams,
         }
 
@@ -87,7 +102,7 @@ def run_audit(
 
     Returns
     -------
-    AuditResult with caught suppliers and excluded teams populated.
+    AuditResult with caught suppliers and penalized teams populated.
     """
     if rng is None:
         rng = random.Random()
@@ -129,7 +144,7 @@ def run_audit(
             if caught:
                 result.caught_suppliers.add(sid)
 
-    # Determine which teams are excluded
+    # Determine which teams are penalized
     for team in sorted(team_profiles):
         profile = team_profiles[team]
         caught_picks = [
@@ -138,7 +153,8 @@ def run_audit(
         ]
         if caught_picks:
             result.team_violations[team] = caught_picks
-            result.excluded_teams.append(team)
+            result.penalized_teams.append(team)
+            result.team_penalties[team] = result.utility_penalty
 
-    result.excluded_teams.sort()
+    result.penalized_teams.sort()
     return result

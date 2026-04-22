@@ -63,3 +63,25 @@ def test_scale_changes_mnl_shares_after_positive_shift() -> None:
 
     assert shares["A"] == pytest.approx(expected)
     assert shares["B"] == pytest.approx(1.0 - expected)
+
+
+def test_utility_adjustment_reduces_share_and_realized_utility() -> None:
+    profiles = [
+        BuyerProfile(team_name="Penalized", price_per_user=10.0, avg_env=1.0, avg_social=1.0, utility_adjustment=-10.0),
+        BuyerProfile(team_name="Clean", price_per_user=10.0, avg_env=1.0, avg_social=1.0, utility_adjustment=0.0),
+    ]
+    segments = [
+        CustomerSegment(
+            segment_id="S1",
+            density=1.0,
+            w_env=1.0,
+            w_social=1.0,
+            w_cost=0.0,
+        )
+    ]
+
+    result = run_mnl_market(profiles, segments, delta=1.0, quality_sensitivity=1.0)
+    shares = result.segment_allocations[0].shares
+
+    assert shares["Penalized"] < shares["Clean"]
+    assert result.buyer_results["Penalized"].realized_utility < result.buyer_results["Clean"].realized_utility

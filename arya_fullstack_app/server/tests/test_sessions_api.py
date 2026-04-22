@@ -373,9 +373,9 @@ def test_round_current_hides_delta_unless_explicitly_requested(monkeypatch) -> N
     assert admin_resp.json()["delta"] == pytest.approx(0.42)
 
 
-def test_round_matching_audit_excludes_caught_teams(monkeypatch) -> None:
-    """When audit_probability=1.0 and catch_probability=1.0, every flagged supplier
-    is always caught.  Teams using that supplier must be excluded from MNL matching."""
+def test_round_matching_audit_penalizes_caught_teams(monkeypatch) -> None:
+    """When audit_probability=1.0 and catch_probability=1.0, caught teams stay in the
+    market but receive a utility penalty that lowers their demand share."""
 
     # CAM1 carries a child_labor violation
     suppliers = _make_mock_suppliers().copy()
@@ -408,23 +408,29 @@ def test_round_matching_audit_excludes_caught_teams(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
 
-    # CaughtTeam should be in excluded list
-    assert "CaughtTeam" in payload["excluded_infeasible_teams"]
+    assert "CaughtTeam" not in payload["excluded_infeasible_teams"]
     assert "CleanTeam" not in payload["excluded_infeasible_teams"]
 
     matching = payload["matching"]
     assert "CleanTeam" in matching["market_to_users"]
-    assert "CaughtTeam" not in matching["market_to_users"]
+    assert "CaughtTeam" in matching["market_to_users"]
+    assert matching["market_to_users"]["CaughtTeam"] < matching["market_to_users"]["CleanTeam"]
 
-    # Audit block in the matching result must name the caught supplier and team
+    team_fins = {row["team"]: row for row in matching["round_financials"]["team_financials"]}
+    assert team_fins["CaughtTeam"]["audit_penalty"] == pytest.approx(-10.0)
+    assert team_fins["CaughtTeam"]["penalized_by_audit"] is True
+    assert team_fins["CleanTeam"]["audit_penalty"] == pytest.approx(0.0)
+
+    # Audit block in the matching result must name the caught supplier and penalized team
     audit = matching["audit"]
     assert "CAM1" in audit["caught_suppliers"]
-    assert "CaughtTeam" in audit["excluded_teams"]
-    assert "CleanTeam" not in audit["excluded_teams"]
+    assert "CaughtTeam" in audit["penalized_teams"]
+    assert "CleanTeam" not in audit["penalized_teams"]
+    assert audit["team_penalties"]["CaughtTeam"] == pytest.approx(-10.0)
 
 
-def test_round_matching_audit_off_does_not_exclude_flagged_teams(monkeypatch) -> None:
-    """When audit_probability=0.0 (default), no team is excluded by the audit phase
+def test_round_matching_audit_off_does_not_penalize_flagged_teams(monkeypatch) -> None:
+    """When audit_probability=0.0 (default), no team is penalized by the audit phase
     even if their suppliers carry child_labor / banned_chem violations."""
 
     suppliers = _make_mock_suppliers().copy()
@@ -451,13 +457,13 @@ def test_round_matching_audit_off_does_not_exclude_flagged_teams(monkeypatch) ->
     assert response.status_code == 200
     payload = response.json()
 
-    # No teams excluded by audit
+    # No teams penalized by audit
     assert "FlaggedButSafe" not in payload["excluded_infeasible_teams"]
     assert "FlaggedButSafe" in payload["matching"]["market_to_users"]
 
     audit = payload["matching"]["audit"]
     assert audit["caught_suppliers"] == []
-    assert audit["excluded_teams"] == []
+    assert audit["penalized_teams"] == []
 
 
 def test_start_round_respects_configured_round_limit(monkeypatch) -> None:

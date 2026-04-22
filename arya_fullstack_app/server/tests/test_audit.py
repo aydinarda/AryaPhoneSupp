@@ -5,8 +5,8 @@ Each round, the admin can configure:
   audit_probability  — P(a unique supplier is selected for investigation)
   catch_probability  — P(violation found | investigated AND has violation)
 
-If a supplier is caught, every team that selected it is excluded from MNL
-matching for that round (the "regulatory exclusion" mechanic).
+If a supplier is caught, every team that selected it receives a utility penalty
+in MNL matching for that round.
 """
 from __future__ import annotations
 
@@ -54,15 +54,15 @@ class TestAuditDisabled:
         result = run_audit(profiles, df, audit_probability=0.0, catch_probability=1.0)
 
         assert result.caught_suppliers == set()
-        assert result.excluded_teams == []
+        assert result.penalized_teams == []
         assert result.audited_suppliers == {}
         assert result.violation_flags == {}
 
-    def test_audit_off_no_teams_excluded_even_with_violations(self):
+    def test_audit_off_no_teams_penalized_even_with_violations(self):
         profiles = _team_profiles(("TeamX", ["FLAGGED"]))
         df = _suppliers([{"supplier_id": "FLAGGED", "child_labor": 1.0, "banned_chem": 1.0}])
         result = run_audit(profiles, df, audit_probability=0.0, catch_probability=1.0)
-        assert "TeamX" not in result.excluded_teams
+        assert "TeamX" not in result.penalized_teams
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,8 @@ class TestAuditAlwaysTriggers:
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(0))
         assert "S_BAD" in result.caught_suppliers
-        assert "T1" in result.excluded_teams
+        assert "T1" in result.penalized_teams
+        assert result.team_penalties["T1"] == pytest.approx(-10.0)
 
     def test_clean_supplier_never_caught_even_at_full_probability(self):
         """No false positives: a clean supplier cannot be caught regardless of probabilities."""
@@ -85,7 +86,7 @@ class TestAuditAlwaysTriggers:
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(42))
         assert "S_CLEAN" not in result.caught_suppliers
-        assert "T2" not in result.excluded_teams
+        assert "T2" not in result.penalized_teams
 
     def test_banned_chem_flag_also_triggers_catch(self):
         profiles = _team_profiles(("T3", ["S_BC"]))
@@ -93,19 +94,19 @@ class TestAuditAlwaysTriggers:
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(7))
         assert "S_BC" in result.caught_suppliers
-        assert "T3" in result.excluded_teams
+        assert "T3" in result.penalized_teams
 
-    def test_multiple_teams_sharing_caught_supplier_all_excluded(self):
-        """If two teams both pick the same caught supplier, both are excluded."""
+    def test_multiple_teams_sharing_caught_supplier_all_penalized(self):
+        """If two teams both pick the same caught supplier, both are penalized."""
         profiles = _team_profiles(("Alpha", ["SHARED"]), ("Beta", ["SHARED"]))
         df = _suppliers([{"supplier_id": "SHARED", "child_labor": 1.0}])
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(0))
-        assert "Alpha" in result.excluded_teams
-        assert "Beta" in result.excluded_teams
+        assert "Alpha" in result.penalized_teams
+        assert "Beta" in result.penalized_teams
 
-    def test_only_teams_using_caught_supplier_are_excluded(self):
-        """Teams whose suppliers are clean are never caught collaterally."""
+    def test_only_teams_using_caught_supplier_are_penalized(self):
+        """Teams whose suppliers are clean are never penalized collaterally."""
         profiles = _team_profiles(
             ("Dirty", ["S_BAD"]),
             ("Clean", ["S_CLEAN"]),
@@ -116,8 +117,8 @@ class TestAuditAlwaysTriggers:
         ])
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(0))
-        assert "Dirty" in result.excluded_teams
-        assert "Clean" not in result.excluded_teams
+        assert "Dirty" in result.penalized_teams
+        assert "Clean" not in result.penalized_teams
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +135,7 @@ class TestCatchProbabilityZero:
         assert result.audited_suppliers.get("FLAGGED") is True
         # But nothing was caught
         assert "FLAGGED" not in result.caught_suppliers
-        assert "TZ" not in result.excluded_teams
+        assert "TZ" not in result.penalized_teams
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ class TestAuditResultSerialization:
                            rng=random.Random(0))
         d = result.to_dict()
         for key in ("audit_probability", "catch_probability", "audited_suppliers",
-                    "violation_flags", "caught_suppliers", "team_violations", "excluded_teams"):
+                    "violation_flags", "caught_suppliers", "team_violations", "penalized_teams", "team_penalties"):
             assert key in d, f"Missing key in to_dict output: {key!r}"
 
     def test_caught_suppliers_is_sorted_list(self):
@@ -164,13 +165,13 @@ class TestAuditResultSerialization:
         d = result.to_dict()
         assert d["caught_suppliers"] == sorted(d["caught_suppliers"])
 
-    def test_excluded_teams_is_sorted_list(self):
+    def test_penalized_teams_is_sorted_list(self):
         profiles = _team_profiles(("Zebra", ["S1"]), ("Alpha", ["S1"]))
         df = _suppliers([{"supplier_id": "S1", "child_labor": 1.0}])
         result = run_audit(profiles, df, audit_probability=1.0, catch_probability=1.0,
                            rng=random.Random(0))
         d = result.to_dict()
-        assert d["excluded_teams"] == sorted(d["excluded_teams"])
+        assert d["penalized_teams"] == sorted(d["penalized_teams"])
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +191,7 @@ class TestReproducibility:
         r2 = run_audit(profiles, df, audit_probability=0.5, catch_probability=0.7,
                        rng=random.Random(123))
         assert r1.caught_suppliers == r2.caught_suppliers
-        assert r1.excluded_teams == r2.excluded_teams
+        assert r1.penalized_teams == r2.penalized_teams
 
     def test_different_seeds_can_give_different_outcomes(self):
         """With intermediate probabilities, different seeds should eventually diverge."""
