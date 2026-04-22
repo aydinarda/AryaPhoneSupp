@@ -9,8 +9,8 @@ from .optimization_controller import Policy
 class GameSettings:
     served_users: int = 8          # used for profit calc (profit_total = served_users * profit_per_user)
     default_market_capacity: int = 8  # max users matched per team product
-    env_cap: float = 2.75
-    social_cap: float = 3.0
+    env_cap: float = 3.25
+    social_cap: float = 3.5
     cost_scale: float = 10.0
     price_per_user: float = 100.0
     # MNL utility: U = quality_sensitivity * quality - delta * w_cost * price

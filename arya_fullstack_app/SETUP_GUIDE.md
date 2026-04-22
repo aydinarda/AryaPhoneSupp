@@ -70,8 +70,8 @@ After the server starts, open: **http://localhost:8000**
 
 The following constraints are checked automatically:
 
-- **Avg Environmental Risk** ≤ 2.75
-- **Avg Social Risk** ≤ 3.0
+- **Avg Environmental Risk** ≤ 3.25
+- **Avg Social Risk** ≤ 3.5
 - At least **1 supplier** must be selected
 
 ## 📊 Metrics
@@ -126,4 +126,3 @@ For deployment:
 **Leaderboard is empty?**
 - No one may have submitted yet
 - Check the database connection
-
