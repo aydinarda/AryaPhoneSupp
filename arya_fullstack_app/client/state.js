@@ -44,6 +44,8 @@ export const el = {
   teamName: document.getElementById("teamName"),
   playerName: null,
   pricePerUser: document.getElementById("pricePerUser"),
+  btnManual: document.getElementById("btnManual"),
+  btnSubmit: document.getElementById("btnSubmit"),
   leaderboardBody: document.querySelector("#leaderboardTable tbody"),
   turnLeaderboardBody: document.querySelector("#turnLeaderboardTable tbody"),
   cumulativeMatchBody: document.querySelector("#cumulativeMatchTable tbody"),

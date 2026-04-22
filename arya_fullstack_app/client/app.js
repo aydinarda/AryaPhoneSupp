@@ -149,8 +149,8 @@ function setupEvents() {
     el.playerJoinCode.value = (el.playerJoinCode.value || "").toUpperCase();
   });
 
-  document.getElementById("btnManual").addEventListener("click", runManual);
-  document.getElementById("btnSubmit").addEventListener("click", submit);
+  if (el.btnManual) el.btnManual.addEventListener("click", runManual);
+  if (el.btnSubmit) el.btnSubmit.addEventListener("click", submit);
   document.getElementById("btnRefreshLeaderboard").addEventListener("click", async () => {
     await loadLeaderboard();
   });

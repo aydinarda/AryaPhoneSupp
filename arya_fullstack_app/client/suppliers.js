@@ -2,6 +2,8 @@ import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import { api, fmt, metricCard } from "./api.js";
 import { loadLeaderboard } from "./leaderboard.js";
 
+let _submitResetTimer = null;
+
 function persistSelectionState() {
   try {
     const raw = localStorage.getItem(LOBBY_STORAGE_KEY);
@@ -61,6 +63,45 @@ export function renderMetrics(target, title, payload) {
     metricCard("Avg Cost", fmt(m.avg_cost)),
     metricCard("# Suppliers", String(Math.round(Number(m.k || 0)))),
   ].join("");
+}
+
+function setStatus(message, tone = "info") {
+  if (!el.statusText) return;
+  el.statusText.textContent = message || "";
+  el.statusText.className = `hint submission-feedback is-${tone}`;
+}
+
+function resetSubmitButton() {
+  if (_submitResetTimer) {
+    clearTimeout(_submitResetTimer);
+    _submitResetTimer = null;
+  }
+  if (!el.btnSubmit) return;
+  el.btnSubmit.disabled = false;
+  el.btnSubmit.textContent = "Submit";
+  el.btnSubmit.classList.remove("is-submitting", "is-submitted");
+}
+
+function markSubmitPending() {
+  if (!el.btnSubmit) return;
+  if (_submitResetTimer) {
+    clearTimeout(_submitResetTimer);
+    _submitResetTimer = null;
+  }
+  el.btnSubmit.disabled = true;
+  el.btnSubmit.textContent = "Submitting...";
+  el.btnSubmit.classList.add("is-submitting");
+  el.btnSubmit.classList.remove("is-submitted");
+}
+
+function flashSubmitSuccess() {
+  if (!el.btnSubmit) return;
+  el.btnSubmit.textContent = "Submitted";
+  el.btnSubmit.classList.remove("is-submitting");
+  el.btnSubmit.classList.add("is-submitted");
+  _submitResetTimer = setTimeout(() => {
+    resetSubmitButton();
+  }, 1100);
 }
 
 const CATEGORY_LABELS = {
@@ -242,7 +283,7 @@ export function currentPayload() {
 export async function runManual() {
   const missing = getMissingCategories();
   if (missing.length > 0) {
-    el.statusText.textContent = `You haven't selected from: ${missing.join(", ")}.`;
+    setStatus(`You haven't selected from: ${missing.join(", ")}.`, "warning");
     return;
   }
   try {
@@ -251,20 +292,24 @@ export async function runManual() {
       body: JSON.stringify(currentPayload()),
     });
     renderMetrics(el.manualMetrics, "Manual", res);
-    el.statusText.textContent = res.feasible
-      ? "Selection satisfies risk constraints."
-      : "Selection violates risk constraints.";
+    setStatus(
+      res.feasible
+        ? "Selection satisfies risk constraints."
+        : "Selection violates risk constraints.",
+      res.feasible ? "success" : "error",
+    );
   } catch (e) {
-    el.statusText.textContent = e.message;
+    setStatus(e.message, "error");
   }
 }
 
 export async function submit() {
   const missing = getMissingCategories();
   if (missing.length > 0) {
-    el.statusText.textContent = `You haven't selected from: ${missing.join(", ")}.`;
+    setStatus(`You haven't selected from: ${missing.join(", ")}.`, "warning");
     return;
   }
+  markSubmitPending();
   try {
     const sessionMeta = [
       state.role ? `role:${state.role}` : null,
@@ -284,9 +329,11 @@ export async function submit() {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    el.statusText.textContent = "Submission saved to leaderboard!";
+    setStatus("Submission saved to leaderboard!", "success");
+    flashSubmitSuccess();
     loadLeaderboard().catch(() => {});
   } catch (e) {
-    el.statusText.textContent = e.message;
+    resetSubmitButton();
+    setStatus(e.message, "error");
   }
 }

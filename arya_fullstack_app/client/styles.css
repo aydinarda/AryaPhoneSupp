@@ -109,6 +109,7 @@ button.primary {
 }
 button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 button.primary:active { background: #1e40af; }
+button:disabled { cursor: wait; opacity: .95; }
 
 button.btn-sm { padding: 6px 10px; font-size: 12px; }
 button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
@@ -308,6 +309,49 @@ button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fe
   flex-wrap: wrap;
 }
 .actions-row button { flex: 1; }
+
+.submission-feedback {
+  min-height: 20px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: color .18s ease, opacity .18s ease, transform .18s ease;
+}
+.submission-feedback.is-success {
+  color: var(--success);
+}
+.submission-feedback.is-error {
+  color: var(--danger);
+}
+.submission-feedback.is-warning {
+  color: #b45309;
+}
+.submission-feedback.is-info {
+  color: var(--text-secondary);
+}
+
+.submit-cta {
+  position: relative;
+  transition:
+    background-color .2s ease,
+    border-color .2s ease,
+    box-shadow .2s ease,
+    transform .2s ease,
+    filter .2s ease;
+}
+.submit-cta.is-submitting {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 4px rgba(37,99,235,.12), 0 10px 20px rgba(37,99,235,.16);
+  transform: translateY(-1px) scale(1.01);
+  filter: saturate(1.05);
+}
+.submit-cta.is-submitted {
+  background: var(--success);
+  border-color: var(--success);
+  box-shadow: 0 0 0 4px rgba(22,163,74,.12), 0 10px 20px rgba(22,163,74,.14);
+  transform: translateY(-1px) scale(1.01);
+}
 
 /* ===== SUPPLIER LIST ===== */
 .suppliers-card { display: flex; flex-direction: column; gap: 0; min-height: 400px; }
