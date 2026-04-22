@@ -215,6 +215,7 @@ function _applyBetaFromData(data) {
   const a = Number(data.beta_alpha);
   const b = Number(data.beta_beta);
   const d = Number(data.delta);
+  const isAdmin = state.role === "admin";
   const q = Number(data.quality_sensitivity ?? state.qualitySensitivity);
   const auditProbability = Number(data.audit_probability ?? state.auditProbability);
   const catchProbability = Number(data.catch_probability ?? state.catchProbability);
@@ -236,11 +237,11 @@ function _applyBetaFromData(data) {
   if (!_betaInputsInitialized) {
     if (el.betaAlpha)  el.betaAlpha.value  = state.betaAlpha;
     if (el.betaBeta)   el.betaBeta.value   = state.betaBeta;
-    if (el.deltaInput) el.deltaInput.value = state.delta;
+    if (el.deltaInput && dOk) el.deltaInput.value = state.delta;
     if (el.qualitySensitivityInput) el.qualitySensitivityInput.value = state.qualitySensitivity;
     if (el.auditProbabilityInput) el.auditProbabilityInput.value = state.auditProbability;
     if (el.catchProbabilityInput) el.catchProbabilityInput.value = state.catchProbability;
-    _betaInputsInitialized = true;
+    if (!isAdmin || dOk) _betaInputsInitialized = true;
   }
   if (chartChanged) {
     renderDistributionChart();
@@ -254,7 +255,8 @@ export function applyBetaFromServer(data) {
 export async function loadCurrentRound() {
   if (!state.gameCode) return;
   try {
-    const data = await api(`/api/sessions/${state.gameCode}/rounds/current`);
+    const query = state.role === "admin" ? "?include_delta=true" : "";
+    const data = await api(`/api/sessions/${state.gameCode}/rounds/current${query}`);
     const r = data.round;
     state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
     _applyBetaFromData(data);

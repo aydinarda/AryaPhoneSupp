@@ -351,6 +351,28 @@ def test_session_config_audit_defaults_to_zero_and_one(monkeypatch) -> None:
     assert data["catch_probability"] == pytest.approx(1.0)
 
 
+def test_round_current_hides_delta_unless_explicitly_requested(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{"session_code": code, "session_token": "tok-delta",
+                   "is_active": True, "number_of_rounds": 5}]
+        ),
+    )
+    monkeypatch.setattr(sessions_router, "fetch_active_round",
+                        lambda t: SimpleNamespace(data=[]))
+    monkeypatch.setitem(sessions_router._session_delta, "HIDE01", 0.42)
+
+    public_resp = client.get("/api/sessions/HIDE01/rounds/current")
+    assert public_resp.status_code == 200
+    assert "delta" not in public_resp.json()
+
+    admin_resp = client.get("/api/sessions/HIDE01/rounds/current?include_delta=true")
+    assert admin_resp.status_code == 200
+    assert admin_resp.json()["delta"] == pytest.approx(0.42)
+
+
 def test_round_matching_audit_excludes_caught_teams(monkeypatch) -> None:
     """When audit_probability=1.0 and catch_probability=1.0, every flagged supplier
     is always caught.  Teams using that supplier must be excluded from MNL matching."""

@@ -36,7 +36,6 @@ export function renderConfigInfo() {
   el.configInfo.textContent = [
     `Risk caps: avg env ≤ ${fmtConfigValue(config.env_cap)}, avg social ≤ ${fmtConfigValue(config.social_cap)}`,
     `Cost scale: ${fmtConfigValue(config.cost_scale)}`,
-    `Price sensitivity: ${fmtConfigValue(state.delta)}`,
     `Sustainability sensitivity: ${fmtConfigValue(state.qualitySensitivity)}`,
     `Scrutiny level: ${fmtConfigValue(state.auditProbability)}`,
     `Detection prob.: ${fmtConfigValue(state.catchProbability)}`,

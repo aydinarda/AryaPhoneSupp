@@ -309,7 +309,7 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
 
 
 @router.get("/{code}/rounds/current")
-def get_current_round(code: str) -> dict[str, Any]:
+def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
     session_row = _get_session_row_or_404(code)
     session_token = str(session_row.get("session_token", "")).strip()
     if not session_token:
@@ -320,19 +320,24 @@ def get_current_round(code: str) -> dict[str, Any]:
     rows = _extract_rows(fetch_active_round(session_token))
     normalized = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    delta = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
     quality_sensitivity = _session_quality_sensitivity.get(normalized, float(GAME_SETTINGS.quality_sensitivity))
     audit_probability, catch_probability = _session_audit.get(
         normalized, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
     )
 
+    payload: dict[str, Any] = {
+        "total_rounds": total_rounds,
+        "beta_alpha": beta_alpha,
+        "beta_beta": beta_beta,
+        "quality_sensitivity": quality_sensitivity,
+        "audit_probability": audit_probability,
+        "catch_probability": catch_probability,
+    }
+    if include_delta:
+        payload["delta"] = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
+
     if not rows:
-        return {
-            "round": None, "total_rounds": total_rounds,
-            "beta_alpha": beta_alpha, "beta_beta": beta_beta, "delta": delta,
-            "quality_sensitivity": quality_sensitivity,
-            "audit_probability": audit_probability, "catch_probability": catch_probability,
-        }
+        return {"round": None, **payload}
 
     row = rows[0]
     return {
@@ -344,13 +349,7 @@ def get_current_round(code: str) -> dict[str, Any]:
             "ends_at": row.get("ends_at"),
             "is_active": bool(row.get("is_active", False)),
         },
-        "total_rounds": total_rounds,
-        "beta_alpha": beta_alpha,
-        "beta_beta": beta_beta,
-        "delta": delta,
-        "quality_sensitivity": quality_sensitivity,
-        "audit_probability": audit_probability,
-        "catch_probability": catch_probability,
+        **payload,
     }
 
 
@@ -949,7 +948,6 @@ def _build_sync_message(
 ) -> dict[str, Any]:
     total_rounds = _resolve_total_rounds(session_row)
     beta_alpha, beta_beta = _session_beta.get(session_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    delta = _session_delta.get(session_code, float(GAME_SETTINGS.price_sensitivity_delta))
     quality_sensitivity = _session_quality_sensitivity.get(session_code, float(GAME_SETTINGS.quality_sensitivity))
     audit_probability, catch_probability = _session_audit.get(
         session_code, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
@@ -987,7 +985,6 @@ def _build_sync_message(
         "total_rounds": total_rounds,
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
-        "delta": delta,
         "quality_sensitivity": quality_sensitivity,
         "audit_probability": audit_probability,
         "catch_probability": catch_probability,
