@@ -4,6 +4,7 @@ import {
   clearRoundSync,
   clearRoundTimer,
   renderAdminControls,
+  renderMatchingResult,
   renderRoundSummary,
   resetBetaInputsInitialized,
   startRoundSync,
@@ -12,10 +13,61 @@ import { connectWS, disconnectWS } from "./ws.js";
 import { loadBenchmarkSummary } from "./benchmark.js";
 import { renderDistributionChart } from "./distribution.js";
 import { clearJoinedTeams, renderSessionPlayers } from "./sessionPlayers.js";
+import { loadLeaderboard } from "./leaderboard.js";
+import { renderSuppliers } from "./suppliers.js";
+
+const SESSION_RESTORE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+function canAutoRestore(saved) {
+  if (!saved || !saved.role || !saved.gameCode) return false;
+  const savedAt = Date.parse(String(saved.savedAt || ""));
+  if (!Number.isFinite(savedAt)) return false;
+  return (Date.now() - savedAt) <= SESSION_RESTORE_WINDOW_MS;
+}
+
+function resetSessionState() {
+  state.role = null;
+  state.adminPlays = false;
+  state.gameCode = "";
+  state.gameName = "";
+  state.totalRounds = null;
+  state.trialRounds = 2;
+  state.scheduledRounds = null;
+  state.roundNo = null;
+  state.roundEndsAt = null;
+  state.latestRows = [];
+}
+
+function prepareFreshSessionView() {
+  disconnectWS();
+  clearRoundSync();
+  clearRoundTimer();
+  clearJoinedTeams();
+  resetSessionState();
+  state.selected = {};
+  renderSuppliers();
+  if (el.manualMetrics) el.manualMetrics.innerHTML = "";
+  if (el.statusText) {
+    el.statusText.textContent = "";
+    el.statusText.className = "hint submission-feedback";
+  }
+  if (el.adminRoundHint) el.adminRoundHint.textContent = "";
+  renderMatchingResult(null, { force: true });
+  renderSessionSummary();
+  renderRoundSummary();
+
+  const panelGame = document.getElementById("panel-game");
+  const panelLeaderboard = document.getElementById("panel-leaderboard");
+  const leaderboardTab = document.querySelector('.tab[data-tab="leaderboard"]');
+  if (panelGame) panelGame.classList.remove("hidden");
+  if (panelLeaderboard) panelLeaderboard.classList.add("hidden");
+  if (leaderboardTab) leaderboardTab.classList.remove("active");
+}
 
 export function saveLobbyState() {
   const selected = state.selected instanceof Set ? [...state.selected] : state.selected;
   const payload = {
+    savedAt: new Date().toISOString(),
     role: state.role,
     adminPlays: state.adminPlays,
     gameCode: state.gameCode,
@@ -34,10 +86,11 @@ export function loadLobbyState() {
     const raw = localStorage.getItem(LOBBY_STORAGE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
+    const restorable = canAutoRestore(saved);
     if (saved.gameName) el.adminGameName.value = saved.gameName;
     if (saved.totalRounds) el.adminNumberOfRounds.value = saved.totalRounds;
     if (saved.trialRounds != null && el.adminTrialRounds) el.adminTrialRounds.value = saved.trialRounds;
-    if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
+    if (restorable && saved.gameCode) el.playerJoinCode.value = saved.gameCode;
     if (saved.teamName) el.playerTeamName.value = saved.teamName;
     if (Array.isArray(saved.selected)) {
       state.selected = new Set(saved.selected.map(String));
@@ -52,7 +105,7 @@ export function loadLobbyState() {
 }
 
 export function restoreSavedGame(saved) {
-  if (!saved || !saved.role || !saved.gameCode) return false;
+  if (!canAutoRestore(saved)) return false;
   const role = saved.role === "admin" ? "admin" : saved.role === "player" ? "player" : null;
   if (!role) return false;
 
@@ -97,6 +150,8 @@ export function renderSessionSummary() {
 export function showGameScreen() {
   el.lobbyScreen.classList.add("hidden");
   el.gameScreen.classList.remove("hidden");
+  renderMatchingResult(null, { force: true });
+  if (el.adminRoundHint) el.adminRoundHint.textContent = "";
   renderSessionSummary();
   renderAdminControls();
   renderSessionPlayers();
@@ -105,6 +160,7 @@ export function showGameScreen() {
   connectWS(state.gameCode);
   startRoundSync();
   loadBenchmarkSummary();
+  loadLeaderboard().catch(() => {});
 }
 
 export function showLobbyScreen() {
@@ -112,10 +168,17 @@ export function showLobbyScreen() {
   clearRoundSync();
   clearRoundTimer();
   clearJoinedTeams();
+  resetSessionState();
   el.gameScreen.classList.add("hidden");
   el.lobbyScreen.classList.remove("hidden");
   el.teamName.readOnly = false;
   el.teamName.style.opacity = "";
+  el.teamName.value = "";
+  renderMatchingResult(null, { force: true });
+  renderSessionSummary();
+  renderRoundSummary();
+  saveLobbyState();
+  loadLeaderboard().catch(() => {});
 }
 
 export function clearLobbyHints() {
@@ -148,6 +211,7 @@ export async function enterAsAdmin() {
       }),
     });
 
+    prepareFreshSessionView();
     resetBetaInputsInitialized();
     state.role = "admin";
     state.adminPlays = false;
@@ -188,6 +252,7 @@ export async function enterAsPlayer() {
       method: "POST",
       body: JSON.stringify({ team_name: teamName }),
     });
+    prepareFreshSessionView();
     resetBetaInputsInitialized();
     state.role = "player";
     state.adminPlays = false;
