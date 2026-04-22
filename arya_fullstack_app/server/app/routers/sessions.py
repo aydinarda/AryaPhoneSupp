@@ -90,22 +90,50 @@ def _parse_bool_flag(value: Any) -> bool:
     return False
 
 
-def _resolve_total_rounds(session_row: dict[str, Any]) -> int:
-    raw = session_row.get("number_of_rounds", None)
+def _resolve_session_int(
+    session_row: dict[str, Any],
+    key: str,
+    default: int,
+    minimum: int,
+) -> int:
+    raw = session_row.get(key, None)
     if raw is None:
         code = str(session_row.get("session_code", "")).strip().upper()
         if code:
             try:
                 session = get_session(code)
                 if session is not None:
-                    raw = session.get("number_of_rounds", None)
+                    raw = session.get(key, None)
             except Exception:
                 raw = None
 
     try:
-        return max(1, int(raw))
+        return max(minimum, int(raw))
     except Exception:
-        return 5
+        return default
+
+
+def _resolve_total_rounds(session_row: dict[str, Any]) -> int:
+    return _resolve_session_int(session_row, "number_of_rounds", default=5, minimum=1)
+
+
+def _resolve_trial_rounds(session_row: dict[str, Any]) -> int:
+    return _resolve_session_int(session_row, "trial_rounds", default=2, minimum=0)
+
+
+def _resolve_scheduled_rounds(session_row: dict[str, Any]) -> int:
+    return _resolve_total_rounds(session_row) + _resolve_trial_rounds(session_row)
+
+
+def _build_round_phase(round_no: int, trial_rounds: int) -> dict[str, Any]:
+    round_index = max(0, int(round_no))
+    practice_rounds = max(0, int(trial_rounds))
+    is_trial_round = practice_rounds > 0 and 0 < round_index <= practice_rounds
+    return {
+        "is_trial_round": is_trial_round,
+        "trial_round_no": round_index if is_trial_round else None,
+        "game_round_no": max(0, round_index - practice_rounds),
+    }
 
 
 def _submission_is_feasible(row: dict[str, Any]) -> bool:
@@ -217,7 +245,7 @@ def _build_team_product_profiles(
 @router.post("")
 def create_game_session(req: SessionCreateRequest) -> dict[str, Any]:
     try:
-        return create_session(req.game_name, req.admin_name or "Admin", req.number_of_rounds)
+        return create_session(req.game_name, req.admin_name or "Admin", req.number_of_rounds, req.trial_rounds)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -268,6 +296,8 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Session token not found")
 
     total_rounds = _resolve_total_rounds(session_row)
+    trial_rounds = _resolve_trial_rounds(session_row)
+    scheduled_rounds = _resolve_scheduled_rounds(session_row)
 
     duration_seconds = req.duration_seconds if req.duration_seconds and req.duration_seconds > 0 else None
     market_capacity = max(1, _safe_int(req.market_capacity, 1))
@@ -275,11 +305,12 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
     latest_rows = _extract_rows(fetch_latest_round(session_token))
     next_round_no = _safe_int(latest_rows[0].get("round_no"), 0) + 1 if latest_rows else 1
 
-    if next_round_no > total_rounds:
+    if next_round_no > scheduled_rounds:
         raise HTTPException(
             status_code=400,
-            detail=f"Configured round limit reached ({total_rounds}). No more rounds can be started.",
+            detail=f"Configured round limit reached ({scheduled_rounds}). No more rounds can be started.",
         )
+    phase = _build_round_phase(next_round_no, trial_rounds)
 
     now = datetime.now(UTC)
     ends_at = (now + timedelta(seconds=duration_seconds)).isoformat() if duration_seconds else None
@@ -300,6 +331,9 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
         "type": "round_started",
         "round_no": next_round_no,
         "total_rounds": total_rounds,
+        "trial_rounds": trial_rounds,
+        "scheduled_rounds": scheduled_rounds,
+        **phase,
         "duration_seconds": duration_seconds,
         "ends_at": ends_at,
     })
@@ -308,7 +342,12 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
         "session_code": session_code,
         "round_no": next_round_no,
         "total_rounds": total_rounds,
-        "remaining_rounds": max(0, total_rounds - next_round_no),
+        "trial_rounds": trial_rounds,
+        "scheduled_rounds": scheduled_rounds,
+        "remaining_rounds": max(0, scheduled_rounds - next_round_no),
+        "remaining_game_rounds": max(0, total_rounds - phase["game_round_no"]),
+        "remaining_trial_rounds": max(0, trial_rounds - (phase["trial_round_no"] or 0)),
+        **phase,
         "duration_seconds": duration_seconds,
         "market_capacity": market_capacity,
         "started_at": now.isoformat(),
@@ -325,6 +364,8 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Session token not found")
 
     total_rounds = _resolve_total_rounds(session_row)
+    trial_rounds = _resolve_trial_rounds(session_row)
+    scheduled_rounds = _resolve_scheduled_rounds(session_row)
 
     rows = _extract_rows(fetch_active_round(session_token))
     normalized = (code or "").strip().upper()
@@ -336,6 +377,8 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         "total_rounds": total_rounds,
+        "trial_rounds": trial_rounds,
+        "scheduled_rounds": scheduled_rounds,
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,
         "quality_sensitivity": quality_sensitivity,
@@ -349,9 +392,11 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
         return {"round": None, **payload}
 
     row = rows[0]
+    phase = _build_round_phase(_safe_int(row.get("round_no")), trial_rounds)
     return {
         "round": {
             "round_no": _safe_int(row.get("round_no")),
+            **phase,
             "duration_seconds": row.get("duration_seconds"),
             "market_capacity": max(1, _safe_int(row.get("market_capacity"), GAME_SETTINGS.default_market_capacity)),
             "started_at": row.get("created_at"),
@@ -881,8 +926,10 @@ def get_session_leaderboard(
                     "excluded_by_infeasible": bool(tf.get("excluded_by_infeasible")),
                 }
 
+    trial_rounds = _resolve_trial_rounds(session_row)
+
     # --- Build per-round entries ---
-    all_rounds = sorted(round_financials.keys())
+    all_rounds = sorted(rno for rno in round_financials.keys() if rno > trial_rounds)
     turn_leaderboard: list[dict[str, Any]] = []
 
     for rno in all_rounds:
@@ -895,6 +942,7 @@ def get_session_leaderboard(
             entry = {
                 "team": team,
                 "round_no": rno,
+                "game_round_no": max(1, rno - trial_rounds),
                 "price_per_user": round(m["price_per_user"], 2),
                 "realized_profit": round(m["realized_profit"], 2),
                 "market_share_pct": round(m["demand_share"] * 100.0, 2),
@@ -944,6 +992,7 @@ def get_session_leaderboard(
 
     return {
         "rounds": all_rounds,
+        "trial_rounds": trial_rounds,
         "available_metrics": sorted(_LEADERBOARD_METRICS),
         "x_metric": x_metric,
         "y_metric": y_metric,
@@ -962,6 +1011,8 @@ def _build_sync_message(
     session_row: dict[str, Any],
 ) -> dict[str, Any]:
     total_rounds = _resolve_total_rounds(session_row)
+    trial_rounds = _resolve_trial_rounds(session_row)
+    scheduled_rounds = _resolve_scheduled_rounds(session_row)
     beta_alpha, beta_beta = _session_beta.get(session_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     quality_sensitivity = _session_quality_sensitivity.get(session_code, float(GAME_SETTINGS.quality_sensitivity))
     audit_probability, catch_probability = _session_audit.get(
@@ -975,8 +1026,10 @@ def _build_sync_message(
         if active_rows:
             r = active_rows[0]
             round_no = _safe_int(r.get("round_no"))
+            phase = _build_round_phase(round_no, trial_rounds)
             round_data = {
                 "round_no": round_no,
+                **phase,
                 "duration_seconds": r.get("duration_seconds"),
                 "market_capacity": max(1, _safe_int(r.get("market_capacity"), GAME_SETTINGS.default_market_capacity)),
                 "started_at": r.get("created_at"),
@@ -998,6 +1051,8 @@ def _build_sync_message(
     return {
         "type": "sync",
         "total_rounds": total_rounds,
+        "trial_rounds": trial_rounds,
+        "scheduled_rounds": scheduled_rounds,
         "players": list_session_players(session_code),
         "beta_alpha": beta_alpha,
         "beta_beta": beta_beta,

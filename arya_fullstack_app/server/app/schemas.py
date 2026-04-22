@@ -26,6 +26,7 @@ class SessionCreateRequest(BaseModel):
     game_name: str
     admin_name: Optional[str] = None
     number_of_rounds: int = Field(default=5, ge=1, le=100)
+    trial_rounds: int = Field(default=2, ge=0, le=100)
 
 
 class PlayerJoinRequest(BaseModel):

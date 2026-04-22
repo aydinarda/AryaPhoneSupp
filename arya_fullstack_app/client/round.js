@@ -6,6 +6,36 @@ import { renderConfigInfo } from "./suppliers.js";
 let _latestMatchCompletedAt = "";
 let _matchInFlight = false;
 
+function applyRoundMeta(data) {
+  const totalRounds = Number(data?.total_rounds);
+  const trialRounds = Number(data?.trial_rounds);
+  const scheduledRounds = Number(data?.scheduled_rounds);
+  if (Number.isFinite(totalRounds)) state.totalRounds = totalRounds;
+  if (Number.isFinite(trialRounds)) state.trialRounds = trialRounds;
+  if (Number.isFinite(scheduledRounds)) state.scheduledRounds = scheduledRounds;
+  else if (Number.isFinite(totalRounds) || Number.isFinite(trialRounds)) {
+    state.scheduledRounds = (state.totalRounds || 0) + (state.trialRounds || 0);
+  }
+}
+
+function roundLabel(roundNo) {
+  const trialRounds = Math.max(0, Number(state.trialRounds) || 0);
+  const totalRounds = Math.max(0, Number(state.totalRounds) || 0);
+  if (!roundNo) {
+    if (trialRounds > 0 && totalRounds > 0) {
+      return `Round: not started | Trial ${trialRounds} + Game ${totalRounds}`;
+    }
+    const suffix = totalRounds ? ` / ${totalRounds}` : "";
+    return `Round: not started${suffix}`;
+  }
+  if (trialRounds > 0 && roundNo <= trialRounds) {
+    return `Trial Round ${roundNo}/${trialRounds}`;
+  }
+  const gameRoundNo = Math.max(1, roundNo - trialRounds);
+  const suffix = totalRounds ? `/${totalRounds}` : "";
+  return `Round ${gameRoundNo}${suffix}`;
+}
+
 export function clearRoundTimer() {
   if (state.roundTimerId) {
     clearInterval(state.roundTimerId);
@@ -22,24 +52,23 @@ export function clearRoundSync() {
 
 export function renderRoundSummary() {
   if (!el.roundSummary) return;
-  if (!state.roundNo) {
-    const suffix = state.totalRounds ? ` / ${state.totalRounds}` : "";
-    el.roundSummary.textContent = `Round: not started${suffix}`;
-    return;
-  }
+  const label = roundLabel(state.roundNo);
 
   if (state.roundEndsAt) {
     const diffMs = new Date(state.roundEndsAt).getTime() - Date.now();
     const sec = Math.max(0, Math.floor(diffMs / 1000));
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
-    const suffix = state.totalRounds ? `/${state.totalRounds}` : "";
-    el.roundSummary.textContent = `Round ${state.roundNo}${suffix} | Remaining: ${mm}:${ss}`;
+    el.roundSummary.textContent = `${label} | Remaining: ${mm}:${ss}`;
     return;
   }
 
-  const suffix = state.totalRounds ? `/${state.totalRounds}` : "";
-  el.roundSummary.textContent = `Round ${state.roundNo}${suffix} | No timer`;
+  if (!state.roundNo) {
+    el.roundSummary.textContent = label;
+    return;
+  }
+
+  el.roundSummary.textContent = `${label} | No timer`;
 }
 
 export function startRoundCountdown() {
@@ -261,7 +290,7 @@ export async function loadCurrentRound() {
     const query = state.role === "admin" ? "?include_delta=true" : "";
     const data = await api(`/api/sessions/${state.gameCode}/rounds/current${query}`);
     const r = data.round;
-    state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
+    applyRoundMeta(data);
     _applyBetaFromData(data);
     if (!r) {
       state.roundNo = null;
@@ -331,14 +360,23 @@ export async function startRound() {
       }),
     });
     state.roundNo = data.round_no;
-    state.totalRounds = Number.isFinite(Number(data.total_rounds)) ? Number(data.total_rounds) : state.totalRounds;
+    applyRoundMeta(data);
     state.roundEndsAt = data.ends_at || null;
     renderRoundSummary();
     startRoundCountdown();
     if (el.adminRoundHint) {
-      const remaining = Number.isFinite(Number(data.remaining_rounds)) ? Number(data.remaining_rounds) : null;
-      const suffix = remaining === null ? "" : ` Remaining rounds: ${remaining}.`;
-      el.adminRoundHint.textContent = `Round ${data.round_no} started.${suffix}`;
+      const gameRoundsLeft = Number.isFinite(Number(data.remaining_game_rounds)) ? Number(data.remaining_game_rounds) : null;
+      const trialRoundsLeft = Number.isFinite(Number(data.remaining_trial_rounds)) ? Number(data.remaining_trial_rounds) : null;
+      if (data.is_trial_round) {
+        const suffix = trialRoundsLeft === null ? "" : ` Trial rounds left: ${trialRoundsLeft}.`;
+        el.adminRoundHint.textContent = `Trial round ${data.trial_round_no} started.${suffix}`;
+      } else if (Number(data.game_round_no) === 1 && Number(state.trialRounds) > 0) {
+        const suffix = gameRoundsLeft === null ? "" : ` Remaining scored rounds: ${gameRoundsLeft}.`;
+        el.adminRoundHint.textContent = `Scores reset. Game round 1 started.${suffix}`;
+      } else {
+        const suffix = gameRoundsLeft === null ? "" : ` Remaining scored rounds: ${gameRoundsLeft}.`;
+        el.adminRoundHint.textContent = `Game round ${data.game_round_no} started.${suffix}`;
+      }
     }
   } catch (e) {
     if (el.adminRoundHint) {

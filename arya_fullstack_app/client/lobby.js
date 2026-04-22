@@ -21,6 +21,7 @@ export function saveLobbyState() {
     gameCode: state.gameCode,
     gameName: state.gameName,
     totalRounds: state.totalRounds,
+    trialRounds: state.trialRounds,
     teamName: (el.teamName.value || "").trim(),
     playerName: (el.teamName.value || "").trim(),
     selected,
@@ -35,6 +36,7 @@ export function loadLobbyState() {
     const saved = JSON.parse(raw);
     if (saved.gameName) el.adminGameName.value = saved.gameName;
     if (saved.totalRounds) el.adminNumberOfRounds.value = saved.totalRounds;
+    if (saved.trialRounds != null && el.adminTrialRounds) el.adminTrialRounds.value = saved.trialRounds;
     if (saved.gameCode) el.playerJoinCode.value = saved.gameCode;
     if (saved.teamName) el.playerTeamName.value = saved.teamName;
     if (Array.isArray(saved.selected)) {
@@ -59,6 +61,8 @@ export function restoreSavedGame(saved) {
   state.gameCode = String(saved.gameCode || "").trim().toUpperCase();
   state.gameName = String(saved.gameName || "").trim();
   state.totalRounds = Number.isFinite(Number(saved.totalRounds)) ? Number(saved.totalRounds) : state.totalRounds;
+  state.trialRounds = Number.isFinite(Number(saved.trialRounds)) ? Number(saved.trialRounds) : state.trialRounds;
+  state.scheduledRounds = (state.totalRounds || 0) + (state.trialRounds || 0);
 
   el.playerJoinCode.value = state.gameCode;
   if (role === "admin") {
@@ -85,8 +89,9 @@ export function renderSessionSummary() {
   const roleLabel = state.role === "admin" ? "Admin" : "Player";
   const gameLabel = state.gameName || "Untitled Game";
   const codeLabel = state.gameCode || "------";
+  const trialLabel = Number.isFinite(Number(state.trialRounds)) ? ` | Trial: ${state.trialRounds}` : "";
   const roundsLabel = state.totalRounds ? ` | Rounds: ${state.totalRounds}` : "";
-  el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}${roundsLabel}`;
+  el.sessionSummary.textContent = `${roleLabel} | ${gameLabel} | Code: ${codeLabel}${trialLabel}${roundsLabel}`;
 }
 
 export function showGameScreen() {
@@ -124,6 +129,8 @@ export async function enterAsAdmin() {
   const adminName = (el.adminName.value || "").trim();
   const roundsRaw = Number(el.adminNumberOfRounds?.value || 5);
   const numberOfRounds = Number.isFinite(roundsRaw) && roundsRaw >= 1 ? Math.floor(roundsRaw) : 5;
+  const trialRoundsRaw = Number(el.adminTrialRounds?.value ?? 2);
+  const trialRounds = Number.isFinite(trialRoundsRaw) && trialRoundsRaw >= 0 ? Math.floor(trialRoundsRaw) : 2;
 
   if (!gameName) {
     el.adminHint.textContent = "Please enter a game name.";
@@ -137,6 +144,7 @@ export async function enterAsAdmin() {
         game_name: gameName,
         admin_name: adminName || "Admin",
         number_of_rounds: numberOfRounds,
+        trial_rounds: trialRounds,
       }),
     });
 
@@ -146,6 +154,8 @@ export async function enterAsAdmin() {
     state.gameName = session.game_name;
     state.gameCode = session.code;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : numberOfRounds;
+    state.trialRounds = Number.isFinite(Number(session.trial_rounds)) ? Number(session.trial_rounds) : trialRounds;
+    state.scheduledRounds = state.totalRounds + state.trialRounds;
     clearJoinedTeams();
     el.teamName.value = session.game_name;
     el.teamName.readOnly = true;
@@ -184,6 +194,8 @@ export async function enterAsPlayer() {
     state.gameCode = session.code;
     state.gameName = session.game_name;
     state.totalRounds = Number.isFinite(Number(session.number_of_rounds)) ? Number(session.number_of_rounds) : state.totalRounds;
+    state.trialRounds = Number.isFinite(Number(session.trial_rounds)) ? Number(session.trial_rounds) : state.trialRounds;
+    state.scheduledRounds = state.totalRounds + state.trialRounds;
     clearJoinedTeams();
     el.teamName.value = teamName;
     el.teamName.readOnly = true;

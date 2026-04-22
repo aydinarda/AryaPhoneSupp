@@ -21,6 +21,7 @@ _sessions_lock = Lock()
 _sessions: dict[str, dict[str, Any]] = {}
 _session_players: dict[str, dict[str, str]] = {}  # code -> {normalized_team_name: display_name}
 _session_round_limits: dict[str, int] = {}
+_session_trial_round_limits: dict[str, int] = {}
 
 
 def _use_db_backend() -> bool:
@@ -51,17 +52,28 @@ def _normalize_team_name(team_name: str) -> str:
 
 def _from_db_row(row: dict[str, Any]) -> dict[str, Any]:
     rounds = row.get("number_of_rounds", None)
+    trial_rounds = row.get("trial_rounds", None)
     code = str(row.get("session_code", ""))
     if rounds is None and code in _session_round_limits:
         rounds = _session_round_limits[code]
+    if trial_rounds is None and code in _session_trial_round_limits:
+        trial_rounds = _session_trial_round_limits[code]
     if rounds is None:
         rounds = 5
+    if trial_rounds is None:
+        trial_rounds = 2
     try:
         rounds = int(rounds)
     except Exception:
         rounds = 5
+    try:
+        trial_rounds = int(trial_rounds)
+    except Exception:
+        trial_rounds = 2
     if rounds < 1:
         rounds = 1
+    if trial_rounds < 0:
+        trial_rounds = 0
 
     return {
         "code": row.get("session_code", ""),
@@ -69,6 +81,7 @@ def _from_db_row(row: dict[str, Any]) -> dict[str, Any]:
         "admin_name": row.get("admin_name", "Admin"),
         "session_token": row.get("session_token", ""),
         "number_of_rounds": rounds,
+        "trial_rounds": trial_rounds,
     }
 
 
@@ -102,15 +115,23 @@ def _is_recoverable_db_error(exc: Exception) -> bool:
     )
 
 
-def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -> dict[str, Any]:
+def create_session(
+    game_name: str,
+    admin_name: str,
+    number_of_rounds: int = 5,
+    trial_rounds: int = 2,
+) -> dict[str, Any]:
     cleaned_game_name = (game_name or "").strip()
     cleaned_admin_name = (admin_name or "Admin").strip() or "Admin"
     rounds = int(number_of_rounds)
+    practice_rounds = int(trial_rounds)
 
     if not cleaned_game_name:
         raise ValueError("Game name is required")
     if rounds < 1:
         raise ValueError("number_of_rounds must be at least 1")
+    if practice_rounds < 0:
+        raise ValueError("trial_rounds must be zero or higher")
 
     if _use_db_backend():
         for _ in range(100):
@@ -122,6 +143,7 @@ def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -
                 "game_name": cleaned_game_name,
                 "admin_name": cleaned_admin_name,
                 "number_of_rounds": rounds,
+                "trial_rounds": practice_rounds,
                 "is_active": True,
             }
             try:
@@ -140,9 +162,10 @@ def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -
                     "game_name": cleaned_game_name,
                     "admin_name": cleaned_admin_name,
                     "number_of_rounds": rounds,
+                    "trial_rounds": practice_rounds,
                 }
             except Exception as exc:
-                if _is_missing_column_error(exc, "number_of_rounds"):
+                if _is_missing_column_error(exc, "number_of_rounds") or _is_missing_column_error(exc, "trial_rounds"):
                     legacy_payload = {
                         "session_code": code,
                         "session_token": token,
@@ -150,14 +173,30 @@ def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -
                         "admin_name": cleaned_admin_name,
                         "is_active": True,
                     }
+                    if not _is_missing_column_error(exc, "number_of_rounds"):
+                        legacy_payload["number_of_rounds"] = rounds
+                    if not _is_missing_column_error(exc, "trial_rounds"):
+                        legacy_payload["trial_rounds"] = practice_rounds
                     try:
                         insert_game_session(legacy_payload)
-                        _session_round_limits[code] = rounds
+                        if "number_of_rounds" not in legacy_payload:
+                            _session_round_limits[code] = rounds
+                        if "trial_rounds" not in legacy_payload:
+                            _session_trial_round_limits[code] = practice_rounds
+                        try:
+                            insert_session_player({
+                                "session_token": token,
+                                "team_name": cleaned_game_name,
+                                "team_name_normalized": _normalize_team_name(cleaned_game_name),
+                            })
+                        except Exception:
+                            pass
                         return {
                             "code": code,
                             "game_name": cleaned_game_name,
                             "admin_name": cleaned_admin_name,
                             "number_of_rounds": rounds,
+                            "trial_rounds": practice_rounds,
                         }
                     except Exception as legacy_exc:
                         if _is_recoverable_db_error(legacy_exc):
@@ -178,6 +217,7 @@ def create_session(game_name: str, admin_name: str, number_of_rounds: int = 5) -
             "game_name": cleaned_game_name,
             "admin_name": cleaned_admin_name,
             "number_of_rounds": rounds,
+            "trial_rounds": practice_rounds,
         }
         _sessions[code] = payload
         return payload
@@ -203,6 +243,7 @@ def get_session(code: str) -> dict[str, Any] | None:
                 "game_name": session["game_name"],
                 "admin_name": session["admin_name"],
                 "number_of_rounds": session.get("number_of_rounds", 5),
+                "trial_rounds": session.get("trial_rounds", 2),
             }
         except Exception as exc:
             if _is_recoverable_db_error(exc):
@@ -308,6 +349,7 @@ def join_session(code: str, team_name: str) -> dict[str, Any] | None:
                 "game_name": session["game_name"],
                 "admin_name": session["admin_name"],
                 "number_of_rounds": session.get("number_of_rounds", 5),
+                "trial_rounds": session.get("trial_rounds", 2),
             }
         except ValueError:
             raise

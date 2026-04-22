@@ -42,7 +42,7 @@ function renderLastRound(turnRows) {
     .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
 
   el.turnLeaderboardBody.innerHTML = lastRows.map((r, idx) => `<tr>
-    <td>${r.round_no ?? "-"}</td>
+    <td>${r.game_round_no ?? r.round_no ?? "-"}</td>
     <td>${idx + 1}</td>
     <td><strong>${r.team ?? "-"}</strong></td>
     <td>${r.price_per_user != null ? `$${Number(r.price_per_user).toFixed(0)}` : "-"}</td>

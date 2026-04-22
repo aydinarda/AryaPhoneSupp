@@ -4,6 +4,8 @@ export const state = {
   adminPlays: false,
   gameCode: "",
   gameName: "",
+  trialRounds: 2,
+  scheduledRounds: null,
   suppliers: [],
   selected: {}, // { [category]: supplier_id } — one entry per category
   config: null,
@@ -64,6 +66,7 @@ export const el = {
   adminGameName: document.getElementById("adminGameName"),
   adminName: document.getElementById("adminName"),
   adminNumberOfRounds: document.getElementById("adminNumberOfRounds"),
+  adminTrialRounds: document.getElementById("adminTrialRounds"),
   btnEnterAdmin: document.getElementById("btnEnterAdmin"),
   adminHint: document.getElementById("adminHint"),
   playerJoinCode: document.getElementById("playerJoinCode"),

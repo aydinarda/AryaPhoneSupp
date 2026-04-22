@@ -26,6 +26,7 @@ def test_admin_can_create_session() -> None:
     assert payload["game_name"] == "Round 1"
     assert payload["admin_name"] == "Instructor"
     assert payload["number_of_rounds"] == 5
+    assert payload["trial_rounds"] == 2
     assert isinstance(payload["code"], str)
     assert len(payload["code"]) == 6
 
@@ -39,6 +40,17 @@ def test_admin_can_set_number_of_rounds() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["number_of_rounds"] == 7
+
+
+def test_admin_can_set_trial_rounds() -> None:
+    response = client.post(
+        "/api/sessions",
+        json={"game_name": "Trial Config", "admin_name": "Instructor", "trial_rounds": 4},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trial_rounds"] == 4
 
 
 def test_player_can_join_existing_session_code() -> None:
@@ -291,7 +303,7 @@ def test_leaderboard_averages_use_completed_game_round_count(monkeypatch) -> Non
         sessions_router,
         "fetch_game_session_by_code",
         lambda code: SimpleNamespace(
-            data=[{"session_code": code, "session_token": "tok-lb", "is_active": True, "number_of_rounds": 5}]
+            data=[{"session_code": code, "session_token": "tok-lb", "is_active": True, "number_of_rounds": 5, "trial_rounds": 0}]
         ),
     )
     monkeypatch.setattr(
@@ -358,6 +370,66 @@ def test_leaderboard_averages_use_completed_game_round_count(monkeypatch) -> Non
     assert cumulative["TeamA"]["total_profit"] == pytest.approx(60.0)
     assert cumulative["TeamB"]["rounds_played"] == 4
     assert cumulative["TeamB"]["total_profit"] == pytest.approx(100.0)
+
+
+def test_leaderboard_ignores_trial_rounds_until_real_game_starts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{"session_code": code, "session_token": "tok-trial-lb", "is_active": True, "number_of_rounds": 3, "trial_rounds": 2}]
+        ),
+    )
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_all_matching_results",
+        lambda session_token: SimpleNamespace(data=[
+            {
+                "round_no": 1,
+                "created_at": "2026-04-01T10:00:00+00:00",
+                "result": {"round_financials": {"team_financials": [
+                    {"team": "TeamA", "demand_share": 1.0, "realized_profit": 999, "realized_utility": 50, "buyer_utility": 50, "price_per_user": 100},
+                ]}},
+            },
+            {
+                "round_no": 2,
+                "created_at": "2026-04-02T10:00:00+00:00",
+                "result": {"round_financials": {"team_financials": [
+                    {"team": "TeamA", "demand_share": 1.0, "realized_profit": 999, "realized_utility": 50, "buyer_utility": 50, "price_per_user": 100},
+                ]}},
+            },
+            {
+                "round_no": 3,
+                "created_at": "2026-04-03T10:00:00+00:00",
+                "result": {"round_financials": {"team_financials": [
+                    {"team": "TeamA", "demand_share": 0.4, "realized_profit": 40, "realized_utility": 10, "buyer_utility": 6, "price_per_user": 100},
+                    {"team": "TeamB", "demand_share": 0.6, "realized_profit": 60, "realized_utility": 12, "buyer_utility": 7, "price_per_user": 100},
+                ]}},
+            },
+            {
+                "round_no": 4,
+                "created_at": "2026-04-04T10:00:00+00:00",
+                "result": {"round_financials": {"team_financials": [
+                    {"team": "TeamA", "demand_share": 0.3, "realized_profit": 30, "realized_utility": 9, "buyer_utility": 5, "price_per_user": 100},
+                    {"team": "TeamB", "demand_share": 0.7, "realized_profit": 70, "realized_utility": 14, "buyer_utility": 8, "price_per_user": 100},
+                ]}},
+            },
+        ]),
+    )
+    monkeypatch.setattr(sessions_router, "get_live_matching_results", lambda session_token: [])
+
+    response = client.get("/api/sessions/TRIAL1/leaderboard")
+    assert response.status_code == 200
+    payload = response.json()
+
+    cumulative = {row["team"]: row for row in payload["cumulative_leaderboard"]}
+    assert payload["rounds"] == [3, 4]
+    assert payload["trial_rounds"] == 2
+    assert cumulative["TeamA"]["rounds_played"] == 2
+    assert cumulative["TeamA"]["total_profit"] == pytest.approx(70.0)
+    assert cumulative["TeamB"]["rounds_played"] == 2
+    assert cumulative["TeamB"]["total_profit"] == pytest.approx(130.0)
+    assert payload["turn_leaderboard"][-1]["game_round_no"] == 2
 
 
 def test_round_matching_excludes_category_invalid_submissions(monkeypatch) -> None:
@@ -587,6 +659,7 @@ def test_start_round_respects_configured_round_limit(monkeypatch) -> None:
                     "session_token": "token-1",
                     "is_active": True,
                     "number_of_rounds": 2,
+                    "trial_rounds": 2,
                 }
             ]
         ),
@@ -594,7 +667,7 @@ def test_start_round_respects_configured_round_limit(monkeypatch) -> None:
     monkeypatch.setattr(
         sessions_router,
         "fetch_latest_round",
-        lambda session_token: SimpleNamespace(data=[{"round_no": 2}]),
+        lambda session_token: SimpleNamespace(data=[{"round_no": 4}]),
     )
     monkeypatch.setattr(sessions_router, "close_active_rounds", lambda session_token: None)
 

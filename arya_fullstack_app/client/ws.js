@@ -64,7 +64,11 @@ function _doConnect(sessionCode) {
 function _applyRoundFromMsg(msg) {
   const r = msg.round;
   const totalRounds = Number(msg.total_rounds);
+  const trialRounds = Number(msg.trial_rounds);
+  const scheduledRounds = Number(msg.scheduled_rounds);
   if (Number.isFinite(totalRounds)) state.totalRounds = totalRounds;
+  if (Number.isFinite(trialRounds)) state.trialRounds = trialRounds;
+  if (Number.isFinite(scheduledRounds)) state.scheduledRounds = scheduledRounds;
   if (r) {
     state.roundNo = r.round_no ?? null;
     state.roundEndsAt = r.ends_at || null;
@@ -95,6 +99,8 @@ function _handleMessage(msg) {
     state.roundNo = msg.round_no ?? null;
     state.roundEndsAt = msg.ends_at || null;
     if (Number.isFinite(Number(msg.total_rounds))) state.totalRounds = Number(msg.total_rounds);
+    if (Number.isFinite(Number(msg.trial_rounds))) state.trialRounds = Number(msg.trial_rounds);
+    if (Number.isFinite(Number(msg.scheduled_rounds))) state.scheduledRounds = Number(msg.scheduled_rounds);
     renderRoundSummary();
     startRoundCountdown();
     return;
