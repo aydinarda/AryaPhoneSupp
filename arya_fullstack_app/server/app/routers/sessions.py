@@ -909,20 +909,20 @@ def get_session_leaderboard(
         turn_leaderboard.extend(round_entries)
 
     # --- Build cumulative leaderboard (plain sum across rounds) ---
+    completed_round_count = len(all_rounds)
     cumulative: dict[str, dict[str, Any]] = {}
     for entry in turn_leaderboard:
         team = entry["team"]
         if team not in cumulative:
             cumulative[team] = {
                 "team": team,
-                "rounds_played": 0,
+                "rounds_played": completed_round_count,
                 "total_profit": 0.0,
                 "total_market_share_pct": 0.0,
                 "total_realized_utility": 0.0,
                 "total_buyer_utility": 0.0,
             }
         c = cumulative[team]
-        c["rounds_played"]          += 1
         c["total_profit"]            += entry["realized_profit"]
         c["total_market_share_pct"]  += entry["market_share_pct"]
         c["total_realized_utility"]  += entry["realized_utility"]

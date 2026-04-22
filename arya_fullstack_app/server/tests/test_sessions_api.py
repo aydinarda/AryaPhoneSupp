@@ -286,6 +286,80 @@ def test_round_matching_excludes_risk_infeasible_submissions(monkeypatch) -> Non
     )
 
 
+def test_leaderboard_averages_use_completed_game_round_count(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{"session_code": code, "session_token": "tok-lb", "is_active": True, "number_of_rounds": 5}]
+        ),
+    )
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_all_matching_results",
+        lambda session_token: SimpleNamespace(data=[
+            {
+                "round_no": 1,
+                "created_at": "2026-04-01T10:00:00+00:00",
+                "result": {
+                    "round_financials": {
+                        "team_financials": [
+                            {"team": "TeamA", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                            {"team": "TeamB", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                        ]
+                    }
+                },
+            },
+            {
+                "round_no": 2,
+                "created_at": "2026-04-02T10:00:00+00:00",
+                "result": {
+                    "round_financials": {
+                        "team_financials": [
+                            {"team": "TeamA", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                            {"team": "TeamB", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                        ]
+                    }
+                },
+            },
+            {
+                "round_no": 3,
+                "created_at": "2026-04-03T10:00:00+00:00",
+                "result": {
+                    "round_financials": {
+                        "team_financials": [
+                            {"team": "TeamA", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                            {"team": "TeamB", "demand_share": 0.5, "realized_profit": 20, "realized_utility": 8, "buyer_utility": 4, "price_per_user": 100},
+                        ]
+                    }
+                },
+            },
+            {
+                "round_no": 4,
+                "created_at": "2026-04-04T10:00:00+00:00",
+                "result": {
+                    "round_financials": {
+                        "team_financials": [
+                            {"team": "TeamB", "demand_share": 1.0, "realized_profit": 40, "realized_utility": 16, "buyer_utility": 8, "price_per_user": 100},
+                        ]
+                    }
+                },
+            },
+        ]),
+    )
+    monkeypatch.setattr(sessions_router, "get_live_matching_results", lambda session_token: [])
+
+    response = client.get("/api/sessions/ABCLB1/leaderboard")
+    assert response.status_code == 200
+    payload = response.json()
+
+    cumulative = {row["team"]: row for row in payload["cumulative_leaderboard"]}
+    assert cumulative["TeamA"]["rounds_played"] == 4
+    assert cumulative["TeamA"]["total_profit"] == pytest.approx(60.0)
+    assert cumulative["TeamB"]["rounds_played"] == 4
+    assert cumulative["TeamB"]["total_profit"] == pytest.approx(100.0)
+
+
 def test_round_matching_excludes_category_invalid_submissions(monkeypatch) -> None:
     """Teams whose picks violate category constraints (not 1-per-category) are excluded."""
     _mock_session_round(
