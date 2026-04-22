@@ -3,6 +3,7 @@ import { api, fmt, metricCard } from "./api.js";
 import { loadLeaderboard } from "./leaderboard.js";
 
 let _submitResetTimer = null;
+const INFEASIBLE_SUBMIT_MESSAGE = "Check your submission. It is not feasible!";
 
 function persistSelectionState() {
   try {
@@ -280,6 +281,15 @@ export function currentPayload() {
   };
 }
 
+async function evaluateCurrentSelection() {
+  const res = await api("/api/manual-eval", {
+    method: "POST",
+    body: JSON.stringify(currentPayload()),
+  });
+  renderMetrics(el.manualMetrics, "Manual", res);
+  return res;
+}
+
 export async function runManual() {
   const missing = getMissingCategories();
   if (missing.length > 0) {
@@ -287,11 +297,7 @@ export async function runManual() {
     return;
   }
   try {
-    const res = await api("/api/manual-eval", {
-      method: "POST",
-      body: JSON.stringify(currentPayload()),
-    });
-    renderMetrics(el.manualMetrics, "Manual", res);
+    const res = await evaluateCurrentSelection();
     setStatus(
       res.feasible
         ? "Selection satisfies risk constraints."
@@ -309,8 +315,14 @@ export async function submit() {
     setStatus(`You haven't selected from: ${missing.join(", ")}.`, "warning");
     return;
   }
-  markSubmitPending();
   try {
+    const manual = await evaluateCurrentSelection();
+    if (!manual.feasible) {
+      setStatus(INFEASIBLE_SUBMIT_MESSAGE, "error");
+      return;
+    }
+
+    markSubmitPending();
     const sessionMeta = [
       state.role ? `role:${state.role}` : null,
       state.gameCode ? `code:${state.gameCode}` : null,

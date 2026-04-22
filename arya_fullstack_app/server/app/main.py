@@ -112,6 +112,8 @@ def submit(req: SubmitRequest) -> dict[str, Any]:
         )
         metrics = result["metrics"]
         feasible = result.get("feasible", False)
+        if not feasible:
+            raise ValueError("Check your submission. It is not feasible!")
 
         session_code = (req.session_code or "").strip().upper() or None
 

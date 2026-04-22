@@ -95,3 +95,17 @@ def test_manual_eval_exposes_violation_averages() -> None:
     assert "avg_banned_chem" in m
     assert m["avg_child_labor"] >= 0.0
     assert m["avg_banned_chem"] >= 0.0
+
+
+def test_submit_rejects_infeasible_payload() -> None:
+    response = client.post(
+        "/api/submit",
+        json={
+            "team": "BlockedTeam",
+            "objective": "max_profit",
+            "picks": [],
+            "price_per_user": 100,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Check your submission. It is not feasible!"
