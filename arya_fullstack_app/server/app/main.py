@@ -259,3 +259,11 @@ def home() -> FileResponse:
     if not index_file.exists():
         raise HTTPException(status_code=404, detail="Client index.html not found")
     return FileResponse(index_file)
+
+
+@app.get("/game-finish")
+def game_finish() -> FileResponse:
+    finish_file = CLIENT_DIR / "game-finish.html"
+    if not finish_file.exists():
+        raise HTTPException(status_code=404, detail="Client game-finish.html not found")
+    return FileResponse(finish_file)

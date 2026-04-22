@@ -1,4 +1,4 @@
-import { state, el } from "./state.js";
+import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import {
   applyBetaFromServer,
   renderMatchingResult,
@@ -15,6 +15,21 @@ let _reconnectDelay = 1000;
 const _MAX_DELAY = 30000;
 let _intentionalClose = false;
 let _currentCode = null;
+
+function redirectToGameFinish(url, sessionCode) {
+  try {
+    localStorage.removeItem(LOBBY_STORAGE_KEY);
+  } catch (_err) {
+    // Ignore storage failures; redirect is still the important part.
+  }
+  disconnectWS();
+  const normalizedCode = String(sessionCode || state.gameCode || "").trim().toUpperCase();
+  const fallback = normalizedCode ? `/game-finish?code=${encodeURIComponent(normalizedCode)}` : "/game-finish";
+  const target = typeof url === "string" && url.trim() ? url : fallback;
+  window.setTimeout(() => {
+    window.location.assign(target);
+  }, 900);
+}
 
 export function connectWS(sessionCode) {
   if (!sessionCode) return;
@@ -114,6 +129,11 @@ function _handleMessage(msg) {
       }
     }
     loadLeaderboard();
+    return;
+  }
+
+  if (type === "game_finished") {
+    redirectToGameFinish(msg.redirect_url, msg.session_code);
     return;
   }
 

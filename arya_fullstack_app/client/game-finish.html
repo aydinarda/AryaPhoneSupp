@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Final Leaderboard</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe6;
+        --panel: rgba(255, 250, 240, 0.92);
+        --panel-strong: #fffaf0;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --accent: #b45309;
+        --accent-dark: #92400e;
+        --border: rgba(180, 83, 9, 0.18);
+        --shadow: 0 24px 60px rgba(120, 53, 15, 0.14);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 28px;
+        font-family: Georgia, "Times New Roman", serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top, rgba(251, 191, 36, 0.22), transparent 30%),
+          linear-gradient(135deg, var(--bg), #ece1d0);
+      }
+
+      .shell {
+        width: min(1220px, 100%);
+        margin: 0 auto;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+
+      .meta {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(180, 83, 9, 0.08);
+        color: var(--accent-dark);
+        border: 1px solid var(--border);
+        font-size: 0.92rem;
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      a, button {
+        border: 0;
+        cursor: pointer;
+        min-height: 44px;
+        padding: 0 16px;
+        border-radius: 12px;
+        text-decoration: none;
+        font-weight: 700;
+        font-family: inherit;
+      }
+
+      .primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .secondary {
+        background: transparent;
+        color: var(--accent-dark);
+        border: 1px solid var(--border);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        padding: 20px;
+        backdrop-filter: blur(12px);
+      }
+
+      .wide {
+        grid-column: 1 / -1;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 520px;
+      }
+
+      th, td {
+        padding: 12px 10px;
+        text-align: left;
+        border-bottom: 1px solid rgba(31, 41, 55, 0.08);
+        font-size: 0.95rem;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .loader, .empty, .error {
+        min-height: 180px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .error {
+        color: #b91c1c;
+      }
+
+      @media (max-width: 900px) {
+        body { padding: 16px; }
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="meta">
+          <span class="pill" id="finishCode">Session code: -</span>
+        </div>
+        <div class="actions">
+          <button class="secondary" id="btnRefresh" type="button">Refresh</button>
+          <a class="primary" href="/">Back to Lobby</a>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="table-wrap" id="lastRoundWrap">
+            <div class="loader">Loading...</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="table-wrap" id="cumulativeWrap">
+            <div class="loader">Loading...</div>
+          </div>
+        </section>
+
+        <section class="card wide">
+          <div class="table-wrap" id="averageWrap">
+            <div class="loader">Loading...</div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script type="module">
+      import { api, fmt } from "/assets/api.js";
+
+      const params = new URLSearchParams(window.location.search);
+      const code = (params.get("code") || "").trim().toUpperCase();
+      const codeEl = document.getElementById("finishCode");
+      const lastRoundWrap = document.getElementById("lastRoundWrap");
+      const cumulativeWrap = document.getElementById("cumulativeWrap");
+      const averageWrap = document.getElementById("averageWrap");
+      const btnRefresh = document.getElementById("btnRefresh");
+
+      if (!code) {
+        window.location.replace("/");
+      }
+
+      codeEl.textContent = `Session code: ${code}`;
+
+      function averageRows(rows) {
+        return (Array.isArray(rows) ? rows : [])
+          .map((row) => {
+            const rounds = Number(row.rounds_played ?? 0) || 1;
+            return {
+              ...row,
+              avg_profit: Number(row.total_profit ?? 0) / rounds,
+              avg_market_share_pct: Number(row.total_market_share_pct ?? 0) / rounds,
+              avg_realized_utility: Number(row.total_realized_utility ?? 0) / rounds,
+              avg_buyer_utility: Number(row.total_buyer_utility ?? 0) / rounds,
+            };
+          })
+          .sort((a, b) => Number(b.avg_profit ?? 0) - Number(a.avg_profit ?? 0));
+      }
+
+      function renderEmpty(target) {
+        target.innerHTML = '<div class="empty">No data</div>';
+      }
+
+      function renderLastRound(rows) {
+        const list = Array.isArray(rows) ? rows : [];
+        if (!list.length) {
+          renderEmpty(lastRoundWrap);
+          return;
+        }
+        const maxRound = Math.max(...list.map((row) => Number(row.round_no ?? 0)));
+        const lastRows = list
+          .filter((row) => Number(row.round_no ?? 0) === maxRound)
+          .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
+
+        lastRoundWrap.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Round</th>
+                <th>#</th>
+                <th>Team</th>
+                <th>Price</th>
+                <th>Demand Share</th>
+                <th>Profit</th>
+                <th>Market Utility</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lastRows.map((row, index) => `
+                <tr>
+                  <td>${row.game_round_no ?? row.round_no ?? "-"}</td>
+                  <td>${index + 1}</td>
+                  <td><strong>${row.team ?? "-"}</strong></td>
+                  <td>${row.price_per_user != null ? `$${Number(row.price_per_user).toFixed(0)}` : "-"}</td>
+                  <td>${fmt(row.market_share_pct)}%</td>
+                  <td><strong>${fmt(row.realized_profit)}</strong></td>
+                  <td>${fmt(row.realized_utility)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      function renderCumulative(rows) {
+        const list = averageRows(rows);
+        if (!list.length) {
+          renderEmpty(cumulativeWrap);
+          return;
+        }
+        cumulativeWrap.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Avg Demand Share</th>
+                <th>Avg Profit</th>
+                <th>Avg Market Utility</th>
+                <th>Avg Buyer Utility</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map((row) => `
+                <tr>
+                  <td><strong>${row.team ?? "-"}</strong></td>
+                  <td>${fmt(row.avg_market_share_pct)}%</td>
+                  <td><strong>${fmt(row.avg_profit)}</strong></td>
+                  <td>${fmt(row.avg_realized_utility)}</td>
+                  <td><strong>${fmt(row.avg_buyer_utility)}</strong></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      function renderAverageLeaderboard(rows) {
+        const list = averageRows(rows);
+        if (!list.length) {
+          renderEmpty(averageWrap);
+          return;
+        }
+        averageWrap.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Team</th>
+                <th>Rounds</th>
+                <th>Avg Demand Share</th>
+                <th>Avg Profit</th>
+                <th>Avg Market Utility</th>
+                <th>Avg Buyer Utility</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map((row, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td><strong>${row.team ?? "-"}</strong></td>
+                  <td>${row.rounds_played ?? 0}</td>
+                  <td>${fmt(row.avg_market_share_pct)}%</td>
+                  <td><strong>${fmt(row.avg_profit)}</strong></td>
+                  <td>${fmt(row.avg_realized_utility)}</td>
+                  <td><strong>${fmt(row.avg_buyer_utility)}</strong></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      async function loadFinalLeaderboard() {
+        try {
+          const data = await api(`/api/sessions/${code}/leaderboard`);
+          renderLastRound(data.turn_leaderboard || []);
+          renderCumulative(data.cumulative_leaderboard || []);
+          renderAverageLeaderboard(data.cumulative_leaderboard || []);
+        } catch (error) {
+          const message = error?.message || "Could not load leaderboard.";
+          const html = `<div class="error">${message}</div>`;
+          lastRoundWrap.innerHTML = html;
+          cumulativeWrap.innerHTML = html;
+          averageWrap.innerHTML = html;
+        }
+      }
+
+      btnRefresh.addEventListener("click", loadFinalLeaderboard);
+      loadFinalLeaderboard();
+    </script>
+  </body>
+</html>

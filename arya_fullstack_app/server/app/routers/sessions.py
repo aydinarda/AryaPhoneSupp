@@ -136,6 +136,13 @@ def _build_round_phase(round_no: int, trial_rounds: int) -> dict[str, Any]:
     }
 
 
+def _build_game_finish_url(session_code: str) -> str:
+    normalized = (session_code or "").strip().upper()
+    if not normalized:
+        return "/game-finish"
+    return f"/game-finish?code={normalized}"
+
+
 def _submission_is_feasible(row: dict[str, Any]) -> bool:
     env_avg = row.get("env_avg")
     social_avg = row.get("social_avg")
@@ -458,6 +465,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     session_code = str(session_row.get("session_code", "")).strip().upper()
     if not session_token or not session_code:
         raise HTTPException(status_code=400, detail="Session metadata is incomplete")
+    scheduled_rounds = _resolve_scheduled_rounds(session_row)
 
     target_round: dict[str, Any] | None = None
     if req.round_no is not None:
@@ -746,6 +754,15 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "round_no": round_no,
         "matching": result,
     })
+    game_finished = round_no >= scheduled_rounds
+    finish_url = _build_game_finish_url(session_code)
+    if game_finished:
+        manager.broadcast_sync(session_code, {
+            "type": "game_finished",
+            "round_no": round_no,
+            "session_code": session_code,
+            "redirect_url": finish_url,
+        })
 
     return {
         "session_code": session_code,
@@ -754,6 +771,8 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         "eligible_team_count": len(team_profiles),
         "excluded_infeasible_teams": excluded_infeasible_teams,
         "matching": result,
+        "game_finished": game_finished,
+        "redirect_url": finish_url if game_finished else None,
     }
 
 

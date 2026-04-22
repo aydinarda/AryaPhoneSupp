@@ -687,3 +687,86 @@ def test_start_round_respects_configured_round_limit(monkeypatch) -> None:
     assert response.status_code == 400
     assert "Configured round limit reached" in response.json()["detail"]
     assert called["insert"] == 0
+
+
+def test_final_match_broadcasts_game_finished(monkeypatch) -> None:
+    emitted: list[tuple[str, dict]] = []
+    stored: dict = {}
+
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_game_session_by_code",
+        lambda code: SimpleNamespace(
+            data=[{
+                "session_code": code,
+                "session_token": "tok-finish",
+                "is_active": True,
+                "number_of_rounds": 2,
+                "trial_rounds": 1,
+            }]
+        ),
+    )
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_round_by_number",
+        lambda session_token, round_no: SimpleNamespace(data=[{
+            "round_no": round_no,
+            "market_capacity": GAME_SETTINGS.default_market_capacity,
+            "created_at": "2026-04-01T10:00:00+00:00",
+            "is_active": True,
+        }]),
+    )
+    monkeypatch.setattr(sessions_router, "fetch_active_round", lambda session_token: SimpleNamespace(data=[]))
+    monkeypatch.setattr(sessions_router, "fetch_latest_round", lambda session_token: SimpleNamespace(data=[]))
+    monkeypatch.setattr(
+        sessions_router,
+        "fetch_submissions_for_round",
+        lambda session_code, round_no: SimpleNamespace(data=[
+            {
+                "team": "TeamA",
+                "selected_suppliers": "CAM1,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:01+00:00",
+                "env_avg": 1.0,
+                "social_avg": 1.0,
+                "price": 100,
+            },
+            {
+                "team": "TeamB",
+                "selected_suppliers": "CAM2,KEY1,CBL1",
+                "created_at": "2026-04-01T10:00:02+00:00",
+                "env_avg": 1.0,
+                "social_avg": 1.0,
+                "price": 100,
+            },
+        ]),
+    )
+    monkeypatch.setattr(sessions_router, "get_tables", lambda: (_make_mock_suppliers(), _make_mock_users(4)))
+    monkeypatch.setattr(sessions_router, "insert_matching_result", lambda payload: stored.update(payload))
+    monkeypatch.setattr(
+        sessions_router.manager,
+        "broadcast_sync",
+        lambda session_code, message: emitted.append((session_code, message)),
+    )
+
+    response = client.post("/api/sessions/FIN123/match", json={"round_no": 3})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["game_finished"] is True
+    assert payload["redirect_url"] == "/game-finish?code=FIN123"
+    assert stored["round_no"] == 3
+    assert any(message.get("type") == "game_finished" for _, message in emitted)
+    assert emitted[-1] == (
+        "FIN123",
+        {
+            "type": "game_finished",
+            "round_no": 3,
+            "session_code": "FIN123",
+            "redirect_url": "/game-finish?code=FIN123",
+        },
+    )
+
+
+def test_game_finish_page_is_served() -> None:
+    response = client.get("/game-finish")
+    assert response.status_code == 200
+    assert "Game Finished" in response.text
