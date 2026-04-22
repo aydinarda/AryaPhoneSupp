@@ -49,7 +49,6 @@ function renderLastRound(turnRows) {
     <td>${fmt(r.market_share_pct)}%</td>
     <td><strong>${fmt(r.realized_profit)}</strong></td>
     <td>${fmt(r.realized_utility)}</td>
-    <td><strong>${fmt(r.buyer_utility)}</strong></td>
   </tr>`).join("");
 }
 

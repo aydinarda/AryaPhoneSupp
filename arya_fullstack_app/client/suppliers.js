@@ -107,7 +107,6 @@ function supplierCard(s, inputType, nameAttr, checked) {
           ${supplierBar("Environmental Risk Score", s.env_risk, s.env_bad_pct, "risk")}
           ${supplierBar("Social Risk Score", s.social_risk, s.social_bad_pct, "risk")}
           ${supplierBar("Cost score", s.cost_score, s.cost_bad_pct, "cost")}
-          ${supplierBar("Strategic Importance Value", s.strategic, s.strategic_good_pct, "good")}
         </div>
         <div class="supplier-flags">
           <span class="supplier-flag ${hasChildLabor ? "flag-warn" : "flag-ok"}">Child Labor Existence: ${hasChildLabor ? "Yes" : "No"}</span>
