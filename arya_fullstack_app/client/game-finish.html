@@ -4,183 +4,197 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Final Leaderboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f4efe6;
-        --panel: rgba(255, 250, 240, 0.92);
-        --panel-strong: #fffaf0;
-        --text: #1f2937;
-        --muted: #6b7280;
-        --accent: #b45309;
-        --accent-dark: #92400e;
-        --border: rgba(180, 83, 9, 0.18);
-        --shadow: 0 24px 60px rgba(120, 53, 15, 0.14);
-      }
-
-      * { box-sizing: border-box; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
       body {
-        margin: 0;
+        font-family: 'Inter', sans-serif;
+        font-size: 14px;
+        color: #1f2937;
+        background: #f3f4f6;
         min-height: 100vh;
-        padding: 28px;
-        font-family: Georgia, "Times New Roman", serif;
-        color: var(--text);
-        background:
-          radial-gradient(circle at top, rgba(251, 191, 36, 0.22), transparent 30%),
-          linear-gradient(135deg, var(--bg), #ece1d0);
+        padding: 24px 20px 40px;
       }
 
       .shell {
-        width: min(1220px, 100%);
+        width: min(1200px, 100%);
         margin: 0 auto;
       }
 
+      /* ── top bar ── */
       .topbar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 14px;
+        gap: 12px;
         flex-wrap: wrap;
-        margin-bottom: 18px;
+        margin-bottom: 20px;
       }
 
-      .meta {
+      .topbar-left {
         display: flex;
-        gap: 10px;
+        align-items: center;
+        gap: 12px;
         flex-wrap: wrap;
+      }
+
+      .page-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: #111827;
       }
 
       .pill {
-        padding: 8px 12px;
+        padding: 4px 12px;
         border-radius: 999px;
-        background: rgba(180, 83, 9, 0.08);
-        color: var(--accent-dark);
-        border: 1px solid var(--border);
-        font-size: 0.92rem;
+        background: #e5e7eb;
+        color: #374151;
+        font-size: 13px;
+        font-weight: 500;
       }
 
-      .actions {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-      a, button {
-        border: 0;
-        cursor: pointer;
-        min-height: 44px;
-        padding: 0 16px;
-        border-radius: 12px;
-        text-decoration: none;
-        font-weight: 700;
+      button, a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
         font-family: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: background 0.15s;
       }
 
-      .primary {
-        background: var(--accent);
+      .btn-secondary {
+        background: #fff;
+        color: #374151;
+        border-color: #d1d5db;
+      }
+      .btn-secondary:hover { background: #f9fafb; }
+
+      .btn-primary {
+        background: #2563eb;
         color: #fff;
       }
+      .btn-primary:hover { background: #1d4ed8; }
 
-      .secondary {
-        background: transparent;
-        color: var(--accent-dark);
-        border: 1px solid var(--border);
-      }
-
+      /* ── layout ── */
       .grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 18px;
+        gap: 16px;
       }
+
+      .wide { grid-column: 1 / -1; }
 
       .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        box-shadow: var(--shadow);
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
         padding: 20px;
-        backdrop-filter: blur(12px);
       }
 
-      .wide {
-        grid-column: 1 / -1;
+      .card-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
       }
 
-      .table-wrap {
-        overflow-x: auto;
-      }
+      /* ── tables ── */
+      .table-wrap { overflow-x: auto; }
 
       table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 520px;
-      }
-
-      th, td {
-        padding: 12px 10px;
-        text-align: left;
-        border-bottom: 1px solid rgba(31, 41, 55, 0.08);
-        font-size: 0.95rem;
+        min-width: 420px;
       }
 
       th {
-        color: var(--muted);
-        font-size: 0.78rem;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.07em;
+        color: #6b7280;
+        border-bottom: 1px solid #e5e7eb;
+        white-space: nowrap;
       }
 
-      tbody tr:last-child td {
-        border-bottom: 0;
+      td {
+        padding: 10px 10px;
+        font-size: 13px;
+        color: #1f2937;
+        border-bottom: 1px solid #f3f4f6;
       }
 
-      .loader, .empty, .error {
-        min-height: 180px;
+      tbody tr:last-child td { border-bottom: none; }
+
+      tbody tr:hover td { background: #f9fafb; }
+
+      td strong { font-weight: 600; }
+
+      .rank { color: #6b7280; font-size: 12px; }
+
+      .empty, .loader, .error {
+        min-height: 140px;
         display: grid;
         place-items: center;
-        color: var(--muted);
-        font-size: 1rem;
+        color: #9ca3af;
+        font-size: 13px;
       }
 
-      .error {
-        color: #b91c1c;
-      }
+      .error { color: #dc2626; }
 
-      @media (max-width: 900px) {
-        body { padding: 16px; }
+      @media (max-width: 800px) {
         .grid { grid-template-columns: 1fr; }
+        body { padding: 16px 12px 32px; }
       }
     </style>
   </head>
   <body>
     <div class="shell">
       <div class="topbar">
-        <div class="meta">
-          <span class="pill" id="finishCode">Session code: -</span>
+        <div class="topbar-left">
+          <span class="page-title">Final Leaderboard</span>
+          <span class="pill" id="finishCode">-</span>
         </div>
         <div class="actions">
-          <button class="secondary" id="btnRefresh" type="button">Refresh</button>
-          <a class="primary" href="/">Back to Lobby</a>
+          <button class="btn-secondary" id="btnRefresh" type="button">Refresh</button>
+          <a class="btn-primary" href="/">Back to Lobby</a>
         </div>
       </div>
 
       <div class="grid">
         <section class="card">
+          <div class="card-title">Last Round Results</div>
           <div class="table-wrap" id="lastRoundWrap">
-            <div class="loader">Loading...</div>
+            <div class="loader">Loading…</div>
           </div>
         </section>
 
         <section class="card">
+          <div class="card-title">Cumulative Match Summary</div>
           <div class="table-wrap" id="cumulativeWrap">
-            <div class="loader">Loading...</div>
+            <div class="loader">Loading…</div>
           </div>
         </section>
 
         <section class="card wide">
+          <div class="card-title">Cumulative Leaderboard</div>
           <div class="table-wrap" id="averageWrap">
-            <div class="loader">Loading...</div>
+            <div class="loader">Loading…</div>
           </div>
         </section>
       </div>
@@ -197,13 +211,11 @@
       const averageWrap = document.getElementById("averageWrap");
       const btnRefresh = document.getElementById("btnRefresh");
 
-      if (!code) {
-        window.location.replace("/");
-      }
+      if (!code) window.location.replace("/");
 
-      codeEl.textContent = `Session code: ${code}`;
+      codeEl.textContent = `Session: ${code}`;
 
-      function averageRows(rows) {
+      function toAverageRows(rows) {
         return (Array.isArray(rows) ? rows : [])
           .map((row) => {
             const rounds = Number(row.rounds_played ?? 0) || 1;
@@ -212,123 +224,89 @@
               avg_profit: Number(row.total_profit ?? 0) / rounds,
               avg_market_share_pct: Number(row.total_market_share_pct ?? 0) / rounds,
               avg_realized_utility: Number(row.total_realized_utility ?? 0) / rounds,
-              avg_buyer_utility: Number(row.total_buyer_utility ?? 0) / rounds,
             };
           })
           .sort((a, b) => Number(b.avg_profit ?? 0) - Number(a.avg_profit ?? 0));
       }
 
-      function renderEmpty(target) {
+      function empty(target) {
         target.innerHTML = '<div class="empty">No data</div>';
       }
 
       function renderLastRound(rows) {
         const list = Array.isArray(rows) ? rows : [];
-        if (!list.length) {
-          renderEmpty(lastRoundWrap);
-          return;
-        }
-        const maxRound = Math.max(...list.map((row) => Number(row.round_no ?? 0)));
+        if (!list.length) { empty(lastRoundWrap); return; }
+        const maxRound = Math.max(...list.map((r) => Number(r.round_no ?? 0)));
         const lastRows = list
-          .filter((row) => Number(row.round_no ?? 0) === maxRound)
+          .filter((r) => Number(r.round_no ?? 0) === maxRound)
           .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
 
         lastRoundWrap.innerHTML = `
           <table>
             <thead>
               <tr>
-                <th>Round</th>
-                <th>#</th>
-                <th>Team</th>
-                <th>Price</th>
-                <th>Demand Share</th>
-                <th>Profit</th>
-                <th>Market Utility</th>
+                <th>Round</th><th>#</th><th>Team</th><th>Price</th>
+                <th>Demand Share</th><th>Profit</th><th>Market Utility</th>
               </tr>
             </thead>
             <tbody>
-              ${lastRows.map((row, index) => `
-                <tr>
-                  <td>${row.game_round_no ?? row.round_no ?? "-"}</td>
-                  <td>${index + 1}</td>
-                  <td><strong>${row.team ?? "-"}</strong></td>
-                  <td>${row.price_per_user != null ? `$${Number(row.price_per_user).toFixed(0)}` : "-"}</td>
-                  <td>${fmt(row.market_share_pct)}%</td>
-                  <td><strong>${fmt(row.realized_profit)}</strong></td>
-                  <td>${fmt(row.realized_utility)}</td>
-                </tr>
-              `).join("")}
+              ${lastRows.map((r, i) => `<tr>
+                <td>${r.game_round_no ?? r.round_no ?? "-"}</td>
+                <td class="rank">${i + 1}</td>
+                <td><strong>${r.team ?? "-"}</strong></td>
+                <td>${r.price_per_user != null ? `$${Number(r.price_per_user).toFixed(0)}` : "-"}</td>
+                <td>${fmt(r.market_share_pct)}%</td>
+                <td><strong>${fmt(r.realized_profit)}</strong></td>
+                <td>${fmt(r.realized_utility)}</td>
+              </tr>`).join("")}
             </tbody>
-          </table>
-        `;
+          </table>`;
       }
 
       function renderCumulative(rows) {
-        const list = averageRows(rows);
-        if (!list.length) {
-          renderEmpty(cumulativeWrap);
-          return;
-        }
+        const list = toAverageRows(rows);
+        if (!list.length) { empty(cumulativeWrap); return; }
         cumulativeWrap.innerHTML = `
           <table>
             <thead>
               <tr>
-                <th>Team</th>
-                <th>Avg Demand Share</th>
-                <th>Avg Profit</th>
-                <th>Avg Market Utility</th>
-                <th>Avg Buyer Utility</th>
+                <th>Team</th><th>Avg Demand Share</th>
+                <th>Avg Profit</th><th>Avg Market Utility</th>
               </tr>
             </thead>
             <tbody>
-              ${list.map((row) => `
-                <tr>
-                  <td><strong>${row.team ?? "-"}</strong></td>
-                  <td>${fmt(row.avg_market_share_pct)}%</td>
-                  <td><strong>${fmt(row.avg_profit)}</strong></td>
-                  <td>${fmt(row.avg_realized_utility)}</td>
-                  <td><strong>${fmt(row.avg_buyer_utility)}</strong></td>
-                </tr>
-              `).join("")}
+              ${list.map((r) => `<tr>
+                <td><strong>${r.team ?? "-"}</strong></td>
+                <td>${fmt(r.avg_market_share_pct)}%</td>
+                <td><strong>${fmt(r.avg_profit)}</strong></td>
+                <td>${fmt(r.avg_realized_utility)}</td>
+              </tr>`).join("")}
             </tbody>
-          </table>
-        `;
+          </table>`;
       }
 
       function renderAverageLeaderboard(rows) {
-        const list = averageRows(rows);
-        if (!list.length) {
-          renderEmpty(averageWrap);
-          return;
-        }
+        const list = toAverageRows(rows);
+        if (!list.length) { empty(averageWrap); return; }
         averageWrap.innerHTML = `
           <table>
             <thead>
               <tr>
-                <th>#</th>
-                <th>Team</th>
-                <th>Rounds</th>
-                <th>Avg Demand Share</th>
-                <th>Avg Profit</th>
-                <th>Avg Market Utility</th>
-                <th>Avg Buyer Utility</th>
+                <th>#</th><th>Team</th><th>Rounds</th>
+                <th>Avg Demand Share</th><th>Avg Profit</th><th>Avg Market Utility</th>
               </tr>
             </thead>
             <tbody>
-              ${list.map((row, index) => `
-                <tr>
-                  <td>${index + 1}</td>
-                  <td><strong>${row.team ?? "-"}</strong></td>
-                  <td>${row.rounds_played ?? 0}</td>
-                  <td>${fmt(row.avg_market_share_pct)}%</td>
-                  <td><strong>${fmt(row.avg_profit)}</strong></td>
-                  <td>${fmt(row.avg_realized_utility)}</td>
-                  <td><strong>${fmt(row.avg_buyer_utility)}</strong></td>
-                </tr>
-              `).join("")}
+              ${list.map((r, i) => `<tr>
+                <td class="rank">${i + 1}</td>
+                <td><strong>${r.team ?? "-"}</strong></td>
+                <td>${r.rounds_played ?? 0}</td>
+                <td>${fmt(r.avg_market_share_pct)}%</td>
+                <td><strong>${fmt(r.avg_profit)}</strong></td>
+                <td>${fmt(r.avg_realized_utility)}</td>
+              </tr>`).join("")}
             </tbody>
-          </table>
-        `;
+          </table>`;
       }
 
       async function loadFinalLeaderboard() {
@@ -337,9 +315,8 @@
           renderLastRound(data.turn_leaderboard || []);
           renderCumulative(data.cumulative_leaderboard || []);
           renderAverageLeaderboard(data.cumulative_leaderboard || []);
-        } catch (error) {
-          const message = error?.message || "Could not load leaderboard.";
-          const html = `<div class="error">${message}</div>`;
+        } catch (err) {
+          const html = `<div class="error">${err?.message || "Could not load leaderboard."}</div>`;
           lastRoundWrap.innerHTML = html;
           cumulativeWrap.innerHTML = html;
           averageWrap.innerHTML = html;
