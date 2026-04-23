@@ -112,14 +112,8 @@ const CATEGORY_LABELS = {
 };
 const CATEGORY_ORDER = ["camera", "keyboard", "cable"];
 
-function clampPct(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.max(0, Math.min(100, numeric));
-}
-
-function supplierBar(label, score, pct, tone) {
-  const width = clampPct(pct);
+function supplierBar(label, score, tone) {
+  const width = Math.max(0, Math.min(100, (Number(score) / 5) * 100));
   return `
     <div class="supplier-bar-row">
       <div class="supplier-bar-head">
@@ -145,9 +139,9 @@ function supplierCard(s, inputType, nameAttr, checked) {
       <div class="supplier-card-body">
         <div class="supplier-title"><strong>${id}</strong></div>
         <div class="supplier-bars">
-          ${supplierBar("Environmental Risk Score", s.env_risk, s.env_bad_pct, "risk")}
-          ${supplierBar("Social Risk Score", s.social_risk, s.social_bad_pct, "risk")}
-          ${supplierBar("Cost score", s.cost_score, s.cost_bad_pct, "cost")}
+          ${supplierBar("Environmental Risk Score", s.env_risk, "risk")}
+          ${supplierBar("Social Risk Score", s.social_risk, "risk")}
+          ${supplierBar("Cost score", s.cost_score, "cost")}
         </div>
         <div class="supplier-flags">
           <span class="supplier-flag ${hasChildLabor ? "flag-warn" : "flag-ok"}">Child Labor Existence: ${hasChildLabor ? "Yes" : "No"}</span>
