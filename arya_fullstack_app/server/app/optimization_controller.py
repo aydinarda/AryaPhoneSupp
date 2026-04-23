@@ -398,7 +398,7 @@ def manual_metrics(
     if br and br.total_demand > 0:
         effective_users = br.total_demand * N
         profit_total = effective_users * (price - cost_per_unit)
-        utility_total = br.realized_utility * N
+        utility_total = br.realized_utility
     else:
         profit_total = 0.0
         utility_total = 0.0

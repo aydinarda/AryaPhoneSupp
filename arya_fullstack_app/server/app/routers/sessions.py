@@ -621,7 +621,7 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
         avg_cost = _safe_float(profile["avg_cost"])
         unit_margin = price - float(GAME_SETTINGS.cost_scale) * avg_cost
         realized_profit = effective_users * unit_margin
-        realized_utility = round((br.realized_utility * N) if br else 0.0, 3)
+        realized_utility = round(br.realized_utility if br else 0.0, 3)
         audit_penalty = _safe_float(audit_penalties.get(tid, 0.0))
         round_profit_total += realized_profit
 
