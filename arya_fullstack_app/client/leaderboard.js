@@ -16,7 +16,6 @@ function cumulativeChartRows(rows) {
       total_profit: _totalProfit,
       total_market_share_pct: _totalMarketSharePct,
       total_realized_utility: _totalRealizedUtility,
-      total_buyer_utility: _totalBuyerUtility,
       ...rest
     } = row;
     return {
@@ -24,7 +23,6 @@ function cumulativeChartRows(rows) {
       avg_profit: Number(_totalProfit ?? 0) / divisor,
       avg_market_share_pct: Number(_totalMarketSharePct ?? 0) / divisor,
       avg_realized_utility: Number(_totalRealizedUtility ?? 0) / divisor,
-      avg_buyer_utility: Number(_totalBuyerUtility ?? 0) / divisor,
     };
   });
 }
@@ -65,9 +63,8 @@ function renderCumulativeMatchSummary(rows) {
         <td>${fmt(r.avg_market_share_pct)}%</td>
         <td><strong>${fmt(r.avg_profit)}</strong></td>
         <td>${fmt(r.avg_realized_utility)}</td>
-        <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
       </tr>`).join("")
-    : '<tr><td colspan="5">No cumulative match summary yet.</td></tr>';
+    : '<tr><td colspan="4">No cumulative match summary yet.</td></tr>';
 }
 
 function renderLeaderboardTableHeader() {
@@ -80,7 +77,6 @@ function renderLeaderboardTableHeader() {
     <th>Avg Demand Share</th>
     <th>Avg Profit</th>
     <th>Avg Market Utility</th>
-    <th>Avg Buyer Utility</th>
   `;
 }
 
@@ -129,7 +125,7 @@ export function renderPlotSelectors(rows) {
     rows.some((r) => Number.isFinite(Number(r?.[key])))
   );
 
-  const withFallback = available.length ? available : ["avg_realized_utility", "avg_buyer_utility", "avg_profit", "avg_market_share_pct"];
+  const withFallback = available.length ? available : ["avg_realized_utility", "avg_profit", "avg_market_share_pct"];
   if (!withFallback.includes(state.plotX)) state.plotX = withFallback[0];
   if (!withFallback.includes(state.plotY)) state.plotY = withFallback[Math.min(1, withFallback.length - 1)];
 
@@ -241,7 +237,7 @@ export async function loadLeaderboard() {
 
     renderLastRound(turnRows);
 
-    const cumulativeKeys = ["avg_realized_utility", "avg_buyer_utility", "avg_profit", "avg_market_share_pct"];
+    const cumulativeKeys = ["avg_realized_utility", "avg_profit", "avg_market_share_pct"];
     if (!cumulativeKeys.includes(state.plotX)) state.plotX = "avg_realized_utility";
     if (!cumulativeKeys.includes(state.plotY)) state.plotY = "avg_market_share_pct";
 
@@ -261,15 +257,14 @@ export async function loadLeaderboard() {
           <td>${fmt(r.avg_market_share_pct)}%</td>
           <td><strong>${fmt(r.avg_profit)}</strong></td>
           <td>${fmt(r.avg_realized_utility)}</td>
-          <td><strong>${fmt(r.avg_buyer_utility)}</strong></td>
         </tr>`).join("")
-      : '<tr><td colspan="7">No cumulative leaderboard yet.</td></tr>';
+      : '<tr><td colspan="6">No cumulative leaderboard yet.</td></tr>';
   } catch (e) {
     if (requestSeq !== _leaderboardRequestSeq) return;
     state.latestRows = [];
     renderLastRound([]);
     renderPlotSelectors([]);
     renderLeaderboardScatter([]);
-    el.leaderboardBody.innerHTML = `<tr><td colspan="7">${e.message}</td></tr>`;
+    el.leaderboardBody.innerHTML = `<tr><td colspan="6">${e.message}</td></tr>`;
   }
 }

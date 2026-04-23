@@ -32,7 +32,6 @@ export const ROUND_SYNC_INTERVAL_MS = 2000;
 
 export const PLOT_COLUMNS = {
   avg_realized_utility:  "Avg Market Utility",
-  avg_buyer_utility:     "Avg Buyer Utility",
   avg_profit:            "Avg Profit",
   avg_market_share_pct:  "Avg Demand Share %",
 };

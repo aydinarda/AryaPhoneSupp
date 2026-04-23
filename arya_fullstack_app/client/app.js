@@ -15,6 +15,14 @@ function showSelectionPanel() {
   if (leaderboardTab) leaderboardTab.classList.remove("active");
 }
 
+function ensureLeaderboardBelowSuppliers() {
+  const leaderboardSection = document.getElementById("leaderboardSection");
+  const gameMainGrid = document.getElementById("gameMainGrid");
+  if (!leaderboardSection || !gameMainGrid) return;
+  if (leaderboardSection.previousElementSibling === gameMainGrid) return;
+  gameMainGrid.insertAdjacentElement("afterend", leaderboardSection);
+}
+
 function setupTabs() {
   const tabs = document.querySelectorAll(".tab");
   const panelGame = document.getElementById("panel-game");
@@ -173,6 +181,7 @@ function setupEvents() {
 
 async function init() {
   const savedLobby = loadLobbyState();
+  ensureLeaderboardBelowSuppliers();
   setupTabs();
   setupEvents();
   renderRoundSummary();

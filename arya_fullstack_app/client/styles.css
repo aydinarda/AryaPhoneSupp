@@ -318,10 +318,7 @@ button.btn-danger { background: #fef2f2; color: var(--danger); border-color: #fe
   grid-template-columns: 1fr 340px;
   gap: 16px;
   align-items: start;
-  order: 1;
 }
-.game-content > #leaderboardSection { order: 2; }
-.game-content > #benchmarkSummary { order: 3; }
 .game-actions-stack {
   position: sticky;
   top: calc(var(--nav-h) + 16px);
