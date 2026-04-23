@@ -152,9 +152,11 @@ def _mnl_for_segment(
 
     U_{i,s} = quality_sensitivity * q_{i,s} - delta * w_cost_s * price_i
 
-    u_outside: utility of the outside option.
+    u_outside: raw utility of the outside option on the same pre-transform scale
+               as buyer utilities.
                None = no outside option (all demand is served by buyers).
-               Float = adds exp(u_outside) to denominator to model "no purchase".
+               Float = adds exp(transform(u_outside)) to the denominator to model
+               "no purchase".
                Caution: set carefully — buyer logits can be large negative numbers,
                making a fixed u_outside dominate unless the logit scale is calibrated.
     """
@@ -172,7 +174,8 @@ def _mnl_for_segment(
     denom = sum(exps)
 
     if u_outside is not None:
-        denom += math.exp(u_outside - max_logit)
+        outside_logit = _transform_utility(float(u_outside))
+        denom += math.exp(outside_logit - max_logit)
 
     shares = {p.team_name: exps[i] / denom for i, p in enumerate(profiles)}
 
