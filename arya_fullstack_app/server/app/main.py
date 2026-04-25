@@ -7,14 +7,18 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope, Receive, Send
 
 from .db import fetch_active_round, fetch_all_submissions, fetch_game_session_by_code, insert_submission
+from .error_notifier import install_thread_exception_notifier, notify_exception
 from .matching_engine import run_market_matching
 from .live_state import upsert_live_submission
 from .routers.sessions import router as sessions_router
@@ -36,6 +40,42 @@ def _insert_submission_best_effort(payload: dict[str, Any]) -> None:
 @app.on_event("startup")
 async def _startup() -> None:
     manager.set_loop(asyncio.get_running_loop())
+    install_thread_exception_notifier()
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_notifier(request: Request, exc: StarletteHTTPException):
+    notify_exception(
+        title="Handled HTTP exception",
+        exc=exc,
+        request=request,
+        status_code=exc.status_code,
+        extra={"detail": exc.detail},
+    )
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_exception_notifier(request: Request, exc: RequestValidationError):
+    notify_exception(
+        title="Request validation exception",
+        exc=exc,
+        request=request,
+        status_code=422,
+        extra={"errors": exc.errors()},
+    )
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_notifier(request: Request, exc: Exception) -> JSONResponse:
+    notify_exception(
+        title="Unhandled ASGI exception",
+        exc=exc,
+        request=request,
+        status_code=500,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 app.add_middleware(
     CORSMiddleware,
