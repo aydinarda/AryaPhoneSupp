@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import random
@@ -1091,7 +1092,9 @@ async def websocket_session(code: str, websocket: WebSocket) -> None:
     normalized = (code or "").strip().upper()
     rows: list[dict[str, Any]] = []
     try:
-        rows = _extract_rows(fetch_game_session_by_code(normalized))
+        rows = await asyncio.to_thread(
+            lambda: _extract_rows(fetch_game_session_by_code(normalized))
+        )
     except Exception:
         pass
 
@@ -1105,7 +1108,10 @@ async def websocket_session(code: str, websocket: WebSocket) -> None:
 
     manager.register(session_code, websocket)
     try:
-        await websocket.send_json(_build_sync_message(session_code, session_token, session_row))
+        sync_msg = await asyncio.to_thread(
+            _build_sync_message, session_code, session_token, session_row
+        )
+        await websocket.send_json(sync_msg)
         async for text in websocket.iter_text():
             try:
                 msg = json.loads(text)
