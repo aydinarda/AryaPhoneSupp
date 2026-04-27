@@ -1,0 +1,62 @@
+name: Load Test — 50 Users
+
+# Sadece manuel tetiklenir, her deploy'da çalışmaz.
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Target URL"
+        required: false
+        default: "https://aryaphonesupp.onrender.com"
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq
+          sudo apt-get install -y k6
+
+      - name: Wake up Render instance
+        run: |
+          TARGET="${{ github.event.inputs.target_url }}"
+          echo "Waking up ${TARGET} ..."
+          for i in $(seq 1 18); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${TARGET}/api/health")
+            echo "  [${i}/18] HTTP ${CODE}"
+            [ "${CODE}" = "200" ] && echo "Server ready." && break
+            sleep 10
+          done
+
+      - name: Run load test
+        env:
+          TARGET_URL: ${{ github.event.inputs.target_url }}
+        run: |
+          k6 run \
+            --env TARGET_URL="${TARGET_URL}" \
+            --out json=results.ndjson \
+            .github/scripts/load_test.js
+        continue-on-error: true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-run-${{ github.run_number }}
+          path: |
+            results.ndjson
+            summary.html
+            summary.json
+          retention-days: 30
