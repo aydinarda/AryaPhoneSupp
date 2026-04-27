@@ -24,10 +24,12 @@ from ..db import (
     insert_matching_result,
 )
 from ..live_state import (
+    get_live_active_round,
     get_live_latest_matching_result,
     get_live_matching_results,
     get_live_round_submissions,
     get_live_session_submissions,
+    set_live_active_round,
     upsert_live_matching_result,
 )
 from ..service import get_tables
@@ -333,6 +335,7 @@ def start_round(code: str, req: RoundStartRequest) -> dict[str, Any]:
         "ends_at": ends_at,
     }
     insert_game_round(payload)
+    set_live_active_round(session_token, {**payload, "created_at": now.isoformat()})
 
     session_code = str(session_row.get("session_code", code)).strip().upper()
     manager.broadcast_sync(session_code, {
@@ -375,7 +378,8 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
     trial_rounds = _resolve_trial_rounds(session_row)
     scheduled_rounds = _resolve_scheduled_rounds(session_row)
 
-    rows = _extract_rows(fetch_active_round(session_token))
+    live_round = get_live_active_round(session_token)
+    rows = [live_round] if live_round else _extract_rows(fetch_active_round(session_token))
     normalized = (code or "").strip().upper()
     beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
     quality_sensitivity = _session_quality_sensitivity.get(normalized, float(GAME_SETTINGS.quality_sensitivity))
@@ -1042,9 +1046,11 @@ def _build_sync_message(
     round_data = None
     live_submissions: list[dict[str, Any]] = []
     try:
-        active_rows = _extract_rows(fetch_active_round(session_token))
-        if active_rows:
-            r = active_rows[0]
+        r = get_live_active_round(session_token)
+        if r is None:
+            active_rows = _extract_rows(fetch_active_round(session_token))
+            r = active_rows[0] if active_rows else None
+        if r:
             round_no = _safe_int(r.get("round_no"))
             phase = _build_round_phase(round_no, trial_rounds)
             round_data = {

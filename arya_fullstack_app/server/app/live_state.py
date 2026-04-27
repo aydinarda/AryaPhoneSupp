@@ -9,6 +9,18 @@ from typing import Any
 _lock = RLock()
 _submissions: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
 _matching_results: dict[str, dict[int, dict[str, Any]]] = {}
+_active_rounds: dict[str, dict[str, Any]] = {}  # session_token -> active round row
+
+
+def set_live_active_round(session_token: str, round_row: dict[str, Any]) -> None:
+    with _lock:
+        _active_rounds[session_token] = deepcopy(round_row)
+
+
+def get_live_active_round(session_token: str) -> dict[str, Any] | None:
+    with _lock:
+        row = _active_rounds.get(session_token)
+        return deepcopy(row) if row else None
 
 
 def _session_code(value: Any) -> str:

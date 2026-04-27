@@ -60,8 +60,17 @@ def insert_game_session(payload: dict):
     return get_client().table("game_sessions").insert(payload).execute()
 
 
+_session_cache: dict[str, Any] = {}
+
+
 def fetch_game_session_by_code(code: str):
-    return get_client().table("game_sessions").select("*").eq("session_code", code).limit(1).execute()
+    if code in _session_cache:
+        return _session_cache[code]
+    result = get_client().table("game_sessions").select("*").eq("session_code", code).limit(1).execute()
+    rows = getattr(result, "data", None) or []
+    if rows:
+        _session_cache[code] = result
+    return result
 
 
 def fetch_session_player(session_token: str, team_name_normalized: str):
