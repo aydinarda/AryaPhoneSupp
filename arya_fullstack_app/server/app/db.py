@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
@@ -61,16 +62,20 @@ def insert_game_session(payload: dict):
 
 
 _session_cache: dict[str, Any] = {}
+_session_cache_lock = threading.Lock()
 
 
 def fetch_game_session_by_code(code: str):
     if code in _session_cache:
         return _session_cache[code]
-    result = get_client().table("game_sessions").select("*").eq("session_code", code).limit(1).execute()
-    rows = getattr(result, "data", None) or []
-    if rows:
-        _session_cache[code] = result
-    return result
+    with _session_cache_lock:
+        if code in _session_cache:
+            return _session_cache[code]
+        result = get_client().table("game_sessions").select("*").eq("session_code", code).limit(1).execute()
+        rows = getattr(result, "data", None) or []
+        if rows:
+            _session_cache[code] = result
+        return result
 
 
 def fetch_session_player(session_token: str, team_name_normalized: str):
