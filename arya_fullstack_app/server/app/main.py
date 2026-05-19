@@ -93,6 +93,9 @@ def health() -> dict[str, str]:
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
+    icon_path = Path(__file__).resolve().parents[2] / "client" / "AryaPhone_Icon.png"
+    if icon_path.exists():
+        return FileResponse(icon_path, media_type="image/png")
     return Response(status_code=204)
 
 
