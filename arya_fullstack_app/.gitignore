@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Test / CI caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Jupyter outputs
+server/tests/*_executed.ipynb
+server/tests/*.png
+
+# Generated simulation results
+server/tests/*_results.xlsx
+server/tests/classroom_simulation*.xlsx
+
+# Logs
+*.log
+*.out.log
+*.err.log
+
+# Secrets / credentials
+secrets.toml
+.env
+
+# OS
+.DS_Store
+Thumbs.db
