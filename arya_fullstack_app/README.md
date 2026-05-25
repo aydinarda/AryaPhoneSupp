@@ -13,7 +13,7 @@ A classroom simulation game where competing teams select smartphone component su
 | Database | PostgreSQL via [Supabase](https://supabase.com) |
 | Real-time | WebSockets (built into FastAPI) |
 | Charts | [Plotly](https://plotly.com/javascript/) (CDN) |
-| Optimisation | [Gurobi](https://www.gurobi.com) MILP (optional) |
+| Optimisation | [Gurobi](https://www.gurobi.com) MILP (not even used in the latest structure) |
 
 The frontend is served as static files by the same FastAPI process — there is no separate frontend server.
 
