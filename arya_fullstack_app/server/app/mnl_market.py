@@ -41,7 +41,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .buyer import Buyer
     from .customer_segment import CustomerSegment
 
 
@@ -60,16 +59,6 @@ class BuyerProfile:
     avg_env: float
     avg_social: float
     utility_adjustment: float = 0.0
-
-    @classmethod
-    def from_buyer(cls, buyer: "Buyer") -> "BuyerProfile":
-        return cls(
-            team_name=buyer.team_name,
-            price_per_user=buyer.price_per_user or 0.0,
-            avg_env=buyer.avg_env or 0.0,
-            avg_social=buyer.avg_social or 0.0,
-            utility_adjustment=0.0,
-        )
 
 
 @dataclass(frozen=True, slots=True)
