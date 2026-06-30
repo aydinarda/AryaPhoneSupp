@@ -2,6 +2,9 @@ import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import {
   applyBetaFromServer,
   renderMatchingResult,
+  renderPlayerResult,
+  renderPlayerStandings,
+  clearPlayerResult,
   renderRoundSummary,
   startRoundCountdown,
   clearRoundTimer,
@@ -104,8 +107,14 @@ function _handleMessage(msg) {
     setJoinedTeams(msg.players || []);
     applyBetaFromServer(msg);
     _applyRoundFromMsg(msg);
-    if (msg.match && state.role === "admin") {
-      renderMatchingResult(msg.match);
+    if (msg.match) {
+      if (state.role === "admin") {
+        renderMatchingResult(msg.match);
+      } else if (state.role === "player") {
+        const rno = msg.match_round_no ?? msg.round?.round_no ?? null;
+        renderPlayerResult(msg.match, { roundNo: rno });
+        loadLeaderboard().then(() => renderPlayerStandings()).catch(() => {});
+      }
     }
     return;
   }
@@ -116,6 +125,8 @@ function _handleMessage(msg) {
     if (Number.isFinite(Number(msg.total_rounds))) state.totalRounds = Number(msg.total_rounds);
     if (Number.isFinite(Number(msg.trial_rounds))) state.trialRounds = Number(msg.trial_rounds);
     if (Number.isFinite(Number(msg.scheduled_rounds))) state.scheduledRounds = Number(msg.scheduled_rounds);
+    // A new round started: clear the previous round result so the next match flashes fresh.
+    if (state.role === "player") clearPlayerResult();
     renderRoundSummary();
     startRoundCountdown();
     return;
@@ -127,8 +138,12 @@ function _handleMessage(msg) {
       if (rendered && el.adminRoundHint) {
         el.adminRoundHint.textContent = `Matching completed for round ${msg.round_no}.`;
       }
+    } else if (state.role === "player") {
+      renderPlayerResult(msg.matching, { roundNo: msg.round_no });
     }
-    loadLeaderboard();
+    loadLeaderboard().then(() => {
+      if (state.role === "player") renderPlayerStandings();
+    }).catch(() => {});
     return;
   }
 

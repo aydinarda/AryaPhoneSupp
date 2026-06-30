@@ -953,7 +953,11 @@ def get_session_leaderboard(
     trial_rounds = _resolve_trial_rounds(session_row)
 
     # --- Build per-round entries ---
-    all_rounds = sorted(rno for rno in round_financials.keys() if rno > trial_rounds)
+    # turn_leaderboard includes EVERY played round (trial + scored) so players and
+    # admins can see each round's outcome. Trial rounds carry is_trial=True and are
+    # excluded from the cumulative (scored) leaderboard below.
+    all_rounds = sorted(rno for rno in round_financials.keys() if rno > 0)
+    scored_rounds = [rno for rno in all_rounds if rno > trial_rounds]
     turn_leaderboard: list[dict[str, Any]] = []
 
     for rno in all_rounds:
@@ -961,12 +965,15 @@ def get_session_leaderboard(
         if not teams_fin:
             continue
 
+        is_trial = rno <= trial_rounds
         round_entries: list[dict[str, Any]] = []
         for team, m in teams_fin.items():
             entry = {
                 "team": team,
                 "round_no": rno,
-                "game_round_no": max(1, rno - trial_rounds),
+                "is_trial": is_trial,
+                "trial_round_no": rno if is_trial else 0,
+                "game_round_no": 0 if is_trial else max(1, rno - trial_rounds),
                 "price_per_user": round(m["price_per_user"], 2),
                 "realized_profit": round(m["realized_profit"], 2),
                 "market_share_pct": round(m["demand_share"] * 100.0, 2),
@@ -980,10 +987,12 @@ def get_session_leaderboard(
         round_entries.sort(key=lambda x: x["realized_profit"], reverse=True)
         turn_leaderboard.extend(round_entries)
 
-    # --- Build cumulative leaderboard (plain sum across rounds) ---
-    completed_round_count = len(all_rounds)
+    # --- Build cumulative leaderboard (plain sum across SCORED rounds only) ---
+    completed_round_count = len(scored_rounds)
     cumulative: dict[str, dict[str, Any]] = {}
     for entry in turn_leaderboard:
+        if entry["is_trial"]:
+            continue
         team = entry["team"]
         if team not in cumulative:
             cumulative[team] = {
@@ -1015,7 +1024,8 @@ def get_session_leaderboard(
     )
 
     return {
-        "rounds": all_rounds,
+        "rounds": scored_rounds,
+        "all_rounds": all_rounds,
         "trial_rounds": trial_rounds,
         "available_metrics": sorted(_LEADERBOARD_METRICS),
         "x_metric": x_metric,
@@ -1067,10 +1077,12 @@ def _build_sync_message(
         pass
 
     match_data = None
+    match_round_no = None
     try:
         match_rows = _extract_rows(fetch_latest_matching_result(session_token))
         if match_rows:
             match_data = _parse_result_json(match_rows[0].get("result"))
+            match_round_no = _safe_int(match_rows[0].get("round_no")) or None
     except Exception:
         pass
 
@@ -1088,6 +1100,7 @@ def _build_sync_message(
         "round": round_data,
         "submissions": live_submissions,
         "match": match_data,
+        "match_round_no": match_round_no,
     }
 
 

@@ -39,15 +39,20 @@ function renderLastRound(turnRows) {
     .filter((r) => (r.round_no ?? 0) === maxRound)
     .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
 
-  el.turnLeaderboardBody.innerHTML = lastRows.map((r, idx) => `<tr>
-    <td>${r.game_round_no ?? r.round_no ?? "-"}</td>
-    <td>${idx + 1}</td>
-    <td><strong>${r.team ?? "-"}</strong></td>
-    <td>${r.price_per_user != null ? `$${Number(r.price_per_user).toFixed(0)}` : "-"}</td>
-    <td>${fmt(r.market_share_pct)}%</td>
-    <td><strong>${fmt(r.realized_profit)}</strong></td>
-    <td>${fmt(r.realized_utility)}</td>
-  </tr>`).join("");
+  el.turnLeaderboardBody.innerHTML = lastRows.map((r, idx) => {
+    const roundCell = r.is_trial
+      ? `Trial ${r.trial_round_no || r.round_no || "-"} <span class="trial-badge">not scored</span>`
+      : (r.game_round_no || r.round_no || "-");
+    return `<tr class="${r.is_trial ? "trial-row" : ""}">
+      <td>${roundCell}</td>
+      <td>${idx + 1}</td>
+      <td><strong>${r.team ?? "-"}</strong></td>
+      <td>${r.price_per_user != null ? `$${Number(r.price_per_user).toFixed(0)}` : "-"}</td>
+      <td>${fmt(r.market_share_pct)}%</td>
+      <td><strong>${fmt(r.realized_profit)}</strong></td>
+      <td>${fmt(r.realized_utility)}</td>
+    </tr>`;
+  }).join("");
 }
 
 function renderCumulativeMatchSummary(rows) {

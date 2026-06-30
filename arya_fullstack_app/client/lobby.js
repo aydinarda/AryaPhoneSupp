@@ -1,6 +1,7 @@
 import { state, el, LOBBY_STORAGE_KEY } from "./state.js";
 import { api } from "./api.js";
 import {
+  clearPlayerResult,
   clearRoundSync,
   clearRoundTimer,
   renderAdminControls,
@@ -53,6 +54,7 @@ function prepareFreshSessionView() {
   }
   if (el.adminRoundHint) el.adminRoundHint.textContent = "";
   renderMatchingResult(null, { force: true });
+  clearPlayerResult();
   renderSessionSummary();
   renderRoundSummary();
 
@@ -175,6 +177,7 @@ export function showLobbyScreen() {
   el.teamName.style.opacity = "";
   el.teamName.value = "";
   renderMatchingResult(null, { force: true });
+  clearPlayerResult();
   renderSessionSummary();
   renderRoundSummary();
   saveLobbyState();

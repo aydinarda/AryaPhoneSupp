@@ -159,6 +159,49 @@
       <!-- MAIN CONTENT -->
       <div class="game-content">
 
+        <!-- Player round result (players only; hidden until a match runs) -->
+        <section id="playerResultCard" class="card player-result-card hidden">
+          <div class="player-result-header">
+            <h3 id="playerResultTitle">Round Results</h3>
+            <span id="playerResultBadge" class="trial-badge hidden">Trial — not scored</span>
+          </div>
+
+          <h4 class="player-result-subtitle">Standings</h4>
+          <div class="table-wrap">
+            <table id="playerStandingsTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Team</th>
+                  <th>Rounds</th>
+                  <th>Avg Demand Share</th>
+                  <th>Avg Profit</th>
+                  <th>Avg Market Utility</th>
+                </tr>
+              </thead>
+              <tbody id="playerStandingsBody"></tbody>
+            </table>
+          </div>
+
+          <details id="playerRoundDetails" class="player-round-details">
+            <summary>This round breakdown ▾</summary>
+            <div class="table-wrap" style="margin-top:8px;">
+              <table id="playerRoundTable">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Team</th>
+                    <th>Demand Share</th>
+                    <th>Realized Profit</th>
+                    <th>Market Utility</th>
+                  </tr>
+                </thead>
+                <tbody id="playerRoundBody"></tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+
         <!-- Config info strip -->
         <section class="card info" id="configInfo">Loading…</section>
 

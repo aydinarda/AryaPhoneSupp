@@ -1,5 +1,5 @@
 import { state, el, ROUND_SYNC_INTERVAL_MS } from "./state.js";
-import { api } from "./api.js";
+import { api, fmt } from "./api.js";
 import { renderDistributionChart } from "./distribution.js";
 import { renderConfigInfo } from "./suppliers.js";
 
@@ -102,6 +102,10 @@ export function renderAdminControls() {
   }
   if (el.sessionPlayersCard) {
     el.sessionPlayersCard.classList.toggle("hidden", !isAdmin);
+  }
+  if (el.playerResultCard && isAdmin) {
+    // Admins use the detailed matching result card; the player card is players-only.
+    el.playerResultCard.classList.add("hidden");
   }
   renderAdminPlayMode();
 }
@@ -233,6 +237,94 @@ function _renderSegmentShares(segmentShares, teams) {
       return `<tr><td>${s.segment_index}</td><td>${(s.density ?? 0).toFixed(3)}</td>${cells}</tr>`;
     })
     .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Player-facing round result (players only). Shows full standings plus an
+// optional per-round breakdown. Admins keep the detailed #matchingResultCard.
+// ---------------------------------------------------------------------------
+
+export function renderPlayerStandings() {
+  if (!el.playerStandingsBody) return;
+  const myTeam = (el.teamName?.value || "").trim();
+  const rows = (state.latestRows || [])
+    .slice()
+    .sort((a, b) => Number(b.avg_profit ?? 0) - Number(a.avg_profit ?? 0));
+
+  el.playerStandingsBody.innerHTML = rows.length
+    ? rows.map((r, idx) => {
+        const mine = myTeam !== "" && String(r.team ?? "").trim() === myTeam;
+        return `<tr class="${mine ? "me-row" : ""}">
+          <td>${idx + 1}</td>
+          <td>${r.team ?? "-"}${mine ? " (you)" : ""}</td>
+          <td>${r.rounds_played ?? 0}</td>
+          <td>${fmt(r.avg_market_share_pct)}%</td>
+          <td><strong>${fmt(r.avg_profit)}</strong></td>
+          <td>${fmt(r.avg_realized_utility)}</td>
+        </tr>`;
+      }).join("")
+    : '<tr><td colspan="6">No scored rounds yet — standings start after trial rounds.</td></tr>';
+}
+
+export function renderPlayerResult(payload, { roundNo } = {}) {
+  if (state.role !== "player" || !el.playerResultCard) return;
+
+  const rno = Number(roundNo ?? state.roundNo ?? 0) || 0;
+  const trialRounds = Math.max(0, Number(state.trialRounds) || 0);
+  const isTrial = rno > 0 && rno <= trialRounds;
+
+  if (el.playerResultTitle) {
+    el.playerResultTitle.textContent = rno ? `${roundLabel(rno)} — Results` : "Round Results";
+  }
+  if (el.playerResultBadge) {
+    el.playerResultBadge.classList.toggle("hidden", !isTrial);
+  }
+
+  // This round's all-team breakdown straight from the match payload.
+  const financials = (payload && payload.round_financials) || {};
+  const teamFinancials = Array.isArray(financials.team_financials) ? financials.team_financials : [];
+  const myTeam = (el.teamName?.value || "").trim();
+  if (el.playerRoundBody) {
+    const sorted = teamFinancials
+      .slice()
+      .sort((a, b) => Number(b.realized_profit ?? 0) - Number(a.realized_profit ?? 0));
+    el.playerRoundBody.innerHTML = sorted.length
+      ? sorted.map((tf, idx) => {
+          const mine = myTeam !== "" && String(tf.team ?? "").trim() === myTeam;
+          const share = (Number(tf.demand_share ?? 0) * 100).toFixed(1);
+          return `<tr class="${mine ? "me-row" : ""}">
+            <td>${idx + 1}</td>
+            <td><strong>${tf.team ?? "-"}</strong>${mine ? " (you)" : ""}</td>
+            <td>${share}%</td>
+            <td><strong>${Number(tf.realized_profit ?? 0).toFixed(1)}</strong></td>
+            <td>${Number(tf.realized_utility ?? 0).toFixed(1)}</td>
+          </tr>`;
+        }).join("")
+      : '<tr><td colspan="5">No results for this round.</td></tr>';
+  }
+
+  renderPlayerStandings();
+
+  if (el.playerRoundDetails) {
+    // Auto-open the per-round breakdown when cumulative standings are empty (trial rounds).
+    el.playerRoundDetails.open = isTrial || !(state.latestRows && state.latestRows.length);
+  }
+
+  el.playerResultCard.classList.remove("hidden");
+  // Restart the flash highlight animation.
+  el.playerResultCard.classList.remove("flash");
+  void el.playerResultCard.offsetWidth;
+  el.playerResultCard.classList.add("flash");
+  el.playerResultCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+export function clearPlayerResult() {
+  if (!el.playerResultCard) return;
+  el.playerResultCard.classList.add("hidden");
+  el.playerResultCard.classList.remove("flash");
+  if (el.playerResultBadge) el.playerResultBadge.classList.add("hidden");
+  if (el.playerRoundBody) el.playerRoundBody.innerHTML = "";
+  if (el.playerStandingsBody) el.playerStandingsBody.innerHTML = "";
 }
 
 // Flag: have we initialised the admin inputs from the server at least once this session?
