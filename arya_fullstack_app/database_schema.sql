@@ -61,6 +61,16 @@ ALTER TABLE game_sessions ADD CONSTRAINT game_sessions_number_of_rounds_check CH
 ALTER TABLE game_sessions DROP CONSTRAINT IF EXISTS game_sessions_trial_rounds_check;
 ALTER TABLE game_sessions ADD CONSTRAINT game_sessions_trial_rounds_check CHECK (trial_rounds >= 0);
 
+-- Admin-tunable matching configuration, persisted so it survives server
+-- restarts / redeploys (Render free tier spins down on idle). All nullable;
+-- the server falls back to in-memory cache, then GameSettings defaults.
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS beta_alpha DOUBLE PRECISION;
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS beta_beta DOUBLE PRECISION;
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS price_delta DOUBLE PRECISION;
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS quality_sensitivity DOUBLE PRECISION;
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS audit_probability DOUBLE PRECISION;
+ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS catch_probability DOUBLE PRECISION;
+
 CREATE TABLE IF NOT EXISTS session_players (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -84,6 +94,10 @@ CREATE POLICY "Enable read access for all users (game_sessions)" ON game_session
 DROP POLICY IF EXISTS "Enable insert for all users (game_sessions)" ON game_sessions;
 CREATE POLICY "Enable insert for all users (game_sessions)" ON game_sessions
   FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Enable update for all users (game_sessions)" ON game_sessions;
+CREATE POLICY "Enable update for all users (game_sessions)" ON game_sessions
+  FOR UPDATE USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Enable read access for all users (session_players)" ON session_players;
 CREATE POLICY "Enable read access for all users (session_players)" ON session_players
@@ -156,7 +170,7 @@ CREATE POLICY "Enable update for all users (matching_results)" ON matching_resul
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
 GRANT SELECT, INSERT ON TABLE submissions TO anon, authenticated;
-GRANT SELECT, INSERT ON TABLE game_sessions TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON TABLE game_sessions TO anon, authenticated;
 GRANT SELECT, INSERT ON TABLE session_players TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE game_rounds TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE matching_results TO anon, authenticated;

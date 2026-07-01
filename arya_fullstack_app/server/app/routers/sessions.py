@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import hashlib
+import logging
+import math
 import random
 import threading
 from datetime import UTC, datetime, timedelta
@@ -22,6 +24,8 @@ from ..db import (
     fetch_submissions_for_session,
     insert_game_round,
     insert_matching_result,
+    invalidate_session_cache,
+    update_game_session_config,
 )
 from ..live_state import (
     get_live_active_round,
@@ -40,8 +44,13 @@ from ..settings import GAME_SETTINGS
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
+_log = logging.getLogger(__name__)
+
 # In-memory session config per session code (beta distribution + delta + audit params).
-# Resets on server restart (acceptable for a classroom game).
+# Acts as a fast cache + authoritative value while the server is running; it is
+# also persisted to the game_sessions row (see update_session_config) so it
+# survives restarts / Render redeploys. After a restart the in-memory dicts are
+# empty and config is rehydrated from the DB columns.
 _session_beta: dict[str, tuple[float, float]] = {}
 _session_delta: dict[str, float] = {}
 _session_quality_sensitivity: dict[str, float] = {}
@@ -49,6 +58,64 @@ _session_audit: dict[str, tuple[float, float]] = {}  # (audit_probability, catch
 
 _DEFAULT_ALPHA = 3.0
 _DEFAULT_BETA = 3.0
+
+
+def _num_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except Exception:
+        return None
+    return None if (math.isnan(f) or math.isinf(f)) else f
+
+
+def _resolve_session_config(session_row: dict[str, Any]) -> dict[str, float]:
+    """Resolve a session's matching config.
+
+    Precedence: in-memory dict (most recent on a running server) -> persisted
+    game_sessions DB columns (durable across restarts) -> GameSettings defaults.
+    """
+    code = str(session_row.get("session_code", "")).strip().upper()
+
+    mem_beta = _session_beta.get(code)
+    if mem_beta:
+        beta_alpha, beta_beta = float(mem_beta[0]), float(mem_beta[1])
+    else:
+        ba = _num_or_none(session_row.get("beta_alpha"))
+        bb = _num_or_none(session_row.get("beta_beta"))
+        beta_alpha = ba if (ba is not None and ba > 0) else _DEFAULT_ALPHA
+        beta_beta = bb if (bb is not None and bb > 0) else _DEFAULT_BETA
+
+    if code in _session_delta:
+        delta = float(_session_delta[code])
+    else:
+        d = _num_or_none(session_row.get("price_delta"))
+        delta = d if d is not None else float(GAME_SETTINGS.price_sensitivity_delta)
+
+    if code in _session_quality_sensitivity:
+        quality_sensitivity = float(_session_quality_sensitivity[code])
+    else:
+        q = _num_or_none(session_row.get("quality_sensitivity"))
+        quality_sensitivity = q if q is not None else float(GAME_SETTINGS.quality_sensitivity)
+
+    mem_audit = _session_audit.get(code)
+    if mem_audit:
+        audit_probability, catch_probability = float(mem_audit[0]), float(mem_audit[1])
+    else:
+        ap = _num_or_none(session_row.get("audit_probability"))
+        cp = _num_or_none(session_row.get("catch_probability"))
+        audit_probability = ap if ap is not None else float(GAME_SETTINGS.audit_probability)
+        catch_probability = cp if cp is not None else float(GAME_SETTINGS.catch_probability)
+
+    return {
+        "beta_alpha": beta_alpha,
+        "beta_beta": beta_beta,
+        "delta": delta,
+        "quality_sensitivity": quality_sensitivity,
+        "audit_probability": audit_probability,
+        "catch_probability": catch_probability,
+    }
 
 
 def _stable_seed(payload: dict[str, Any]) -> int:
@@ -380,12 +447,10 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
 
     live_round = get_live_active_round(session_token)
     rows = [live_round] if live_round else _extract_rows(fetch_active_round(session_token))
-    normalized = (code or "").strip().upper()
-    beta_alpha, beta_beta = _session_beta.get(normalized, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    quality_sensitivity = _session_quality_sensitivity.get(normalized, float(GAME_SETTINGS.quality_sensitivity))
-    audit_probability, catch_probability = _session_audit.get(
-        normalized, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
-    )
+    cfg = _resolve_session_config(session_row)
+    beta_alpha, beta_beta = cfg["beta_alpha"], cfg["beta_beta"]
+    quality_sensitivity = cfg["quality_sensitivity"]
+    audit_probability, catch_probability = cfg["audit_probability"], cfg["catch_probability"]
 
     payload: dict[str, Any] = {
         "total_rounds": total_rounds,
@@ -398,7 +463,7 @@ def get_current_round(code: str, include_delta: bool = False) -> dict[str, Any]:
         "catch_probability": catch_probability,
     }
     if include_delta:
-        payload["delta"] = _session_delta.get(normalized, float(GAME_SETTINGS.price_sensitivity_delta))
+        payload["delta"] = cfg["delta"]
 
     if not rows:
         return {"round": None, **payload}
@@ -446,6 +511,24 @@ def update_session_config(code: str, req: SessionConfigRequest) -> dict[str, Any
         (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
     )
     session_token = str(session_row.get("session_token", "")).strip()
+
+    # Persist config to the game_sessions row so it survives a restart/redeploy.
+    # In-memory dicts above remain the fast path; the DB write is best-effort and
+    # degrades gracefully if the columns have not been migrated yet.
+    if session_token:
+        try:
+            update_game_session_config(session_token, {
+                "beta_alpha": float(req.beta_alpha),
+                "beta_beta": float(req.beta_beta),
+                "price_delta": float(current_delta),
+                "quality_sensitivity": float(current_quality_sensitivity),
+                "audit_probability": float(current_ap),
+                "catch_probability": float(current_cp),
+            })
+            invalidate_session_cache(session_code)
+        except Exception as exc:
+            _log.warning("Could not persist session config (using in-memory): %s", exc)
+
     if session_token:
         manager.broadcast_sync(
             session_code,
@@ -530,18 +613,15 @@ def run_round_matching(code: str, req: MatchRunRequest) -> dict[str, Any]:
     if N <= 0:
         raise HTTPException(status_code=400, detail="No users available in dataset for matching")
 
-    normalized_code = (code or "").strip().upper()
-    beta_alpha, beta_beta = _session_beta.get(normalized_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    delta = _session_delta.get(normalized_code, float(GAME_SETTINGS.price_sensitivity_delta))
-    quality_sensitivity = _session_quality_sensitivity.get(normalized_code, float(GAME_SETTINGS.quality_sensitivity))
+    cfg = _resolve_session_config(session_row)
+    beta_alpha, beta_beta = cfg["beta_alpha"], cfg["beta_beta"]
+    delta = cfg["delta"]
+    quality_sensitivity = cfg["quality_sensitivity"]
 
     # --- Audit phase (runs before MNL; caught teams receive a utility penalty) ---
     from ..audit import run_audit
 
-    audit_ap, audit_cp = _session_audit.get(
-        session_code,
-        (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability)),
-    )
+    audit_ap, audit_cp = cfg["audit_probability"], cfg["catch_probability"]
     match_input = {
         "session_code": session_code,
         "round_no": round_no,
@@ -1047,11 +1127,10 @@ def _build_sync_message(
     total_rounds = _resolve_total_rounds(session_row)
     trial_rounds = _resolve_trial_rounds(session_row)
     scheduled_rounds = _resolve_scheduled_rounds(session_row)
-    beta_alpha, beta_beta = _session_beta.get(session_code, (_DEFAULT_ALPHA, _DEFAULT_BETA))
-    quality_sensitivity = _session_quality_sensitivity.get(session_code, float(GAME_SETTINGS.quality_sensitivity))
-    audit_probability, catch_probability = _session_audit.get(
-        session_code, (float(GAME_SETTINGS.audit_probability), float(GAME_SETTINGS.catch_probability))
-    )
+    cfg = _resolve_session_config(session_row)
+    beta_alpha, beta_beta = cfg["beta_alpha"], cfg["beta_beta"]
+    quality_sensitivity = cfg["quality_sensitivity"]
+    audit_probability, catch_probability = cfg["audit_probability"], cfg["catch_probability"]
 
     round_data = None
     live_submissions: list[dict[str, Any]] = []

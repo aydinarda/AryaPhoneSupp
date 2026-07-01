@@ -1,4 +1,4 @@
-import { state, el, ROUND_SYNC_INTERVAL_MS } from "./state.js";
+import { state, el } from "./state.js";
 import { api, fmt } from "./api.js";
 import { renderDistributionChart } from "./distribution.js";
 import { renderConfigInfo } from "./suppliers.js";
@@ -421,18 +421,18 @@ export function startRoundSync() {
   clearRoundSync();
   if (!state.gameCode) return;
 
-  async function tick() {
+  // One-shot initial load only. Ongoing updates arrive via WebSocket push
+  // (round_started, match_result, config sync, player_joined) and a fresh
+  // `sync` on (re)connect, so the previous 2-second polling interval was removed.
+  (async () => {
     if (!state.gameCode || el.gameScreen.classList.contains("hidden")) return;
     try {
       await loadCurrentRound();
       if (state.role === "admin") await loadLatestMatch();
     } catch (_err) {
-      // Ignore transient polling failures; explicit user actions still show errors.
+      // Ignore transient load failures; explicit user actions still show errors.
     }
-  }
-
-  tick(); // run immediately on start, don't wait for first interval
-  state.roundSyncId = setInterval(tick, ROUND_SYNC_INTERVAL_MS);
+  })();
 }
 
 export async function startRound() {

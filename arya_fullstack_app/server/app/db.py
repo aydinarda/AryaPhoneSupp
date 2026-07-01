@@ -90,6 +90,25 @@ def fetch_game_session_by_code(code: str):
         return result
 
 
+def invalidate_session_cache(code: str | None = None) -> None:
+    """Drop a cached game_sessions row so the next fetch re-reads from the DB."""
+    with _session_cache_lock:
+        if code is None:
+            _session_cache.clear()
+        else:
+            _session_cache.pop(code, None)
+
+
+def update_game_session_config(session_token: str, config: dict):
+    """Persist admin-tunable matching config onto the game_sessions row."""
+    return _run(
+        get_client()
+        .table("game_sessions")
+        .update(config)
+        .eq("session_token", session_token)
+    )
+
+
 def fetch_session_player(session_token: str, team_name_normalized: str):
     return _run(
         get_client()

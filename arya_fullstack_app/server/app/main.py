@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,13 +29,16 @@ from .ws_manager import manager
 
 app = FastAPI(title="Arya Phone Game API", version="1.0.0")
 
+_log = logging.getLogger(__name__)
+
 
 def _insert_submission_best_effort(payload: dict[str, Any]) -> None:
     try:
         insert_submission(payload)
     except Exception:
         # Live classroom matching uses in-memory state; DB history is best-effort.
-        pass
+        # Log (don't crash) so silent persistence failures are diagnosable.
+        _log.warning("Submission DB write failed; live state still holds it", exc_info=True)
 
 
 @app.on_event("startup")
