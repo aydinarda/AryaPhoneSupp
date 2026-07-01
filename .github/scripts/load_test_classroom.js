@@ -154,7 +154,16 @@ export function setup() {
       sessions.push({ code, picks });
     }
   }
-  console.log(`Sessions: ${JSON.stringify(sessions.map((s) => s.code))} | picks: ${JSON.stringify(picks)} | polling=${SIMULATE_POLLING}`);
+  console.log("");
+  console.log("================= ARYA LOAD TEST — LIVE GAME CODES =================");
+  console.log("  App: " + TARGET);
+  for (const s of sessions) {
+    console.log("  GAME CODE: " + s.code + "   (join as a player to watch live)");
+  }
+  console.log("  " + PLAYERS_PER_SESSION + " players/session | " + ROUNDS +
+              " rounds | " + ROUND_SECONDS + "s/round | polling=" + SIMULATE_POLLING);
+  console.log("===================================================================");
+  console.log("");
   sleep(1);
   return { sessions };
 }

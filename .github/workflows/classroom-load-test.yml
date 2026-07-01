@@ -65,6 +65,7 @@ jobs:
           ROUND_SECONDS: ${{ github.event.inputs.round_seconds }}
           SIMULATE_POLLING: ${{ github.event.inputs.simulate_polling }}
         run: |
+          set -o pipefail
           k6 run \
             --env TARGET_URL="${TARGET_URL}" \
             --env SESSIONS="${SESSIONS}" \
@@ -73,8 +74,21 @@ jobs:
             --env ROUND_SECONDS="${ROUND_SECONDS}" \
             --env SIMULATE_POLLING="${SIMULATE_POLLING}" \
             --out json=results.ndjson \
-            .github/scripts/load_test_classroom.js
+            .github/scripts/load_test_classroom.js 2>&1 | stdbuf -oL tee k6_output.log
         continue-on-error: true
+
+      - name: Publish game codes
+        if: always()
+        run: |
+          echo "## Arya classroom load test — game codes" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if grep -h "GAME CODE:" k6_output.log 2>/dev/null; then
+            grep -h "GAME CODE:" k6_output.log >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "(no game codes captured — check the 'Run classroom load test' step log)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()
@@ -82,6 +96,7 @@ jobs:
         with:
           name: classroom-load-test-${{ github.run_number }}
           path: |
+            k6_output.log
             results.ndjson
             summary.html
             summary.json
