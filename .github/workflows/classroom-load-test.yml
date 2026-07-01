@@ -1,0 +1,88 @@
+name: Classroom Load Test (multi-session)
+
+# Manuel tetiklenir. Varsayılanlar = 2 session x 25 oyuncu, 3 tur, tur 35 sn.
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Target URL"
+        required: false
+        default: "https://aryaphonesupp.onrender.com"
+      sessions:
+        description: "Aynı anda session sayısı"
+        required: false
+        default: "2"
+      players_per_session:
+        description: "Session başına oyuncu"
+        required: false
+        default: "25"
+      rounds:
+        description: "Tur sayısı"
+        required: false
+        default: "3"
+      round_seconds:
+        description: "Tur başına saniye"
+        required: false
+        default: "35"
+      simulate_polling:
+        description: "Eski 2sn polling'i taklit et (true/false) — A/B için"
+        required: false
+        default: "false"
+
+jobs:
+  classroom-load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          curl -L https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz \
+            | tar xz --strip-components=1 k6-v0.54.0-linux-amd64/k6
+          sudo mv k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Wake up Render instance
+        run: |
+          TARGET="${{ github.event.inputs.target_url }}"
+          echo "Waking up ${TARGET} ..."
+          for i in $(seq 1 18); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${TARGET}/api/health")
+            echo "  [${i}/18] HTTP ${CODE}"
+            [ "${CODE}" = "200" ] && echo "Server ready." && break
+            sleep 10
+          done
+
+      - name: Run classroom load test
+        env:
+          TARGET_URL: ${{ github.event.inputs.target_url }}
+          SESSIONS: ${{ github.event.inputs.sessions }}
+          PLAYERS_PER_SESSION: ${{ github.event.inputs.players_per_session }}
+          ROUNDS: ${{ github.event.inputs.rounds }}
+          ROUND_SECONDS: ${{ github.event.inputs.round_seconds }}
+          SIMULATE_POLLING: ${{ github.event.inputs.simulate_polling }}
+        run: |
+          k6 run \
+            --env TARGET_URL="${TARGET_URL}" \
+            --env SESSIONS="${SESSIONS}" \
+            --env PLAYERS_PER_SESSION="${PLAYERS_PER_SESSION}" \
+            --env ROUNDS="${ROUNDS}" \
+            --env ROUND_SECONDS="${ROUND_SECONDS}" \
+            --env SIMULATE_POLLING="${SIMULATE_POLLING}" \
+            --out json=results.ndjson \
+            .github/scripts/load_test_classroom.js
+        continue-on-error: true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classroom-load-test-${{ github.run_number }}
+          path: |
+            results.ndjson
+            summary.html
+            summary.json
+          retention-days: 30
